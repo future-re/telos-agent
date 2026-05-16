@@ -18,14 +18,14 @@ pub trait CompactionStrategy: Send + Sync + std::fmt::Debug {
 
 #[derive(Debug)]
 pub struct SummaryCompaction {
-    pub max_chars: usize,
+    pub max_tokens: usize,
     pub keep_recent: usize,
 }
 
 impl Default for SummaryCompaction {
     fn default() -> Self {
         Self {
-            max_chars: 100_000,
+            max_tokens: 20_000,
             keep_recent: 6,
         }
     }
@@ -38,21 +38,24 @@ impl CompactionStrategy for SummaryCompaction {
         messages: &mut Vec<Message>,
         provider: &dyn ModelProvider,
     ) -> Result<bool, AgentError> {
-        let total_chars: usize = messages
+        let total_tokens: usize = messages
             .iter()
             .map(|m| {
                 m.blocks
                     .iter()
                     .map(|b| match b {
-                        ContentBlock::Text(t) => t.text.len(),
-                        ContentBlock::ToolCall(c) => c.name.len() + c.arguments.to_string().len(),
-                        ContentBlock::ToolResult(r) => r.content.to_string().len(),
+                        ContentBlock::Text(t) => provider.estimate_tokens(&t.text),
+                        ContentBlock::ToolCall(c) => {
+                            provider.estimate_tokens(&c.name)
+                                + provider.estimate_tokens(&c.arguments.to_string())
+                        }
+                        ContentBlock::ToolResult(r) => provider.estimate_tokens(&r.content.to_string()),
                     })
                     .sum::<usize>()
             })
             .sum();
 
-        if total_chars <= self.max_chars {
+        if total_tokens <= self.max_tokens {
             return Ok(false);
         }
 

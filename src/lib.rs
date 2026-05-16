@@ -18,7 +18,7 @@ pub use mock::MockProvider;
 pub use permissions::{PermissionEngine, PermissionRule, RuleDecision};
 pub use provider::{
     AnthropicConfig, AnthropicProvider, CompletionRequest, CompletionResponse, ModelProvider,
-    OpenAIConfig, OpenAIProvider, StopReason,
+    OpenAIConfig, OpenAIProvider, StopReason, TokenUsage,
 };
 pub use runtime::{AgentConfig, AgentSession, TurnEvent, TurnResult};
 pub use storage::{JsonlStorage, NoopStorage, Storage};

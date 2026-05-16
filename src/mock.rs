@@ -32,4 +32,8 @@ impl ModelProvider for MockProvider {
             .pop_front()
             .ok_or_else(|| AgentError::Provider("mock provider has no more responses".into()))
     }
+
+    fn estimate_tokens(&self, text: &str) -> usize {
+        (text.len() as f64 / 4.0).ceil() as usize
+    }
 }

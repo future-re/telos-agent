@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::error::AgentError;
 use crate::message::{ContentBlock, Message, Role, TextBlock, ToolCall};
-use crate::provider::{CompletionRequest, CompletionResponse, ModelProvider, StopReason};
+use crate::provider::{CompletionRequest, CompletionResponse, ModelProvider, StopReason, TokenUsage};
 
 #[derive(Debug, Clone)]
 pub struct AnthropicConfig {
@@ -86,6 +86,11 @@ impl ModelProvider for AnthropicProvider {
 
         anthropic_response_to_completion(decoded)
     }
+
+    fn estimate_tokens(&self, text: &str) -> usize {
+        // Claude uses a SentencePiece-derived tokenizer; ~3.5 chars per token is a rough heuristic.
+        (text.len() as f64 / 3.5).ceil() as usize
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -132,6 +137,14 @@ enum AnthropicContentBlock {
 struct AnthropicMessageResponse {
     content: Vec<AnthropicContentBlock>,
     stop_reason: Option<String>,
+    #[serde(default)]
+    usage: Option<AnthropicUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicUsage {
+    input_tokens: usize,
+    output_tokens: usize,
 }
 
 fn anthropic_request_from_completion(
@@ -252,6 +265,11 @@ fn anthropic_response_to_completion(
         }
     }
 
+    let usage = response.usage.map(|u| TokenUsage {
+        input_tokens: u.input_tokens,
+        output_tokens: u.output_tokens,
+    });
+
     Ok(CompletionResponse {
         message: Message {
             role: Role::Assistant,
@@ -261,6 +279,7 @@ fn anthropic_response_to_completion(
             Some("tool_use") => StopReason::ToolUse,
             _ => StopReason::EndTurn,
         },
+        usage,
     })
 }
 
@@ -329,6 +348,7 @@ mod tests {
                 },
             ],
             stop_reason: Some("tool_use".into()),
+            usage: None,
         };
 
         let completion = anthropic_response_to_completion(response).unwrap();

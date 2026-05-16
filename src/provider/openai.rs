@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::error::AgentError;
 use crate::message::{ContentBlock, Message, Role, TextBlock, ToolCall};
-use crate::provider::{CompletionRequest, CompletionResponse, ModelProvider, StopReason};
+use crate::provider::{CompletionRequest, CompletionResponse, ModelProvider, StopReason, TokenUsage};
 
 #[derive(Debug, Clone)]
 pub struct OpenAIConfig {
@@ -84,6 +84,11 @@ impl ModelProvider for OpenAIProvider {
 
         openai_response_to_completion(decoded)
     }
+
+    fn estimate_tokens(&self, text: &str) -> usize {
+        // OpenAI models (GPT-4, GPT-3.5) use cl100k_base; ~4 chars per token is a rough heuristic.
+        (text.len() as f64 / 4.0).ceil() as usize
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -136,6 +141,14 @@ struct OpenAIFunctionCall {
 #[derive(Debug, Deserialize)]
 struct OpenAIChatResponse {
     choices: Vec<OpenAIChoice>,
+    #[serde(default)]
+    usage: Option<OpenAIUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIUsage {
+    prompt_tokens: usize,
+    completion_tokens: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -253,6 +266,11 @@ fn openai_response_to_completion(
         }
     }
 
+    let usage = response.usage.map(|u| TokenUsage {
+        input_tokens: u.prompt_tokens,
+        output_tokens: u.completion_tokens,
+    });
+
     Ok(CompletionResponse {
         message: Message {
             role: Role::Assistant,
@@ -262,6 +280,7 @@ fn openai_response_to_completion(
             Some("tool_calls") => StopReason::ToolUse,
             _ => StopReason::EndTurn,
         },
+        usage,
     })
 }
 
@@ -288,6 +307,7 @@ mod tests {
                 },
                 finish_reason: Some("tool_calls".into()),
             }],
+            usage: None,
         };
 
         let completion = openai_response_to_completion(response).unwrap();

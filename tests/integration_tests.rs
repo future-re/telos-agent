@@ -77,10 +77,12 @@ fn multi_step_tool_loop_completes() {
                     ],
                 },
                 stop_reason: StopReason::ToolUse,
+                usage: None,
             },
             CompletionResponse {
                 message: Message::assistant("The answer is 5."),
                 stop_reason: StopReason::EndTurn,
+                usage: None,
             },
         ]);
 
@@ -119,10 +121,12 @@ fn missing_tool_returns_error_result_message() {
                     })],
                 },
                 stop_reason: StopReason::ToolUse,
+                usage: None,
             },
             CompletionResponse {
                 message: Message::assistant("I could not run that tool."),
                 stop_reason: StopReason::EndTurn,
+                usage: None,
             },
         ]);
 
@@ -197,10 +201,12 @@ fn permission_denial_returns_structured_tool_error() {
                     })],
                 },
                 stop_reason: StopReason::ToolUse,
+                usage: None,
             },
             CompletionResponse {
                 message: Message::assistant("Denied."),
                 stop_reason: StopReason::EndTurn,
+                usage: None,
             },
         ]);
 
@@ -252,6 +258,7 @@ fn run_turn_stream_emits_deltas_and_hooks() {
         let provider = MockProvider::new(vec![CompletionResponse {
             message: Message::assistant("hello"),
             stop_reason: StopReason::EndTurn,
+            usage: None,
         }]);
         let tools = ToolRegistry::new();
         let mut session = AgentSession::new(AgentConfig {
@@ -315,10 +322,12 @@ fn tool_result_budget_compacts_large_output() {
                     })],
                 },
                 stop_reason: StopReason::ToolUse,
+                usage: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
+                usage: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -378,6 +387,7 @@ fn session_save_and_resume_works() {
         let provider = MockProvider::new(vec![CompletionResponse {
             message: Message::assistant("hi there"),
             stop_reason: StopReason::EndTurn,
+            usage: None,
         }]);
         let tools = ToolRegistry::new();
         let mut session = AgentSession::new(AgentConfig {
@@ -423,10 +433,12 @@ fn permission_engine_denies_tool() {
                     })],
                 },
                 stop_reason: StopReason::ToolUse,
+                usage: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
+                usage: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -468,10 +480,12 @@ fn permission_engine_allows_tool() {
                     })],
                 },
                 stop_reason: StopReason::ToolUse,
+                usage: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
+                usage: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -510,14 +524,17 @@ fn summary_compaction_triggers_when_over_budget() {
                     })],
                 },
                 stop_reason: StopReason::ToolUse,
+                usage: None,
             },
             CompletionResponse {
                 message: Message::assistant("summary result"),
                 stop_reason: StopReason::EndTurn,
+                usage: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
+                usage: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -525,7 +542,7 @@ fn summary_compaction_triggers_when_over_budget() {
 
         let mut session = AgentSession::new(AgentConfig {
             compaction: Some(Arc::new(SummaryCompaction {
-                max_chars: 10,
+                max_tokens: 10,
                 keep_recent: 2,
             })),
             max_tool_result_chars: usize::MAX,

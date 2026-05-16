@@ -18,7 +18,10 @@
 - `HookRegistry`，支持 `post_sampling` 和 `stop` 两个 hook phase
 - tool result 压缩
 - provider streaming 事件抽象，非流式 provider 可通过默认实现兼容
-- 基础工具执行编排，支持并发安全工具分批执行
+- Anthropic / OpenAI 原生 SSE streaming 主干解析
+- 基础工具执行编排，支持并发安全工具分批执行和实时 tool progress
+- `TokenBudget` + auto compact 触发
+- `SubagentTool`，支持 in-process 子 agent
 - JSONL snapshot 存储与会话恢复
 - 内置核心工具：shell、file_read、file_write、file_edit、glob、grep
 - `MockProvider`，用于测试和样例驱动开发
@@ -28,7 +31,7 @@
 - UI / TUI / Web 层
 - MCP / plugin / bridge / swarm
 - classifier / sandbox 等复杂权限审批流程
-- Anthropic / OpenAI 原生 SSE streaming 解析
+- 多模态、thinking block 和 provider 级 fallback/retry
 
 ## 核心对象
 
@@ -37,6 +40,8 @@
 - `ModelProvider`: 模型适配接口，接收消息和工具定义，返回 assistant message
 - `Tool`: 工具接口，覆盖 definition、validate、permission 和 invoke
 - `register_core_tools`: 注册内置 shell / 文件 / 搜索工具
+- `SubagentTool`: 将一个 in-process 子 agent 注册为工具
+- `TokenBudget`: 基于估算 token 触发 compact / budget exceeded 事件
 - `TurnEvent`: turn 执行过程中产生的结构化事件
 - `Hook`: 在采样后或停止时插入自定义逻辑
 

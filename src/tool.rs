@@ -93,7 +93,7 @@ pub trait Tool: Send + Sync {
     ) -> Result<ToolOutput, AgentError>;
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
 }

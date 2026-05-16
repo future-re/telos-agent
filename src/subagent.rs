@@ -1,0 +1,163 @@
+use async_trait::async_trait;
+use futures_util::StreamExt;
+use serde_json::{Value, json};
+use std::sync::Arc;
+
+use crate::error::AgentError;
+use crate::provider::{CompletionRequest, CompletionResponse, ModelProvider, ProviderEvent};
+use crate::runtime::{AgentConfig, AgentSession, TurnEvent};
+use crate::tool::{
+    PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
+};
+
+pub struct SubagentTool {
+    provider: Arc<dyn ModelProvider>,
+    tools: ToolRegistry,
+    config: AgentConfig,
+}
+
+impl SubagentTool {
+    pub fn new(provider: Arc<dyn ModelProvider>, tools: ToolRegistry, config: AgentConfig) -> Self {
+        Self {
+            provider,
+            tools,
+            config,
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for SubagentTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "subagent".into(),
+            description:
+                "Run an in-process subagent with its own turn loop and return its final answer."
+                    .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "prompt": { "type": "string" },
+                    "system_prompt": { "type": "string" },
+                    "max_iterations": { "type": "integer" }
+                },
+                "required": ["prompt"]
+            }),
+        }
+    }
+
+    async fn validate(&self, arguments: &Value, _context: &ToolContext) -> Result<(), AgentError> {
+        arguments
+            .get("prompt")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| AgentError::Validation("missing string `prompt`".into()))?;
+        Ok(())
+    }
+
+    async fn check_permission(
+        &self,
+        _arguments: &Value,
+        _context: &ToolContext,
+    ) -> Result<PermissionDecision, AgentError> {
+        Ok(PermissionDecision::Allow)
+    }
+
+    async fn invoke(
+        &self,
+        arguments: Value,
+        context: ToolContext,
+    ) -> Result<ToolOutput, AgentError> {
+        let prompt = arguments
+            .get("prompt")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| AgentError::Validation("missing string `prompt`".into()))?;
+
+        let mut config = self.config.clone();
+        config.cwd = context.cwd;
+        config.env = context.env;
+        config.storage = None;
+        config.permission_engine = self.config.permission_engine.clone();
+        if let Some(system_prompt) = arguments
+            .get("system_prompt")
+            .and_then(|value| value.as_str())
+        {
+            config.system_prompt = Some(system_prompt.to_string());
+        }
+        if let Some(max_iterations) = arguments
+            .get("max_iterations")
+            .and_then(|value| value.as_u64())
+        {
+            config.max_iterations = max_iterations.max(1) as usize;
+        }
+
+        let provider = SharedProvider(self.provider.clone());
+        let mut session = AgentSession::new(config);
+        let mut events = Vec::new();
+        {
+            let mut stream =
+                Box::pin(session.run_turn_stream(&provider, &self.tools, prompt.to_string()));
+            while let Some(event) = stream.next().await {
+                let event = event?;
+                if let Some(progress) = progress_summary(&event) {
+                    if let Some(tx) = &context.progress {
+                        let _ = tx.send(crate::tool::ToolProgress {
+                            tool_call_id: None,
+                            message: progress,
+                            data: None,
+                        });
+                    }
+                }
+                events.push(event);
+            }
+        }
+
+        let final_text = session
+            .messages()
+            .iter()
+            .rev()
+            .find(|message| message.role == crate::message::Role::Assistant)
+            .map(|message| message.text_content())
+            .unwrap_or_default();
+
+        Ok(ToolOutput::json(json!({
+            "session_id": session.session_id(),
+            "final_text": final_text,
+            "event_count": events.len(),
+        })))
+    }
+}
+
+struct SharedProvider(Arc<dyn ModelProvider>);
+
+#[async_trait]
+impl ModelProvider for SharedProvider {
+    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AgentError> {
+        self.0.complete(request).await
+    }
+
+    fn stream_complete<'a>(
+        &'a self,
+        request: CompletionRequest,
+    ) -> std::pin::Pin<
+        Box<dyn futures_core::stream::Stream<Item = Result<ProviderEvent, AgentError>> + Send + 'a>,
+    > {
+        self.0.stream_complete(request)
+    }
+
+    fn estimate_tokens(&self, text: &str) -> usize {
+        self.0.estimate_tokens(text)
+    }
+}
+
+fn progress_summary(event: &TurnEvent) -> Option<String> {
+    match event {
+        TurnEvent::ProviderRequest { iteration, .. } => {
+            Some(format!("subagent provider request iteration {iteration}"))
+        }
+        TurnEvent::ToolCall { name, .. } => Some(format!("subagent tool call {name}")),
+        TurnEvent::TurnFinished { stop_reason, .. } => {
+            Some(format!("subagent finished with {stop_reason:?}"))
+        }
+        _ => None,
+    }
+}

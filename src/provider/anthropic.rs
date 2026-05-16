@@ -1,12 +1,15 @@
+use async_stream::try_stream;
 use async_trait::async_trait;
+use futures_core::stream::Stream;
+use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::error::AgentError;
 use crate::message::{ContentBlock, Message, Role, TextBlock, ToolCall};
 use crate::provider::{
-    CompletionRequest, CompletionResponse, ModelProvider, StopReason, TokenUsage,
+    CompletionRequest, CompletionResponse, ModelProvider, ProviderEvent, StopReason, TokenUsage,
 };
 
 #[derive(Debug, Clone)]
@@ -86,10 +89,196 @@ impl ModelProvider for AnthropicProvider {
         anthropic_response_to_completion(decoded)
     }
 
+    fn stream_complete<'a>(
+        &'a self,
+        request: CompletionRequest,
+    ) -> std::pin::Pin<Box<dyn Stream<Item = Result<ProviderEvent, AgentError>> + Send + 'a>> {
+        Box::pin(try_stream! {
+            let mut body = serde_json::to_value(anthropic_request_from_completion(&request, &self.config))
+                .map_err(|err| AgentError::Provider(format!("invalid anthropic stream request: {err}")))?;
+            body["stream"] = Value::Bool(true);
+            let response = self
+                .client
+                .post(self.endpoint())
+                .header("x-api-key", &self.config.api_key)
+                .header("anthropic-version", &self.config.anthropic_version)
+                .header("content-type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|err| AgentError::Provider(err.to_string()))?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let text = response
+                    .text()
+                    .await
+                    .map_err(|err| AgentError::Provider(err.to_string()))?;
+                Err(AgentError::Provider(format!("anthropic stream api error {}: {}", status, text)))?;
+            } else {
+                yield ProviderEvent::MessageStart;
+                let mut sse = crate::provider::sse_data_stream(response);
+                let mut current_tool: Option<StreamingAnthropicToolCall> = None;
+                let mut usage = TokenUsage::default();
+                let mut stop_reason = StopReason::EndTurn;
+
+                while let Some(data) = sse.next().await {
+                    let event: AnthropicStreamEvent = serde_json::from_str(&data?)
+                        .map_err(|err| AgentError::Provider(format!("invalid anthropic stream event: {err}")))?;
+                    match event.event_type.as_str() {
+                        "message_start" => {
+                            if let Some(message) = event.message {
+                                if let Some(event_usage) = message.usage {
+                                    usage.input_tokens = event_usage.input_tokens.unwrap_or(0);
+                                    usage.output_tokens = event_usage.output_tokens.unwrap_or(0);
+                                }
+                            }
+                        }
+                        "content_block_start" => {
+                            if let Some(block) = event.content_block {
+                                match block.block_type.as_str() {
+                                    "text" => {
+                                        if let Some(text) = block.text {
+                                            if !text.is_empty() {
+                                                yield ProviderEvent::TextDelta(text);
+                                            }
+                                        }
+                                    }
+                                    "tool_use" => {
+                                        current_tool = Some(StreamingAnthropicToolCall {
+                                            id: block.id.unwrap_or_default(),
+                                            name: block.name.unwrap_or_default(),
+                                            json_input: String::new(),
+                                        });
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        "content_block_delta" => {
+                            if let Some(delta) = event.delta {
+                                match delta.delta_type.as_deref() {
+                                    Some("text_delta") => {
+                                        if let Some(text) = delta.text {
+                                            yield ProviderEvent::TextDelta(text);
+                                        }
+                                    }
+                                    Some("input_json_delta") => {
+                                        if let (Some(tool), Some(partial)) = (&mut current_tool, delta.partial_json) {
+                                            tool.json_input.push_str(&partial);
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        "content_block_stop" => {
+                            if let Some(tool) = current_tool.take() {
+                                let arguments = if tool.json_input.trim().is_empty() {
+                                    json!({})
+                                } else {
+                                    serde_json::from_str(&tool.json_input)
+                                        .map_err(|err| AgentError::Provider(format!("invalid anthropic streamed tool input: {err}")))?
+                                };
+                                yield ProviderEvent::ToolCall(ToolCall {
+                                    id: tool.id,
+                                    name: tool.name,
+                                    arguments,
+                                });
+                            }
+                        }
+                        "message_delta" => {
+                            if let Some(delta) = event.delta {
+                                if let Some(reason) = delta.stop_reason {
+                                    stop_reason = if reason == "tool_use" {
+                                        StopReason::ToolUse
+                                    } else {
+                                        StopReason::EndTurn
+                                    };
+                                }
+                            }
+                            if let Some(event_usage) = event.usage {
+                                if let Some(output_tokens) = event_usage.output_tokens {
+                                    usage.output_tokens = output_tokens;
+                                }
+                            }
+                        }
+                        "message_stop" => break,
+                        _ => {}
+                    }
+                }
+
+                yield ProviderEvent::MessageStop {
+                    stop_reason,
+                    usage: Some(usage),
+                };
+            }
+        })
+    }
+
     fn estimate_tokens(&self, text: &str) -> usize {
         // Claude uses a SentencePiece-derived tokenizer; ~3.5 chars per token is a rough heuristic.
         (text.len() as f64 / 3.5).ceil() as usize
     }
+}
+
+#[derive(Debug)]
+struct StreamingAnthropicToolCall {
+    id: String,
+    name: String,
+    json_input: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicStreamEvent {
+    #[serde(rename = "type")]
+    event_type: String,
+    #[serde(default)]
+    message: Option<AnthropicStreamMessage>,
+    #[serde(default)]
+    content_block: Option<AnthropicStreamContentBlock>,
+    #[serde(default)]
+    delta: Option<AnthropicStreamDelta>,
+    #[serde(default)]
+    usage: Option<AnthropicStreamUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicStreamMessage {
+    #[serde(default)]
+    usage: Option<AnthropicStreamUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicStreamContentBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicStreamDelta {
+    #[serde(rename = "type", default)]
+    delta_type: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    partial_json: Option<String>,
+    #[serde(default)]
+    stop_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicStreamUsage {
+    #[serde(default)]
+    input_tokens: Option<usize>,
+    #[serde(default)]
+    output_tokens: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]

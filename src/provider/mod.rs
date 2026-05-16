@@ -1,6 +1,7 @@
 use async_stream::try_stream;
 use async_trait::async_trait;
 use futures_core::stream::Stream;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AgentError;
@@ -18,6 +19,42 @@ pub struct CompletionRequest {
     pub system_prompt: Option<String>,
     pub messages: Vec<Message>,
     pub tools: Vec<ToolDefinition>,
+}
+
+pub(crate) fn sse_data_stream(
+    response: reqwest::Response,
+) -> std::pin::Pin<Box<dyn Stream<Item = Result<String, AgentError>> + Send>> {
+    Box::pin(try_stream! {
+        let mut buffer = String::new();
+        let mut bytes = response.bytes_stream();
+        while let Some(chunk) = bytes.next().await {
+            let chunk = chunk.map_err(|err| AgentError::Provider(err.to_string()))?;
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            while let Some(split_at) = buffer.find("\n\n").or_else(|| buffer.find("\r\n\r\n")) {
+                let raw = buffer[..split_at].to_string();
+                let drain_to = if buffer[split_at..].starts_with("\r\n\r\n") {
+                    split_at + 4
+                } else {
+                    split_at + 2
+                };
+                buffer.drain(..drain_to);
+
+                let data = raw
+                    .lines()
+                    .filter_map(|line| {
+                        let line = line.trim_end_matches('\r');
+                        line.strip_prefix("data:").map(|data| data.trim_start())
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if data.is_empty() || data == "[DONE]" {
+                    continue;
+                }
+                yield data;
+            }
+        }
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

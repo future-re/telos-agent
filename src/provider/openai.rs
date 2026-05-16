@@ -1,12 +1,15 @@
+use async_stream::try_stream;
 use async_trait::async_trait;
+use futures_core::stream::Stream;
+use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::error::AgentError;
 use crate::message::{ContentBlock, Message, Role, TextBlock, ToolCall};
 use crate::provider::{
-    CompletionRequest, CompletionResponse, ModelProvider, StopReason, TokenUsage,
+    CompletionRequest, CompletionResponse, ModelProvider, ProviderEvent, StopReason, TokenUsage,
 };
 
 #[derive(Debug, Clone)]
@@ -84,10 +87,160 @@ impl ModelProvider for OpenAIProvider {
         openai_response_to_completion(decoded)
     }
 
+    fn stream_complete<'a>(
+        &'a self,
+        request: CompletionRequest,
+    ) -> std::pin::Pin<Box<dyn Stream<Item = Result<ProviderEvent, AgentError>> + Send + 'a>> {
+        Box::pin(try_stream! {
+            let mut body = serde_json::to_value(openai_request_from_completion(&request, &self.config))
+                .map_err(|err| AgentError::Provider(format!("invalid openai stream request: {err}")))?;
+            body["stream"] = Value::Bool(true);
+            body["stream_options"] = json!({ "include_usage": true });
+            let response = self
+                .client
+                .post(self.endpoint())
+                .bearer_auth(&self.config.api_key)
+                .header("content-type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|err| AgentError::Provider(err.to_string()))?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let text = response
+                    .text()
+                    .await
+                    .map_err(|err| AgentError::Provider(err.to_string()))?;
+                Err(AgentError::Provider(format!("openai stream api error {}: {}", status, text)))?;
+            } else {
+                yield ProviderEvent::MessageStart;
+                let mut sse = crate::provider::sse_data_stream(response);
+                let mut tool_calls: Vec<StreamingOpenAIToolCall> = Vec::new();
+                let mut stop_reason = StopReason::EndTurn;
+                let mut usage = None;
+
+                while let Some(data) = sse.next().await {
+                    let event: OpenAIStreamChunk = serde_json::from_str(&data?)
+                        .map_err(|err| AgentError::Provider(format!("invalid openai stream event: {err}")))?;
+                    if let Some(event_usage) = event.usage {
+                        usage = Some(TokenUsage {
+                            input_tokens: event_usage.prompt_tokens,
+                            output_tokens: event_usage.completion_tokens,
+                        });
+                    }
+
+                    for choice in event.choices {
+                        if let Some(content) = choice.delta.content {
+                            if !content.is_empty() {
+                                yield ProviderEvent::TextDelta(content);
+                            }
+                        }
+                        if let Some(delta_tool_calls) = choice.delta.tool_calls {
+                            for delta_call in delta_tool_calls {
+                                let index = delta_call.index;
+                                while tool_calls.len() <= index {
+                                    tool_calls.push(StreamingOpenAIToolCall::default());
+                                }
+                                let aggregate = &mut tool_calls[index];
+                                if let Some(id) = delta_call.id {
+                                    aggregate.id = id;
+                                }
+                                if let Some(function) = delta_call.function {
+                                    if let Some(name) = function.name {
+                                        aggregate.name = name;
+                                    }
+                                    if let Some(arguments) = function.arguments {
+                                        aggregate.arguments.push_str(&arguments);
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(reason) = choice.finish_reason {
+                            stop_reason = if reason == "tool_calls" {
+                                StopReason::ToolUse
+                            } else {
+                                StopReason::EndTurn
+                            };
+                        }
+                    }
+                }
+
+                for call in tool_calls {
+                    if call.id.is_empty() && call.name.is_empty() {
+                        continue;
+                    }
+                    let arguments = if call.arguments.trim().is_empty() {
+                        json!({})
+                    } else {
+                        serde_json::from_str(&call.arguments)
+                            .map_err(|err| AgentError::Provider(format!("invalid openai streamed tool arguments: {err}")))?
+                    };
+                    yield ProviderEvent::ToolCall(ToolCall {
+                        id: call.id,
+                        name: call.name,
+                        arguments,
+                    });
+                }
+
+                yield ProviderEvent::MessageStop {
+                    stop_reason,
+                    usage,
+                };
+            }
+        })
+    }
+
     fn estimate_tokens(&self, text: &str) -> usize {
         // OpenAI models (GPT-4, GPT-3.5) use cl100k_base; ~4 chars per token is a rough heuristic.
         (text.len() as f64 / 4.0).ceil() as usize
     }
+}
+
+#[derive(Debug, Default)]
+struct StreamingOpenAIToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIStreamChunk {
+    #[serde(default)]
+    choices: Vec<OpenAIStreamChoice>,
+    #[serde(default)]
+    usage: Option<OpenAIUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIStreamChoice {
+    delta: OpenAIStreamDelta,
+    finish_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIStreamDelta {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<OpenAIStreamToolCall>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIStreamToolCall {
+    index: usize,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<OpenAIStreamFunctionCall>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIStreamFunctionCall {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

@@ -14,6 +14,7 @@ use tiny_agent_core::{JsonlStorage, PermissionEngine, PermissionRule, Storage, S
 use tiny_agent_core::{
     PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
 };
+use tiny_agent_core::{SubagentTool, TokenBudget};
 
 struct AddTool;
 
@@ -313,6 +314,34 @@ impl Tool for BigTool {
         Ok(ToolOutput {
             content: json!({ "blob": "x".repeat(100) }),
         })
+    }
+}
+
+struct ProgressTool;
+
+#[async_trait]
+impl Tool for ProgressTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "progress".into(),
+            description: "Emit progress before completing".into(),
+            input_schema: json!({ "type": "object" }),
+        }
+    }
+
+    async fn invoke(
+        &self,
+        _arguments: Value,
+        context: ToolContext,
+    ) -> Result<ToolOutput, AgentError> {
+        if let Some(tx) = &context.progress {
+            let _ = tx.send(tiny_agent_core::ToolProgress {
+                tool_call_id: None,
+                message: "halfway".into(),
+                data: None,
+            });
+        }
+        Ok(ToolOutput::json(json!({ "done": true })))
     }
 }
 
@@ -725,5 +754,152 @@ fn permission_engine_allows_shell_by_command_prefix() {
             "{}",
             tool_result.text()
         );
+    });
+}
+
+#[test]
+fn tool_progress_streams_before_tool_result() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "progress".into(),
+                        arguments: json!({}),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("done"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+        let mut tools = ToolRegistry::new();
+        tools.register(ProgressTool);
+        let mut session = AgentSession::new(AgentConfig::default());
+
+        let events = session
+            .run_turn_stream(&provider, &tools, "go")
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let progress_idx = events
+            .iter()
+            .position(|event| matches!(event, TurnEvent::ToolProgress { message, .. } if message == "halfway"))
+            .unwrap();
+        let result_idx = events
+            .iter()
+            .position(|event| matches!(event, TurnEvent::ToolResult(_)))
+            .unwrap();
+        assert!(progress_idx < result_idx);
+    });
+}
+
+#[test]
+fn token_budget_triggers_auto_compaction() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message::assistant("summary"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("done"),
+                stop_reason: StopReason::EndTurn,
+                usage: Some(tiny_agent_core::TokenUsage {
+                    input_tokens: 10,
+                    output_tokens: 2,
+                }),
+            },
+        ]);
+        let tools = ToolRegistry::new();
+        let mut session = AgentSession::new(AgentConfig {
+            system_prompt: Some("x".repeat(200)),
+            compaction: Some(Arc::new(SummaryCompaction {
+                max_tokens: 20,
+                keep_recent: 1,
+            })),
+            token_budget: Some(TokenBudget {
+                max_tokens: 1_000,
+                compact_at_tokens: 10,
+            }),
+            ..AgentConfig::default()
+        });
+
+        let result = session.run_turn(&provider, &tools, "hello").await.unwrap();
+        assert!(result.events.iter().any(|event| {
+            matches!(event, TurnEvent::CompactionStarted { reason } if reason == "token_budget")
+        }));
+        assert!(result.events.iter().any(|event| {
+            matches!(
+                event,
+                TurnEvent::ProviderUsage {
+                    input_tokens: 10,
+                    output_tokens: 2
+                }
+            )
+        }));
+    });
+}
+
+#[test]
+fn subagent_tool_runs_in_process_agent() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let outer_provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "subagent".into(),
+                        arguments: json!({ "prompt": "solve inside" }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("outer done"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+        let inner_provider = Arc::new(MockProvider::new(vec![CompletionResponse {
+            message: Message::assistant("inner answer"),
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+        }]));
+        let mut tools = ToolRegistry::new();
+        tools.register(SubagentTool::new(
+            inner_provider,
+            ToolRegistry::new(),
+            AgentConfig::default(),
+        ));
+        let mut session = AgentSession::new(AgentConfig::default());
+
+        let result = session
+            .run_turn(&outer_provider, &tools, "delegate")
+            .await
+            .unwrap();
+        let tool_result = result
+            .events
+            .iter()
+            .find_map(|event| match event {
+                TurnEvent::ToolResult(_) => Some(event),
+                _ => None,
+            })
+            .unwrap();
+        assert!(tool_result.text().contains("inner answer"));
     });
 }

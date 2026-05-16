@@ -10,6 +10,7 @@ pub mod permissions;
 pub mod provider;
 pub mod runtime;
 pub mod storage;
+pub mod subagent;
 pub mod tool;
 
 pub use builtin_tools::{
@@ -26,8 +27,9 @@ pub use provider::{
     AnthropicConfig, AnthropicProvider, CompletionRequest, CompletionResponse, ModelProvider,
     OpenAIConfig, OpenAIProvider, ProviderEvent, StopReason, TokenUsage,
 };
-pub use runtime::{AgentConfig, AgentSession, TurnEvent, TurnResult};
+pub use runtime::{AgentConfig, AgentSession, TokenBudget, TurnEvent, TurnResult};
 pub use storage::{JsonlStorage, NoopStorage, Storage};
+pub use subagent::SubagentTool;
 pub use tool::{
     InterruptBehavior, PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput,
     ToolProgress, ToolRegistry,

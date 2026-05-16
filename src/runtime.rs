@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::compaction::{CompactionConfig, compact_tool_result_message};
 use crate::context_compact::CompactionStrategy;
 use crate::error::AgentError;
-use crate::executor::{ToolExecutionEvent, execute_tool_calls};
+use crate::executor::{ToolExecutionEvent, ToolExecutionStreamItem, execute_tool_calls_stream};
 use crate::hooks::{HookContext, HookPhase, HookRegistry};
 use crate::message::{ContentBlock, Message, Role, TextBlock};
 use crate::provider::{CompletionRequest, ModelProvider, ProviderEvent, StopReason, TokenUsage};
@@ -31,6 +31,7 @@ pub struct AgentConfig {
     pub compaction: Option<Arc<dyn CompactionStrategy>>,
     pub permission_engine: Option<crate::permissions::PermissionEngine>,
     pub tool_concurrency_limit: usize,
+    pub token_budget: Option<TokenBudget>,
 }
 
 impl Default for AgentConfig {
@@ -46,6 +47,22 @@ impl Default for AgentConfig {
             compaction: None,
             permission_engine: None,
             tool_concurrency_limit: 10,
+            token_budget: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TokenBudget {
+    pub max_tokens: usize,
+    pub compact_at_tokens: usize,
+}
+
+impl TokenBudget {
+    pub fn new(max_tokens: usize) -> Self {
+        Self {
+            max_tokens,
+            compact_at_tokens: ((max_tokens as f64) * 0.8).ceil() as usize,
         }
     }
 }
@@ -96,6 +113,10 @@ pub enum TurnEvent {
     },
     CompactionCompleted {
         reason: String,
+    },
+    TokenBudgetExceeded {
+        used_tokens: usize,
+        max_tokens: usize,
     },
     HookStarted {
         phase: &'static str,
@@ -242,6 +263,33 @@ impl AgentSession {
                     tool_count: tool_definitions.len(),
                 };
 
+                if let Some(budget) = self.config.token_budget {
+                    let estimated_tokens = estimate_message_tokens(&self.messages, provider);
+                    if estimated_tokens > budget.max_tokens {
+                        yield TurnEvent::TokenBudgetExceeded {
+                            used_tokens: estimated_tokens,
+                            max_tokens: budget.max_tokens,
+                        };
+                        yield TurnEvent::TurnFinished {
+                            stop_reason: StopReason::EndTurn,
+                            final_text: String::new(),
+                        };
+                        break;
+                    }
+                    if estimated_tokens >= budget.compact_at_tokens {
+                        if let Some(compaction) = self.config.compaction.clone() {
+                            if compaction.compact(&mut self.messages, provider).await? {
+                                yield TurnEvent::CompactionStarted {
+                                    reason: "token_budget".into(),
+                                };
+                                yield TurnEvent::CompactionCompleted {
+                                    reason: "token_budget".into(),
+                                };
+                            }
+                        }
+                    }
+                }
+
                 if let Some(compaction) = self.config.compaction.clone() {
                     if compaction.compact(&mut self.messages, provider).await? {
                         yield TurnEvent::CompactionStarted {
@@ -361,47 +409,55 @@ impl AgentSession {
                     break;
                 }
 
-                let execution = execute_tool_calls(
+                let mut execution = Box::pin(execute_tool_calls_stream(
                     tool_calls,
                     tools,
                     &self.config,
                     &self.session_id,
                     turn_id,
                     self.messages.clone(),
-                ).await;
-                for event in execution.events {
-                    match event {
-                        ToolExecutionEvent::ToolStarted { tool_call_id, name } => {
-                            yield TurnEvent::ToolCall { tool_call_id, name };
+                ));
+                let mut tool_results = Vec::new();
+                while let Some(item) = execution.next().await {
+                    match item {
+                        ToolExecutionStreamItem::Event(event) => {
+                            match event {
+                                ToolExecutionEvent::ToolStarted { tool_call_id, name } => {
+                                    yield TurnEvent::ToolCall { tool_call_id, name };
+                                }
+                                ToolExecutionEvent::ToolProgress {
+                                    tool_call_id,
+                                    name,
+                                    message,
+                                    data,
+                                } => {
+                                    yield TurnEvent::ToolProgress {
+                                        tool_call_id,
+                                        name,
+                                        message,
+                                        data,
+                                    };
+                                }
+                                ToolExecutionEvent::ToolCompleted {
+                                    tool_call_id,
+                                    name,
+                                    is_error,
+                                } => {
+                                    yield TurnEvent::ToolCompleted {
+                                        tool_call_id,
+                                        name,
+                                        is_error,
+                                    };
+                                }
+                            }
                         }
-                        ToolExecutionEvent::ToolProgress {
-                            tool_call_id,
-                            name,
-                            message,
-                            data,
-                        } => {
-                            yield TurnEvent::ToolProgress {
-                                tool_call_id,
-                                name,
-                                message,
-                                data,
-                            };
-                        }
-                        ToolExecutionEvent::ToolCompleted {
-                            tool_call_id,
-                            name,
-                            is_error,
-                        } => {
-                            yield TurnEvent::ToolCompleted {
-                                tool_call_id,
-                                name,
-                                is_error,
-                            };
+                        ToolExecutionStreamItem::Result(result) => {
+                            tool_results.push(result);
                         }
                     }
                 }
 
-                let tool_message = Message::tool_results(execution.results);
+                let tool_message = Message::tool_results(tool_results);
                 let compaction_config = CompactionConfig {
                     max_tool_result_chars: self.config.max_tool_result_chars,
                 };
@@ -521,6 +577,10 @@ impl TurnEvent {
             TurnEvent::CompactionCompleted { reason } => {
                 format!("compaction_completed:{reason}")
             }
+            TurnEvent::TokenBudgetExceeded {
+                used_tokens,
+                max_tokens,
+            } => format!("token_budget_exceeded:{used_tokens}/{max_tokens}"),
             TurnEvent::HookStarted { phase, name } => {
                 format!("hook_started:{phase}:{name}")
             }
@@ -550,4 +610,21 @@ impl TurnEvent {
                 .join("\n"),
         }
     }
+}
+
+fn estimate_message_tokens(messages: &[Message], provider: &dyn ModelProvider) -> usize {
+    messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .map(|block| match block {
+            ContentBlock::Text(text) => provider.estimate_tokens(&text.text),
+            ContentBlock::ToolCall(call) => {
+                provider.estimate_tokens(&call.name)
+                    + provider.estimate_tokens(&call.arguments.to_string())
+            }
+            ContentBlock::ToolResult(result) => {
+                provider.estimate_tokens(&result.content.to_string())
+            }
+        })
+        .sum()
 }

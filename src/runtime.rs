@@ -9,10 +9,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::compaction::{CompactionConfig, compact_tool_result_message};
+use crate::context_compact::CompactionStrategy;
 use crate::error::AgentError;
 use crate::hooks::{HookContext, HookPhase, HookRegistry};
 use crate::message::{ContentBlock, Message, ToolResult};
 use crate::provider::{CompletionRequest, ModelProvider, StopReason};
+use crate::storage::Storage;
 use crate::tool::{PermissionDecision, ToolContext, ToolRegistry};
 
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
@@ -25,6 +27,9 @@ pub struct AgentConfig {
     pub env: HashMap<String, String>,
     pub max_tool_result_chars: usize,
     pub hooks: Arc<HookRegistry>,
+    pub storage: Option<Arc<dyn Storage>>,
+    pub compaction: Option<Arc<dyn CompactionStrategy>>,
+    pub permission_engine: Option<crate::permissions::PermissionEngine>,
 }
 
 impl Default for AgentConfig {
@@ -36,6 +41,9 @@ impl Default for AgentConfig {
             env: std::env::vars().collect(),
             max_tool_result_chars: usize::MAX,
             hooks: Arc::new(HookRegistry::new()),
+            storage: None,
+            compaction: None,
+            permission_engine: None,
         }
     }
 }
@@ -129,6 +137,50 @@ impl AgentSession {
         self.next_turn_id = 1;
     }
 
+    pub async fn save(&self) -> Result<(), AgentError> {
+        if let Some(storage) = &self.config.storage {
+            storage.append(&self.session_id, &self.messages).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn resume(
+        session_id: impl Into<String>,
+        mut config: AgentConfig,
+        storage: Arc<dyn Storage>,
+    ) -> Result<Self, AgentError> {
+        let session_id = session_id.into();
+        let mut messages = storage.load(&session_id).await?;
+        if messages.is_empty() {
+            if let Some(system_prompt) = config.system_prompt.as_ref() {
+                messages.push(Message::system(system_prompt.clone()));
+            }
+        } else {
+            // Ensure the loaded system prompt matches config
+            let loaded_system = messages
+                .first()
+                .filter(|m| m.role == crate::message::Role::System)
+                .map(|m| m.text_content());
+            if let Some(config_system) = &config.system_prompt {
+                if loaded_system.as_deref() != Some(config_system.as_str()) {
+                    // Replace system prompt if config differs
+                    if messages.first().map(|m| m.role) == Some(crate::message::Role::System) {
+                        messages[0] = Message::system(config_system.clone());
+                    } else {
+                        messages.insert(0, Message::system(config_system.clone()));
+                    }
+                }
+            }
+        }
+        config.storage = Some(storage);
+        Ok(Self {
+            config,
+            session_id,
+            next_turn_id: 1,
+            messages,
+        })
+    }
+
     pub fn run_turn_stream<'a, P: ModelProvider + 'a>(
         &'a mut self,
         provider: &'a P,
@@ -166,6 +218,17 @@ impl AgentSession {
                     message_count: self.messages.len(),
                     tool_count: tool_definitions.len(),
                 };
+
+                if let Some(compaction) = self.config.compaction.clone() {
+                    if compaction.compact(&mut self.messages, provider).await? {
+                        yield TurnEvent::CompactionStarted {
+                            reason: "char_budget".into(),
+                        };
+                        yield TurnEvent::CompactionCompleted {
+                            reason: "char_budget".into(),
+                        };
+                    }
+                }
 
                 let response = provider
                     .complete(CompletionRequest {
@@ -264,40 +327,49 @@ impl AgentSession {
                             };
 
                             match tool.validate(&call.arguments, &context).await {
-                                Ok(()) => match tool.check_permission(&call.arguments, &context).await {
-                                    Ok(PermissionDecision::Allow) => match tool.invoke(call.arguments.clone(), context).await {
-                                        Ok(output) => ToolResult {
+                                Ok(()) => {
+                                    let engine_decision = self.config.permission_engine.as_ref().and_then(|e| e.evaluate(&call.name));
+                                    let permission = match engine_decision {
+                                        Some(crate::permissions::RuleDecision::Allow) => Ok(PermissionDecision::Allow),
+                                        Some(crate::permissions::RuleDecision::Deny) => Ok(PermissionDecision::Deny { reason: "denied by permission rule".into() }),
+                                        Some(crate::permissions::RuleDecision::Ask) => Ok(PermissionDecision::Ask { reason: "approval required by permission rule".into() }),
+                                        None => tool.check_permission(&call.arguments, &context).await,
+                                    };
+                                    match permission {
+                                        Ok(PermissionDecision::Allow) => match tool.invoke(call.arguments.clone(), context).await {
+                                            Ok(output) => ToolResult {
+                                                tool_call_id: call.id,
+                                                name: call.name,
+                                                content: output.content,
+                                                is_error: false,
+                                            },
+                                            Err(err) => ToolResult {
+                                                tool_call_id: call.id,
+                                                name: call.name.clone(),
+                                                content: json_error_payload("execution_error", err.to_string()),
+                                                is_error: true,
+                                            },
+                                        },
+                                        Ok(PermissionDecision::Deny { reason }) => ToolResult {
                                             tool_call_id: call.id,
-                                            name: call.name,
-                                            content: output.content,
-                                            is_error: false,
+                                            name: call.name.clone(),
+                                            content: json_error_payload("permission_denied", reason),
+                                            is_error: true,
+                                        },
+                                        Ok(PermissionDecision::Ask { reason }) => ToolResult {
+                                            tool_call_id: call.id,
+                                            name: call.name.clone(),
+                                            content: json_error_payload("permission_required", reason),
+                                            is_error: true,
                                         },
                                         Err(err) => ToolResult {
                                             tool_call_id: call.id,
                                             name: call.name.clone(),
-                                            content: json_error_payload("execution_error", err.to_string()),
+                                            content: json_error_payload("permission_error", err.to_string()),
                                             is_error: true,
                                         },
-                                    },
-                                    Ok(PermissionDecision::Deny { reason }) => ToolResult {
-                                        tool_call_id: call.id,
-                                        name: call.name.clone(),
-                                        content: json_error_payload("permission_denied", reason),
-                                        is_error: true,
-                                    },
-                                    Ok(PermissionDecision::Ask { reason }) => ToolResult {
-                                        tool_call_id: call.id,
-                                        name: call.name.clone(),
-                                        content: json_error_payload("permission_required", reason),
-                                        is_error: true,
-                                    },
-                                    Err(err) => ToolResult {
-                                        tool_call_id: call.id,
-                                        name: call.name.clone(),
-                                        content: json_error_payload("permission_error", err.to_string()),
-                                        is_error: true,
-                                    },
-                                },
+                                    }
+                                }
                                 Err(err) => ToolResult {
                                     tool_call_id: call.id,
                                     name: call.name.clone(),
@@ -341,24 +413,29 @@ impl AgentSession {
         tools: &ToolRegistry,
         user_input: impl Into<String>,
     ) -> Result<TurnResult, AgentError> {
-        let mut stream = Box::pin(self.run_turn_stream(provider, tools, user_input));
-        let mut events = Vec::new();
-        let mut final_message = None;
-        let mut stop_reason = StopReason::EndTurn;
+        let (events, final_message, stop_reason) = {
+            let mut stream = Box::pin(self.run_turn_stream(provider, tools, user_input));
+            let mut events = Vec::new();
+            let mut final_message = None;
+            let mut stop_reason = StopReason::EndTurn;
 
-        while let Some(event) = stream.next().await {
-            let event = event?;
-            if let TurnEvent::Assistant(message) = &event {
-                final_message = Some(message.clone());
+            while let Some(event) = stream.next().await {
+                let event = event?;
+                if let TurnEvent::Assistant(message) = &event {
+                    final_message = Some(message.clone());
+                }
+                if let TurnEvent::TurnFinished {
+                    stop_reason: reason, ..
+                } = event.clone()
+                {
+                    stop_reason = reason;
+                }
+                events.push(event);
             }
-            if let TurnEvent::TurnFinished {
-                stop_reason: reason, ..
-            } = event.clone()
-            {
-                stop_reason = reason;
-            }
-            events.push(event);
-        }
+            (events, final_message, stop_reason)
+        };
+
+        self.save().await?;
 
         Ok(TurnResult {
             final_message: final_message.unwrap_or_else(|| Message::assistant("")),

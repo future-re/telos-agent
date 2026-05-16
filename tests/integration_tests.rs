@@ -12,6 +12,7 @@ use tiny_agent_core::{AgentConfig, AgentSession, TurnEvent};
 use tiny_agent_core::{
     PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
 };
+use tiny_agent_core::{JsonlStorage, PermissionEngine, PermissionRule, Storage, SummaryCompaction};
 
 struct AddTool;
 
@@ -338,5 +339,201 @@ fn tool_result_budget_compacts_large_output() {
             })
             .unwrap();
         assert!(tool_result.text().contains("truncated"));
+    });
+}
+
+#[test]
+fn jsonl_storage_roundtrips_messages() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let dir = std::env::temp_dir().join(format!("tiny-agent-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let storage = JsonlStorage::new(&dir).unwrap();
+
+        let messages = vec![
+            Message::system("sys"),
+            Message::user("hello"),
+            Message::assistant("world"),
+        ];
+        storage.append("s1", &messages).await.unwrap();
+
+        let loaded = storage.load("s1").await.unwrap();
+        assert_eq!(loaded.len(), 3);
+        assert_eq!(loaded[0].text_content(), "sys");
+        assert_eq!(loaded[1].text_content(), "hello");
+        assert_eq!(loaded[2].text_content(), "world");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
+fn session_save_and_resume_works() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let dir = std::env::temp_dir().join(format!("tiny-agent-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let storage = Arc::new(JsonlStorage::new(&dir).unwrap());
+
+        let provider = MockProvider::new(vec![CompletionResponse {
+            message: Message::assistant("hi there"),
+            stop_reason: StopReason::EndTurn,
+        }]);
+        let tools = ToolRegistry::new();
+        let mut session = AgentSession::new(AgentConfig {
+            system_prompt: Some("sys".into()),
+            storage: Some(storage.clone()),
+            ..AgentConfig::default()
+        });
+
+        session.run_turn(&provider, &tools, "hello").await.unwrap();
+        assert_eq!(session.messages().len(), 3); // sys + user + assistant
+
+        let session_id = session.session_id().to_string();
+        let resumed = AgentSession::resume(session_id, AgentConfig {
+            system_prompt: Some("sys".into()),
+            storage: Some(storage.clone()),
+            ..AgentConfig::default()
+        }, storage.clone()).await.unwrap();
+
+        assert_eq!(resumed.messages().len(), 3);
+        assert_eq!(resumed.messages()[0].text_content(), "sys");
+        assert_eq!(resumed.messages()[1].text_content(), "hello");
+        assert_eq!(resumed.messages()[2].text_content(), "hi there");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
+fn permission_engine_denies_tool() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::deny_tool("add"));
+
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "add".into(),
+                        arguments: json!({ "a": 1, "b": 2 }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+            },
+            CompletionResponse {
+                message: Message::assistant("done"),
+                stop_reason: StopReason::EndTurn,
+            },
+        ]);
+        let mut tools = ToolRegistry::new();
+        tools.register(AddTool);
+
+        let mut session = AgentSession::new(AgentConfig {
+            permission_engine: Some(engine),
+            ..AgentConfig::default()
+        });
+        let result = session.run_turn(&provider, &tools, "add").await.unwrap();
+        let tool_result = result
+            .events
+            .iter()
+            .find_map(|event| match event {
+                TurnEvent::ToolResult(_) => Some(event),
+                _ => None,
+            })
+            .unwrap();
+        assert!(tool_result.text().contains("permission_denied"));
+        assert!(tool_result.text().contains("permission rule"));
+    });
+}
+
+#[test]
+fn permission_engine_allows_tool() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::allow_tool("add"));
+
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "add".into(),
+                        arguments: json!({ "a": 1, "b": 2 }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+            },
+            CompletionResponse {
+                message: Message::assistant("done"),
+                stop_reason: StopReason::EndTurn,
+            },
+        ]);
+        let mut tools = ToolRegistry::new();
+        tools.register(AddTool);
+
+        let mut session = AgentSession::new(AgentConfig {
+            permission_engine: Some(engine),
+            ..AgentConfig::default()
+        });
+        let result = session.run_turn(&provider, &tools, "add").await.unwrap();
+        let tool_result = result
+            .events
+            .iter()
+            .find_map(|event| match event {
+                TurnEvent::ToolResult(_) => Some(event),
+                _ => None,
+            })
+            .unwrap();
+        assert!(tool_result.text().contains("\"sum\":3"));
+    });
+}
+
+#[test]
+fn summary_compaction_triggers_when_over_budget() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        // Provider responses: tool_use, summary, final_end_turn
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "big".into(),
+                        arguments: json!({}),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+            },
+            CompletionResponse {
+                message: Message::assistant("summary result"),
+                stop_reason: StopReason::EndTurn,
+            },
+            CompletionResponse {
+                message: Message::assistant("done"),
+                stop_reason: StopReason::EndTurn,
+            },
+        ]);
+        let mut tools = ToolRegistry::new();
+        tools.register(BigTool);
+
+        let mut session = AgentSession::new(AgentConfig {
+            compaction: Some(Arc::new(SummaryCompaction {
+                max_chars: 10,
+                keep_recent: 2,
+            })),
+            max_tool_result_chars: usize::MAX,
+            ..AgentConfig::default()
+        });
+
+        let result = session.run_turn(&provider, &tools, "run big").await.unwrap();
+        assert!(result.events.iter().any(|event| matches!(event, TurnEvent::CompactionStarted { .. })));
+        assert!(result.events.iter().any(|event| matches!(event, TurnEvent::CompactionCompleted { .. })));
     });
 }

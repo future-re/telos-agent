@@ -49,7 +49,9 @@ impl CompactionStrategy for SummaryCompaction {
                             provider.estimate_tokens(&c.name)
                                 + provider.estimate_tokens(&c.arguments.to_string())
                         }
-                        ContentBlock::ToolResult(r) => provider.estimate_tokens(&r.content.to_string()),
+                        ContentBlock::ToolResult(r) => {
+                            provider.estimate_tokens(&r.content.to_string())
+                        }
                     })
                     .sum::<usize>()
             })

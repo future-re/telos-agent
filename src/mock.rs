@@ -21,10 +21,7 @@ impl MockProvider {
 
 #[async_trait]
 impl ModelProvider for MockProvider {
-    async fn complete(
-        &self,
-        request: CompletionRequest,
-    ) -> Result<CompletionResponse, AgentError> {
+    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AgentError> {
         self.requests.lock().unwrap().push(request);
         self.responses
             .lock()

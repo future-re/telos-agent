@@ -1,8 +1,10 @@
+use async_stream::try_stream;
 use async_trait::async_trait;
+use futures_core::stream::Stream;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AgentError;
-use crate::message::Message;
+use crate::message::{Message, ToolCall};
 use crate::tool::ToolDefinition;
 
 pub mod anthropic;
@@ -24,7 +26,7 @@ pub enum StopReason {
     ToolUse,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub input_tokens: usize,
     pub output_tokens: usize,
@@ -43,9 +45,45 @@ pub struct CompletionResponse {
     pub usage: Option<TokenUsage>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ProviderEvent {
+    MessageStart,
+    TextDelta(String),
+    ToolCall(ToolCall),
+    MessageStop {
+        stop_reason: StopReason,
+        usage: Option<TokenUsage>,
+    },
+}
+
 #[async_trait]
 pub trait ModelProvider: Send + Sync {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AgentError>;
+
+    fn stream_complete<'a>(
+        &'a self,
+        request: CompletionRequest,
+    ) -> std::pin::Pin<Box<dyn Stream<Item = Result<ProviderEvent, AgentError>> + Send + 'a>> {
+        Box::pin(try_stream! {
+            let response = self.complete(request).await?;
+            yield ProviderEvent::MessageStart;
+            for block in &response.message.blocks {
+                match block {
+                    crate::message::ContentBlock::Text(text) => {
+                        yield ProviderEvent::TextDelta(text.text.clone());
+                    }
+                    crate::message::ContentBlock::ToolCall(call) => {
+                        yield ProviderEvent::ToolCall(call.clone());
+                    }
+                    crate::message::ContentBlock::ToolResult(_) => {}
+                }
+            }
+            yield ProviderEvent::MessageStop {
+                stop_reason: response.stop_reason,
+                usage: response.usage,
+            };
+        })
+    }
 
     /// Estimate the number of tokens for the given text.
     /// This is a local approximation used for budget checks before calling the API.

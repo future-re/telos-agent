@@ -17,15 +17,18 @@
 - `TurnEvent` 事件流
 - `HookRegistry`，支持 `post_sampling` 和 `stop` 两个 hook phase
 - tool result 压缩
+- provider streaming 事件抽象，非流式 provider 可通过默认实现兼容
+- 基础工具执行编排，支持并发安全工具分批执行
+- JSONL snapshot 存储与会话恢复
+- 内置核心工具：shell、file_read、file_write、file_edit、glob、grep
 - `MockProvider`，用于测试和样例驱动开发
 
 ## 暂不包含
 
 - UI / TUI / Web 层
 - MCP / plugin / bridge / swarm
-- 复杂权限审批流程
-- 持久化存储
-- provider 级别的 streaming 协议实现
+- classifier / sandbox 等复杂权限审批流程
+- Anthropic / OpenAI 原生 SSE streaming 解析
 
 ## 核心对象
 
@@ -33,6 +36,7 @@
 - `AgentConfig`: 会话配置，包括 `system_prompt`、`max_iterations`、`cwd`、`env`
 - `ModelProvider`: 模型适配接口，接收消息和工具定义，返回 assistant message
 - `Tool`: 工具接口，覆盖 definition、validate、permission 和 invoke
+- `register_core_tools`: 注册内置 shell / 文件 / 搜索工具
 - `TurnEvent`: turn 执行过程中产生的结构化事件
 - `Hook`: 在采样后或停止时插入自定义逻辑
 
@@ -40,7 +44,7 @@
 
 1. 将用户输入追加到当前会话的消息历史
 2. runtime 调用 provider 完成一次模型采样
-3. 如果 assistant 返回 tool call，则按顺序执行对应工具
+3. 如果 assistant 返回 tool call，则按并发安全性分批执行对应工具
 4. 将 tool result 作为 `Role::Tool` 消息写回会话
 5. 进入下一轮迭代，直到模型停止或达到 `max_iterations`
 

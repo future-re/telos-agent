@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 use crate::error::AgentError;
 use crate::message::Message;
@@ -25,6 +26,17 @@ impl ToolOutput {
             content: json!({ "text": text.into() }),
         }
     }
+
+    pub fn json(content: Value) -> Self {
+        Self { content }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolProgress {
+    pub tool_call_id: Option<String>,
+    pub message: String,
+    pub data: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,17 +59,14 @@ pub struct ToolContext {
     pub cwd: PathBuf,
     pub env: HashMap<String, String>,
     pub messages: Vec<Message>,
+    pub progress: Option<mpsc::UnboundedSender<ToolProgress>>,
 }
 
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn definition(&self) -> ToolDefinition;
 
-    async fn validate(
-        &self,
-        _arguments: &Value,
-        _context: &ToolContext,
-    ) -> Result<(), AgentError> {
+    async fn validate(&self, _arguments: &Value, _context: &ToolContext) -> Result<(), AgentError> {
         Ok(())
     }
 

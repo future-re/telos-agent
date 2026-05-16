@@ -2,7 +2,6 @@ use async_stream::try_stream;
 use futures_core::stream::Stream;
 use futures_util::StreamExt;
 use serde::Serialize;
-use serde_json::json;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,11 +10,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::compaction::{CompactionConfig, compact_tool_result_message};
 use crate::context_compact::CompactionStrategy;
 use crate::error::AgentError;
+use crate::executor::{ToolExecutionEvent, execute_tool_calls};
 use crate::hooks::{HookContext, HookPhase, HookRegistry};
-use crate::message::{ContentBlock, Message, ToolResult};
-use crate::provider::{CompletionRequest, ModelProvider, StopReason};
+use crate::message::{ContentBlock, Message, Role, TextBlock};
+use crate::provider::{CompletionRequest, ModelProvider, ProviderEvent, StopReason, TokenUsage};
 use crate::storage::Storage;
-use crate::tool::{PermissionDecision, ToolContext, ToolRegistry};
+use crate::tool::ToolRegistry;
 
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -30,6 +30,7 @@ pub struct AgentConfig {
     pub storage: Option<Arc<dyn Storage>>,
     pub compaction: Option<Arc<dyn CompactionStrategy>>,
     pub permission_engine: Option<crate::permissions::PermissionEngine>,
+    pub tool_concurrency_limit: usize,
 }
 
 impl Default for AgentConfig {
@@ -44,6 +45,7 @@ impl Default for AgentConfig {
             storage: None,
             compaction: None,
             permission_engine: None,
+            tool_concurrency_limit: 10,
         }
     }
 }
@@ -64,6 +66,10 @@ pub enum TurnEvent {
         message_count: usize,
         tool_count: usize,
     },
+    ProviderUsage {
+        input_tokens: usize,
+        output_tokens: usize,
+    },
     AssistantDelta {
         text: String,
     },
@@ -72,6 +78,17 @@ pub enum TurnEvent {
     ToolCall {
         tool_call_id: String,
         name: String,
+    },
+    ToolProgress {
+        tool_call_id: Option<String>,
+        name: String,
+        message: String,
+        data: Option<serde_json::Value>,
+    },
+    ToolCompleted {
+        tool_call_id: String,
+        name: String,
+        is_error: bool,
     },
     ToolResult(Message),
     CompactionStarted {
@@ -118,7 +135,10 @@ impl AgentSession {
 
         Self {
             config,
-            session_id: format!("session-{}", NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed)),
+            session_id: format!(
+                "session-{}",
+                NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed)
+            ),
             next_turn_id: 1,
             messages,
         }
@@ -133,13 +153,16 @@ impl AgentSession {
     }
 
     pub fn reset(&mut self) {
-        self.messages.retain(|message| message.role == crate::message::Role::System);
+        self.messages
+            .retain(|message| message.role == crate::message::Role::System);
         self.next_turn_id = 1;
     }
 
     pub async fn save(&self) -> Result<(), AgentError> {
         if let Some(storage) = &self.config.storage {
-            storage.append(&self.session_id, &self.messages).await?;
+            storage
+                .save_snapshot(&self.session_id, &self.messages)
+                .await?;
         }
         Ok(())
     }
@@ -230,22 +253,51 @@ impl AgentSession {
                     }
                 }
 
-                let response = provider
-                    .complete(CompletionRequest {
+                let (assistant_message, stop_reason, usage) = {
+                    let request = CompletionRequest {
                         system_prompt: self.config.system_prompt.clone(),
                         messages: self.messages.clone(),
                         tools: tool_definitions,
-                    })
-                    .await?;
-
-                let stop_reason = response.stop_reason;
-                let assistant_message = response.message;
-                for block in &assistant_message.blocks {
-                    if let ContentBlock::Text(text) = block {
-                        yield TurnEvent::AssistantDelta {
-                            text: text.text.clone(),
-                        };
+                    };
+                    let mut stream = Box::pin(provider.stream_complete(request));
+                    let mut blocks = Vec::new();
+                    let mut stop_reason = StopReason::EndTurn;
+                    let mut usage = None;
+                    while let Some(event) = stream.next().await {
+                        match event? {
+                            ProviderEvent::MessageStart => {}
+                            ProviderEvent::TextDelta(text) => {
+                                yield TurnEvent::AssistantDelta {
+                                    text: text.clone(),
+                                };
+                                blocks.push(ContentBlock::Text(TextBlock { text }));
+                            }
+                            ProviderEvent::ToolCall(call) => {
+                                blocks.push(ContentBlock::ToolCall(call));
+                            }
+                            ProviderEvent::MessageStop {
+                                stop_reason: reason,
+                                usage: event_usage,
+                            } => {
+                                stop_reason = reason;
+                                usage = event_usage;
+                            }
+                        }
                     }
+                    (
+                        Message {
+                            role: Role::Assistant,
+                            blocks,
+                        },
+                        stop_reason,
+                        usage,
+                    )
+                };
+                if let Some(TokenUsage { input_tokens, output_tokens }) = usage {
+                    yield TurnEvent::ProviderUsage {
+                        input_tokens,
+                        output_tokens,
+                    };
                 }
                 self.messages.push(assistant_message.clone());
                 yield TurnEvent::Assistant(assistant_message.clone());
@@ -309,86 +361,47 @@ impl AgentSession {
                     break;
                 }
 
-                let mut tool_results = Vec::with_capacity(tool_calls.len());
-                for call in tool_calls {
-                    yield TurnEvent::ToolCall {
-                        tool_call_id: call.id.clone(),
-                        name: call.name.clone(),
-                    };
-
-                    let result = match tools.get(&call.name) {
-                        Ok(tool) => {
-                            let context = ToolContext {
-                                session_id: self.session_id.clone(),
-                                turn_id,
-                                cwd: self.config.cwd.clone(),
-                                env: self.config.env.clone(),
-                                messages: self.messages.clone(),
-                            };
-
-                            match tool.validate(&call.arguments, &context).await {
-                                Ok(()) => {
-                                    let engine_decision = self.config.permission_engine.as_ref().and_then(|e| e.evaluate(&call.name));
-                                    let permission = match engine_decision {
-                                        Some(crate::permissions::RuleDecision::Allow) => Ok(PermissionDecision::Allow),
-                                        Some(crate::permissions::RuleDecision::Deny) => Ok(PermissionDecision::Deny { reason: "denied by permission rule".into() }),
-                                        Some(crate::permissions::RuleDecision::Ask) => Ok(PermissionDecision::Ask { reason: "approval required by permission rule".into() }),
-                                        None => tool.check_permission(&call.arguments, &context).await,
-                                    };
-                                    match permission {
-                                        Ok(PermissionDecision::Allow) => match tool.invoke(call.arguments.clone(), context).await {
-                                            Ok(output) => ToolResult {
-                                                tool_call_id: call.id,
-                                                name: call.name,
-                                                content: output.content,
-                                                is_error: false,
-                                            },
-                                            Err(err) => ToolResult {
-                                                tool_call_id: call.id,
-                                                name: call.name.clone(),
-                                                content: json_error_payload("execution_error", err.to_string()),
-                                                is_error: true,
-                                            },
-                                        },
-                                        Ok(PermissionDecision::Deny { reason }) => ToolResult {
-                                            tool_call_id: call.id,
-                                            name: call.name.clone(),
-                                            content: json_error_payload("permission_denied", reason),
-                                            is_error: true,
-                                        },
-                                        Ok(PermissionDecision::Ask { reason }) => ToolResult {
-                                            tool_call_id: call.id,
-                                            name: call.name.clone(),
-                                            content: json_error_payload("permission_required", reason),
-                                            is_error: true,
-                                        },
-                                        Err(err) => ToolResult {
-                                            tool_call_id: call.id,
-                                            name: call.name.clone(),
-                                            content: json_error_payload("permission_error", err.to_string()),
-                                            is_error: true,
-                                        },
-                                    }
-                                }
-                                Err(err) => ToolResult {
-                                    tool_call_id: call.id,
-                                    name: call.name.clone(),
-                                    content: json_error_payload("validation_error", err.to_string()),
-                                    is_error: true,
-                                },
-                            }
+                let execution = execute_tool_calls(
+                    tool_calls,
+                    tools,
+                    &self.config,
+                    &self.session_id,
+                    turn_id,
+                    self.messages.clone(),
+                ).await;
+                for event in execution.events {
+                    match event {
+                        ToolExecutionEvent::ToolStarted { tool_call_id, name } => {
+                            yield TurnEvent::ToolCall { tool_call_id, name };
                         }
-                        Err(err) => ToolResult {
-                            tool_call_id: call.id,
-                            name: call.name.clone(),
-                            content: json_error_payload("tool_not_found", err.to_string()),
-                            is_error: true,
-                        },
-                    };
-                    tool_results.push(result);
+                        ToolExecutionEvent::ToolProgress {
+                            tool_call_id,
+                            name,
+                            message,
+                            data,
+                        } => {
+                            yield TurnEvent::ToolProgress {
+                                tool_call_id,
+                                name,
+                                message,
+                                data,
+                            };
+                        }
+                        ToolExecutionEvent::ToolCompleted {
+                            tool_call_id,
+                            name,
+                            is_error,
+                        } => {
+                            yield TurnEvent::ToolCompleted {
+                                tool_call_id,
+                                name,
+                                is_error,
+                            };
+                        }
+                    }
                 }
 
-                let tool_message = Message::tool_results(tool_results);
+                let tool_message = Message::tool_results(execution.results);
                 let compaction_config = CompactionConfig {
                     max_tool_result_chars: self.config.max_tool_result_chars,
                 };
@@ -425,7 +438,8 @@ impl AgentSession {
                     final_message = Some(message.clone());
                 }
                 if let TurnEvent::TurnFinished {
-                    stop_reason: reason, ..
+                    stop_reason: reason,
+                    ..
                 } = event.clone()
                 {
                     stop_reason = reason;
@@ -474,10 +488,33 @@ impl TurnEvent {
                 "provider_request:{} messages={} tools={}",
                 iteration, message_count, tool_count
             ),
+            TurnEvent::ProviderUsage {
+                input_tokens,
+                output_tokens,
+            } => format!("provider_usage:input={input_tokens} output={output_tokens}"),
             TurnEvent::AssistantDelta { text } => format!("assistant_delta:{text}"),
             TurnEvent::ToolCall { tool_call_id, name } => {
                 format!("tool_call:{}#{}", name, tool_call_id)
             }
+            TurnEvent::ToolProgress {
+                tool_call_id,
+                name,
+                message,
+                ..
+            } => format!(
+                "tool_progress:{}#{}:{}",
+                name,
+                tool_call_id.as_deref().unwrap_or("unknown"),
+                message
+            ),
+            TurnEvent::ToolCompleted {
+                tool_call_id,
+                name,
+                is_error,
+            } => format!(
+                "tool_completed:{}#{} error={}",
+                name, tool_call_id, is_error
+            ),
             TurnEvent::CompactionStarted { reason } => {
                 format!("compaction_started:{reason}")
             }
@@ -513,13 +550,4 @@ impl TurnEvent {
                 .join("\n"),
         }
     }
-}
-
-fn json_error_payload(kind: &str, message: String) -> serde_json::Value {
-    json!({
-        "error": {
-            "kind": kind,
-            "message": message,
-        }
-    })
 }

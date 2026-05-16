@@ -5,7 +5,9 @@ use serde_json::Value;
 
 use crate::error::AgentError;
 use crate::message::{ContentBlock, Message, Role, TextBlock, ToolCall};
-use crate::provider::{CompletionRequest, CompletionResponse, ModelProvider, StopReason, TokenUsage};
+use crate::provider::{
+    CompletionRequest, CompletionResponse, ModelProvider, StopReason, TokenUsage,
+};
 
 #[derive(Debug, Clone)]
 pub struct AnthropicConfig {
@@ -51,10 +53,7 @@ impl AnthropicProvider {
 
 #[async_trait]
 impl ModelProvider for AnthropicProvider {
-    async fn complete(
-        &self,
-        request: CompletionRequest,
-    ) -> Result<CompletionResponse, AgentError> {
+    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AgentError> {
         let body = anthropic_request_from_completion(&request, &self.config);
         let response = self
             .client
@@ -123,7 +122,11 @@ enum AnthropicContentBlock {
     #[serde(rename = "text")]
     Text { text: String },
     #[serde(rename = "tool_use")]
-    ToolUse { id: String, name: String, input: Value },
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
     #[serde(rename = "tool_result")]
     ToolResult {
         tool_use_id: String,
@@ -199,9 +202,9 @@ fn text_blocks_for_anthropic(message: &Message) -> Vec<AnthropicContentBlock> {
         .blocks
         .iter()
         .filter_map(|block| match block {
-            ContentBlock::Text(TextBlock { text }) => Some(AnthropicContentBlock::Text {
-                text: text.clone(),
-            }),
+            ContentBlock::Text(TextBlock { text }) => {
+                Some(AnthropicContentBlock::Text { text: text.clone() })
+            }
             _ => None,
         })
         .collect()
@@ -212,9 +215,9 @@ fn assistant_blocks_for_anthropic(message: &Message) -> Vec<AnthropicContentBloc
         .blocks
         .iter()
         .filter_map(|block| match block {
-            ContentBlock::Text(TextBlock { text }) => Some(AnthropicContentBlock::Text {
-                text: text.clone(),
-            }),
+            ContentBlock::Text(TextBlock { text }) => {
+                Some(AnthropicContentBlock::Text { text: text.clone() })
+            }
             ContentBlock::ToolCall(ToolCall {
                 id,
                 name,
@@ -260,7 +263,7 @@ fn anthropic_response_to_completion(
             AnthropicContentBlock::ToolResult { .. } => {
                 return Err(AgentError::Provider(
                     "anthropic assistant response unexpectedly contained tool_result".into(),
-                ))
+                ));
             }
         }
     }

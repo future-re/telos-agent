@@ -8,6 +8,8 @@ use crate::message::Message;
 
 #[async_trait]
 pub trait Storage: Send + Sync + std::fmt::Debug {
+    async fn save_snapshot(&self, session_id: &str, messages: &[Message])
+    -> Result<(), AgentError>;
     async fn append(&self, session_id: &str, messages: &[Message]) -> Result<(), AgentError>;
     async fn load(&self, session_id: &str) -> Result<Vec<Message>, AgentError>;
 }
@@ -20,9 +22,8 @@ pub struct JsonlStorage {
 impl JsonlStorage {
     pub fn new(dir: impl Into<PathBuf>) -> Result<Self, AgentError> {
         let dir = dir.into();
-        std::fs::create_dir_all(&dir).map_err(|e| {
-            AgentError::Config(format!("failed to create storage directory: {e}"))
-        })?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| AgentError::Config(format!("failed to create storage directory: {e}")))?;
         Ok(Self { dir })
     }
 
@@ -33,7 +34,47 @@ impl JsonlStorage {
 
 #[async_trait]
 impl Storage for JsonlStorage {
+    async fn save_snapshot(
+        &self,
+        session_id: &str,
+        messages: &[Message],
+    ) -> Result<(), AgentError> {
+        tokio::fs::create_dir_all(&self.dir)
+            .await
+            .map_err(|e| AgentError::Config(format!("failed to create storage directory: {e}")))?;
+        let path = self.path(session_id);
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&path)
+            .await
+            .map_err(|e| AgentError::Config(format!("storage open failed: {e}")))?;
+
+        let mut writer = BufWriter::new(file);
+        for msg in messages {
+            let line = serde_json::to_string(msg)
+                .map_err(|e| AgentError::Config(format!("serialize failed: {e}")))?;
+            writer
+                .write_all(line.as_bytes())
+                .await
+                .map_err(|e| AgentError::Config(format!("storage write failed: {e}")))?;
+            writer
+                .write_all(b"\n")
+                .await
+                .map_err(|e| AgentError::Config(format!("storage write failed: {e}")))?;
+        }
+        writer
+            .flush()
+            .await
+            .map_err(|e| AgentError::Config(format!("storage flush failed: {e}")))?;
+        Ok(())
+    }
+
     async fn append(&self, session_id: &str, messages: &[Message]) -> Result<(), AgentError> {
+        tokio::fs::create_dir_all(&self.dir)
+            .await
+            .map_err(|e| AgentError::Config(format!("failed to create storage directory: {e}")))?;
         let path = self.path(session_id);
         let file = OpenOptions::new()
             .create(true)
@@ -97,6 +138,14 @@ pub struct NoopStorage;
 
 #[async_trait]
 impl Storage for NoopStorage {
+    async fn save_snapshot(
+        &self,
+        _session_id: &str,
+        _messages: &[Message],
+    ) -> Result<(), AgentError> {
+        Ok(())
+    }
+
     async fn append(&self, _session_id: &str, _messages: &[Message]) -> Result<(), AgentError> {
         Ok(())
     }

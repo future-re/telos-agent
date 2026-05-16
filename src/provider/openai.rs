@@ -5,7 +5,9 @@ use serde_json::Value;
 
 use crate::error::AgentError;
 use crate::message::{ContentBlock, Message, Role, TextBlock, ToolCall};
-use crate::provider::{CompletionRequest, CompletionResponse, ModelProvider, StopReason, TokenUsage};
+use crate::provider::{
+    CompletionRequest, CompletionResponse, ModelProvider, StopReason, TokenUsage,
+};
 
 #[derive(Debug, Clone)]
 pub struct OpenAIConfig {
@@ -50,10 +52,7 @@ impl OpenAIProvider {
 
 #[async_trait]
 impl ModelProvider for OpenAIProvider {
-    async fn complete(
-        &self,
-        request: CompletionRequest,
-    ) -> Result<CompletionResponse, AgentError> {
+    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AgentError> {
         let body = openai_request_from_completion(&request, &self.config);
         let response = self
             .client
@@ -256,8 +255,10 @@ fn openai_response_to_completion(
     }
     if let Some(tool_calls) = choice.message.tool_calls {
         for call in tool_calls {
-            let arguments: Value = serde_json::from_str(&call.function.arguments)
-                .map_err(|err| AgentError::Provider(format!("invalid openai tool arguments: {err}")))?;
+            let arguments: Value =
+                serde_json::from_str(&call.function.arguments).map_err(|err| {
+                    AgentError::Provider(format!("invalid openai tool arguments: {err}"))
+                })?;
             blocks.push(ContentBlock::ToolCall(ToolCall {
                 id: call.id,
                 name: call.function.name,

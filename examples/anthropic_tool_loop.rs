@@ -36,9 +36,9 @@ impl Tool for EchoJsonTool {
 
 #[tokio::main]
 async fn main() -> Result<(), AgentError> {
-    let prompt = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "Call echo_json with value='hello from tool' and summarize the result.".into());
+    let prompt = std::env::args().nth(1).unwrap_or_else(|| {
+        "Call echo_json with value='hello from tool' and summarize the result.".into()
+    });
 
     let config = AnthropicConfig::from_env("claude-sonnet-4-5", 1024)?;
     let provider = AnthropicProvider::new(config);

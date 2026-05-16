@@ -4,15 +4,16 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 use tiny_agent_core::AgentError;
-use tiny_agent_core::{Hook, HookContext, HookPhase, HookRegistry};
-use tiny_agent_core::{ContentBlock, Message, ToolCall};
 use tiny_agent_core::MockProvider;
-use tiny_agent_core::{CompletionResponse, StopReason};
+use tiny_agent_core::register_core_tools;
 use tiny_agent_core::{AgentConfig, AgentSession, TurnEvent};
+use tiny_agent_core::{CompletionResponse, StopReason};
+use tiny_agent_core::{ContentBlock, Message, ToolCall};
+use tiny_agent_core::{Hook, HookContext, HookPhase, HookRegistry};
+use tiny_agent_core::{JsonlStorage, PermissionEngine, PermissionRule, Storage, SummaryCompaction};
 use tiny_agent_core::{
     PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
 };
-use tiny_agent_core::{JsonlStorage, PermissionEngine, PermissionRule, Storage, SummaryCompaction};
 
 struct AddTool;
 
@@ -214,16 +215,21 @@ fn permission_denial_returns_structured_tool_error() {
         tools.register(DenyTool);
 
         let mut session = AgentSession::new(AgentConfig::default());
-        let result = session.run_turn(&provider, &tools, "try deny").await.unwrap();
+        let result = session
+            .run_turn(&provider, &tools, "try deny")
+            .await
+            .unwrap();
         let tool_result_event = result
             .events
             .iter()
             .find(|event| matches!(event, TurnEvent::ToolResult(_)))
             .unwrap();
 
-        assert!(tool_result_event
-            .text()
-            .contains("\"kind\":\"permission_denied\""));
+        assert!(
+            tool_result_event
+                .text()
+                .contains("\"kind\":\"permission_denied\"")
+        );
     });
 }
 
@@ -280,7 +286,10 @@ fn run_turn_stream_emits_deltas_and_hooks() {
         assert!(events.iter().any(|event| {
             matches!(event, TurnEvent::HookStarted { phase, .. } if *phase == "stop")
         }));
-        assert_eq!(session.messages().last().unwrap().text_content(), "hook-ran");
+        assert_eq!(
+            session.messages().last().unwrap().text_content(),
+            "hook-ran"
+        );
     });
 }
 
@@ -337,8 +346,18 @@ fn tool_result_budget_compacts_large_output() {
             ..AgentConfig::default()
         });
         let result = session.run_turn(&provider, &tools, "run").await.unwrap();
-        assert!(result.events.iter().any(|event| matches!(event, TurnEvent::CompactionStarted { .. })));
-        assert!(result.events.iter().any(|event| matches!(event, TurnEvent::CompactionCompleted { .. })));
+        assert!(
+            result
+                .events
+                .iter()
+                .any(|event| matches!(event, TurnEvent::CompactionStarted { .. }))
+        );
+        assert!(
+            result
+                .events
+                .iter()
+                .any(|event| matches!(event, TurnEvent::CompactionCompleted { .. }))
+        );
         let tool_result = result
             .events
             .iter()
@@ -355,7 +374,8 @@ fn tool_result_budget_compacts_large_output() {
 fn jsonl_storage_roundtrips_messages() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
-        let dir = std::env::temp_dir().join(format!("tiny-agent-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("tiny-agent-roundtrip-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let storage = JsonlStorage::new(&dir).unwrap();
 
@@ -380,7 +400,8 @@ fn jsonl_storage_roundtrips_messages() {
 fn session_save_and_resume_works() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
-        let dir = std::env::temp_dir().join(format!("tiny-agent-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("tiny-agent-resume-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let storage = Arc::new(JsonlStorage::new(&dir).unwrap());
 
@@ -400,11 +421,17 @@ fn session_save_and_resume_works() {
         assert_eq!(session.messages().len(), 3); // sys + user + assistant
 
         let session_id = session.session_id().to_string();
-        let resumed = AgentSession::resume(session_id, AgentConfig {
-            system_prompt: Some("sys".into()),
-            storage: Some(storage.clone()),
-            ..AgentConfig::default()
-        }, storage.clone()).await.unwrap();
+        let resumed = AgentSession::resume(
+            session_id,
+            AgentConfig {
+                system_prompt: Some("sys".into()),
+                storage: Some(storage.clone()),
+                ..AgentConfig::default()
+            },
+            storage.clone(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(resumed.messages().len(), 3);
         assert_eq!(resumed.messages()[0].text_content(), "sys");
@@ -549,8 +576,154 @@ fn summary_compaction_triggers_when_over_budget() {
             ..AgentConfig::default()
         });
 
-        let result = session.run_turn(&provider, &tools, "run big").await.unwrap();
-        assert!(result.events.iter().any(|event| matches!(event, TurnEvent::CompactionStarted { .. })));
-        assert!(result.events.iter().any(|event| matches!(event, TurnEvent::CompactionCompleted { .. })));
+        let result = session
+            .run_turn(&provider, &tools, "run big")
+            .await
+            .unwrap();
+        assert!(
+            result
+                .events
+                .iter()
+                .any(|event| matches!(event, TurnEvent::CompactionStarted { .. }))
+        );
+        assert!(
+            result
+                .events
+                .iter()
+                .any(|event| matches!(event, TurnEvent::CompactionCompleted { .. }))
+        );
+    });
+}
+
+#[test]
+fn session_save_replaces_snapshot_without_duplicates() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let dir =
+            std::env::temp_dir().join(format!("tiny-agent-snapshot-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let storage = Arc::new(JsonlStorage::new(&dir).unwrap());
+
+        let provider = MockProvider::new(vec![CompletionResponse {
+            message: Message::assistant("first"),
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+        }]);
+        let tools = ToolRegistry::new();
+        let mut session = AgentSession::new(AgentConfig {
+            storage: Some(storage.clone()),
+            ..AgentConfig::default()
+        });
+
+        session.run_turn(&provider, &tools, "hello").await.unwrap();
+        session.save().await.unwrap();
+        session.save().await.unwrap();
+
+        let loaded = storage.load(session.session_id()).await.unwrap();
+        assert_eq!(loaded.len(), session.messages().len());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
+fn builtin_file_read_tool_returns_file_contents() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let dir =
+            std::env::temp_dir().join(format!("tiny-agent-file-read-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("sample.txt"), "alpha\nbeta\n").unwrap();
+
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "file_read".into(),
+                        arguments: json!({ "path": "sample.txt" }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("done"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+        let mut tools = ToolRegistry::new();
+        register_core_tools(&mut tools);
+        let mut session = AgentSession::new(AgentConfig {
+            cwd: dir.clone(),
+            ..AgentConfig::default()
+        });
+
+        let result = session.run_turn(&provider, &tools, "read").await.unwrap();
+        let tool_result = result
+            .events
+            .iter()
+            .find_map(|event| match event {
+                TurnEvent::ToolResult(_) => Some(event),
+                _ => None,
+            })
+            .unwrap();
+        assert!(tool_result.text().contains("1: alpha"));
+        assert!(tool_result.text().contains("2: beta"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
+fn permission_engine_allows_shell_by_command_prefix() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::allow_tool("shell").command_prefix("echo"));
+
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "shell".into(),
+                        arguments: json!({ "command": "echo allowed" }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("done"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+        let mut tools = ToolRegistry::new();
+        register_core_tools(&mut tools);
+        let mut session = AgentSession::new(AgentConfig {
+            permission_engine: Some(engine),
+            ..AgentConfig::default()
+        });
+
+        let result = session.run_turn(&provider, &tools, "shell").await.unwrap();
+        let tool_result = result
+            .events
+            .iter()
+            .find_map(|event| match event {
+                TurnEvent::ToolResult(_) => Some(event),
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            tool_result.text().contains("allowed"),
+            "{}",
+            tool_result.text()
+        );
     });
 }

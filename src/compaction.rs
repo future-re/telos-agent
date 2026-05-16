@@ -1,20 +1,35 @@
 use serde_json::json;
 
 use crate::message::{Message, ToolResult};
-use crate::runtime::{AgentConfig, TurnEvent};
+
+#[derive(Debug, Clone)]
+pub struct CompactionConfig {
+    pub max_tool_result_chars: usize,
+}
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            max_tool_result_chars: usize::MAX,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct CompactionResult {
     pub message: Message,
-    pub event: Option<TurnEvent>,
+    pub compacted: bool,
 }
 
 pub fn compact_tool_result_message(
     message: Message,
-    config: &AgentConfig,
+    config: &CompactionConfig,
 ) -> CompactionResult {
     if config.max_tool_result_chars == usize::MAX {
-        return CompactionResult { message, event: None };
+        return CompactionResult {
+            message,
+            compacted: false,
+        };
     }
 
     let mut changed = false;
@@ -39,14 +54,15 @@ pub fn compact_tool_result_message(
     }
 
     if !changed {
-        return CompactionResult { message, event: None };
+        return CompactionResult {
+            message,
+            compacted: false,
+        };
     }
 
     CompactionResult {
         message: Message::tool_results(results),
-        event: Some(TurnEvent::CompactionCompleted {
-            reason: "tool_result_budget".into(),
-        }),
+        compacted: true,
     }
 }
 

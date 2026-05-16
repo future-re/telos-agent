@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::compaction::compact_tool_result_message;
+use crate::compaction::{CompactionConfig, compact_tool_result_message};
 use crate::error::AgentError;
 use crate::hooks::{HookContext, HookPhase, HookRegistry};
 use crate::message::{ContentBlock, Message, ToolResult};
@@ -317,14 +317,17 @@ impl AgentSession {
                 }
 
                 let tool_message = Message::tool_results(tool_results);
-                if self.config.max_tool_result_chars != usize::MAX {
+                let compaction_config = CompactionConfig {
+                    max_tool_result_chars: self.config.max_tool_result_chars,
+                };
+                let compaction = compact_tool_result_message(tool_message, &compaction_config);
+                if compaction.compacted {
                     yield TurnEvent::CompactionStarted {
                         reason: "tool_result_budget".into(),
                     };
-                }
-                let compaction = compact_tool_result_message(tool_message, &self.config);
-                if let Some(event) = compaction.event.clone() {
-                    yield event;
+                    yield TurnEvent::CompactionCompleted {
+                        reason: "tool_result_budget".into(),
+                    };
                 }
                 self.messages.push(compaction.message.clone());
                 yield TurnEvent::ToolResult(compaction.message);

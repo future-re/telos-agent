@@ -3,9 +3,10 @@ use futures_util::StreamExt;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+use crate::config::AgentConfig;
 use crate::error::AgentError;
 use crate::provider::{CompletionRequest, CompletionResponse, ModelProvider, ProviderEvent};
-use crate::runtime::{AgentConfig, AgentSession, TurnEvent};
+use crate::runtime::{AgentSession, TurnEvent};
 use crate::tool::{
     PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
 };

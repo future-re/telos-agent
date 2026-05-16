@@ -2,70 +2,20 @@ use async_stream::try_stream;
 use futures_core::stream::Stream;
 use futures_util::StreamExt;
 use serde::Serialize;
-use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::compaction::{CompactionConfig, compact_tool_result_message};
-use crate::context_compact::CompactionStrategy;
+use crate::config::AgentConfig;
 use crate::error::AgentError;
 use crate::executor::{ToolExecutionEvent, ToolExecutionStreamItem, execute_tool_calls_stream};
-use crate::hooks::{HookContext, HookPhase, HookRegistry};
+use crate::hooks::{HookContext, HookPhase};
 use crate::message::{ContentBlock, Message, Role, TextBlock};
 use crate::provider::{CompletionRequest, ModelProvider, ProviderEvent, StopReason, TokenUsage};
 use crate::storage::Storage;
 use crate::tool::ToolRegistry;
 
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
-
-#[derive(Debug, Clone)]
-pub struct AgentConfig {
-    pub system_prompt: Option<String>,
-    pub max_iterations: usize,
-    pub cwd: PathBuf,
-    pub env: HashMap<String, String>,
-    pub max_tool_result_chars: usize,
-    pub hooks: Arc<HookRegistry>,
-    pub storage: Option<Arc<dyn Storage>>,
-    pub compaction: Option<Arc<dyn CompactionStrategy>>,
-    pub permission_engine: Option<crate::permissions::PermissionEngine>,
-    pub tool_concurrency_limit: usize,
-    pub token_budget: Option<TokenBudget>,
-}
-
-impl Default for AgentConfig {
-    fn default() -> Self {
-        Self {
-            system_prompt: None,
-            max_iterations: 8,
-            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            env: std::env::vars().collect(),
-            max_tool_result_chars: usize::MAX,
-            hooks: Arc::new(HookRegistry::new()),
-            storage: None,
-            compaction: None,
-            permission_engine: None,
-            tool_concurrency_limit: 10,
-            token_budget: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TokenBudget {
-    pub max_tokens: usize,
-    pub compact_at_tokens: usize,
-}
-
-impl TokenBudget {
-    pub fn new(max_tokens: usize) -> Self {
-        Self {
-            max_tokens,
-            compact_at_tokens: ((max_tokens as f64) * 0.8).ceil() as usize,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub enum TurnEvent {

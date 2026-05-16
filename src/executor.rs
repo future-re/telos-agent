@@ -4,9 +4,9 @@ use futures_util::stream::{FuturesUnordered, StreamExt};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+use crate::config::AgentConfig;
 use crate::message::{ToolCall, ToolResult};
 use crate::permissions::RuleDecision;
-use crate::runtime::AgentConfig;
 use crate::tool::{PermissionDecision, ToolContext, ToolProgress, ToolRegistry};
 
 #[derive(Debug, Clone)]

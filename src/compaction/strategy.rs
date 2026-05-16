@@ -61,14 +61,12 @@ impl CompactionStrategy for SummaryCompaction {
             return Ok(false);
         }
 
-        // Find the system prompt index (if any)
         let system_idx = messages
             .iter()
             .position(|m| m.role == Role::System)
             .map(|i| i + 1)
             .unwrap_or(0);
 
-        // Split point: keep system prompt + most recent keep_recent messages
         let split_point = messages.len().saturating_sub(self.keep_recent);
         let split_point = split_point.max(system_idx);
 

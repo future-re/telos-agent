@@ -6,6 +6,10 @@ pub enum AgentError {
     Provider(String),
     #[error("configuration error: {0}")]
     Config(String),
+    #[error("validation error: {0}")]
+    Validation(String),
+    #[error("permission denied: {0}")]
+    PermissionDenied(String),
     #[error("tool not found: {0}")]
     ToolNotFound(String),
     #[error("tool `{tool}` failed: {message}")]

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use tiny_agent_core::{
-    AgentConfig, AgentError, AgentSession, AnthropicConfig, AnthropicProvider, Tool,
+    AgentConfig, AgentError, AgentSession, AnthropicConfig, AnthropicProvider, Tool, ToolContext,
     ToolDefinition, ToolOutput, ToolRegistry,
 };
 
@@ -23,7 +23,11 @@ impl Tool for EchoJsonTool {
         }
     }
 
-    async fn invoke(&self, arguments: Value) -> Result<ToolOutput, AgentError> {
+    async fn invoke(
+        &self,
+        arguments: Value,
+        _context: ToolContext,
+    ) -> Result<ToolOutput, AgentError> {
         Ok(ToolOutput {
             content: json!({ "echo": arguments }),
         })
@@ -45,6 +49,7 @@ async fn main() -> Result<(), AgentError> {
     let mut session = AgentSession::new(AgentConfig {
         system_prompt: Some("You are a concise coding agent.".into()),
         max_iterations: 6,
+        ..AgentConfig::default()
     });
 
     let result = session.run_turn(&provider, &tools, prompt).await?;

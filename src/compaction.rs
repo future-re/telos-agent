@@ -1,0 +1,55 @@
+use serde_json::json;
+
+use crate::message::{Message, ToolResult};
+use crate::runtime::{AgentConfig, TurnEvent};
+
+#[derive(Debug, Clone)]
+pub struct CompactionResult {
+    pub message: Message,
+    pub event: Option<TurnEvent>,
+}
+
+pub fn compact_tool_result_message(
+    message: Message,
+    config: &AgentConfig,
+) -> CompactionResult {
+    if config.max_tool_result_chars == usize::MAX {
+        return CompactionResult { message, event: None };
+    }
+
+    let mut changed = false;
+    let mut results = Vec::new();
+    for result in message.tool_results_iter() {
+        let content = result.content.to_string();
+        if content.len() > config.max_tool_result_chars {
+            changed = true;
+            results.push(ToolResult {
+                tool_call_id: result.tool_call_id.clone(),
+                name: result.name.clone(),
+                is_error: result.is_error,
+                content: json!({
+                    "preview": truncate_chars(&content, config.max_tool_result_chars),
+                    "truncated": true,
+                    "original_char_count": content.len(),
+                }),
+            });
+        } else {
+            results.push(result.clone());
+        }
+    }
+
+    if !changed {
+        return CompactionResult { message, event: None };
+    }
+
+    CompactionResult {
+        message: Message::tool_results(results),
+        event: Some(TurnEvent::CompactionCompleted {
+            reason: "tool_result_budget".into(),
+        }),
+    }
+}
+
+fn truncate_chars(input: &str, max_chars: usize) -> String {
+    input.chars().take(max_chars).collect()
+}

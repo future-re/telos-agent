@@ -1,9 +1,11 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::error::AgentError;
+use crate::message::Message;
 
 #[derive(Debug, Clone)]
 pub struct ToolDefinition {
@@ -25,11 +27,61 @@ impl ToolOutput {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterruptBehavior {
+    Block,
+    Cancel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PermissionDecision {
+    Allow,
+    Deny { reason: String },
+    Ask { reason: String },
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolContext {
+    pub session_id: String,
+    pub turn_id: u64,
+    pub cwd: PathBuf,
+    pub env: HashMap<String, String>,
+    pub messages: Vec<Message>,
+}
+
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn definition(&self) -> ToolDefinition;
 
-    async fn invoke(&self, arguments: Value) -> Result<ToolOutput, AgentError>;
+    async fn validate(
+        &self,
+        _arguments: &Value,
+        _context: &ToolContext,
+    ) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    async fn check_permission(
+        &self,
+        _arguments: &Value,
+        _context: &ToolContext,
+    ) -> Result<PermissionDecision, AgentError> {
+        Ok(PermissionDecision::Allow)
+    }
+
+    fn interrupt_behavior(&self) -> InterruptBehavior {
+        InterruptBehavior::Block
+    }
+
+    fn is_concurrency_safe(&self, _arguments: &Value) -> bool {
+        false
+    }
+
+    async fn invoke(
+        &self,
+        arguments: Value,
+        context: ToolContext,
+    ) -> Result<ToolOutput, AgentError>;
 }
 
 #[derive(Default)]
@@ -57,12 +109,10 @@ impl ToolRegistry {
             .collect::<Vec<_>>()
     }
 
-    pub async fn invoke(&self, name: &str, arguments: Value) -> Result<ToolOutput, AgentError> {
-        let tool = self
-            .tools
+    pub fn get(&self, name: &str) -> Result<Arc<dyn Tool>, AgentError> {
+        self.tools
             .get(name)
-            .ok_or_else(|| AgentError::ToolNotFound(name.to_string()))?;
-
-        tool.invoke(arguments).await
+            .cloned()
+            .ok_or_else(|| AgentError::ToolNotFound(name.to_string()))
     }
 }

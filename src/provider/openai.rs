@@ -224,6 +224,11 @@ struct StreamingOpenAIToolCall {
     arguments: String,
 }
 
+// === OpenAI wire-format types =====================================================
+// Private structs that mirror OpenAI's Chat Completions JSON shapes. Each
+// field maps 1:1 to a wire field, so individual fields are left undocumented.
+
+/// One SSE chunk delivered while streaming a completion.
 #[derive(Debug, Deserialize)]
 struct OpenAIStreamChunk {
     #[serde(default)]
@@ -248,6 +253,7 @@ struct OpenAIStreamDelta {
 
 #[derive(Debug, Deserialize)]
 struct OpenAIStreamToolCall {
+    /// Position of this call within the assistant message — multiple streamed deltas share an index.
     index: usize,
     #[serde(default)]
     id: Option<String>,
@@ -263,6 +269,7 @@ struct OpenAIStreamFunctionCall {
     arguments: Option<String>,
 }
 
+/// Top-level body of a `POST /v1/chat/completions` request.
 #[derive(Debug, Serialize)]
 struct OpenAIRequestBody {
     model: String,
@@ -285,6 +292,10 @@ struct OpenAIFunctionDefinition {
     parameters: Value,
 }
 
+/// Single message in the chat-completions transcript.
+///
+/// `tool_calls` is only populated on assistant messages; `tool_call_id` is
+/// only populated on `tool`-role messages.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct OpenAIMessage {
     role: String,
@@ -307,9 +318,11 @@ struct OpenAIToolCall {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct OpenAIFunctionCall {
     name: String,
+    /// JSON-encoded arguments — yes, a string, not a nested object (OpenAI quirk).
     arguments: String,
 }
 
+/// Decoded response body from `POST /v1/chat/completions` (non-streaming).
 #[derive(Debug, Deserialize)]
 struct OpenAIChatResponse {
     choices: Vec<OpenAIChoice>,

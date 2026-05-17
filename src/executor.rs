@@ -18,16 +18,19 @@ use crate::tool::{PermissionDecision, ToolContext, ToolProgress, ToolRegistry};
 /// Lifecycle event emitted by the executor for one tool invocation.
 #[derive(Debug, Clone)]
 pub enum ToolExecutionEvent {
+    /// Emitted once when the tool starts (after permission, before `invoke`).
     ToolStarted {
         tool_call_id: String,
         name: String,
     },
+    /// Streaming progress update from inside the tool.
     ToolProgress {
         tool_call_id: Option<String>,
         name: String,
         message: String,
         data: Option<Value>,
     },
+    /// Emitted once when the tool finishes (success or error).
     ToolCompleted {
         tool_call_id: String,
         name: String,
@@ -39,7 +42,9 @@ pub enum ToolExecutionEvent {
 /// results in the original call order.
 #[derive(Debug, Clone)]
 pub struct ToolExecutionOutput {
+    /// Every [`ToolExecutionEvent`] emitted during the batch, in fire order.
     pub events: Vec<ToolExecutionEvent>,
+    /// One [`ToolResult`] per input call, restored to declaration order.
     pub results: Vec<ToolResult>,
 }
 
@@ -247,7 +252,9 @@ pub fn execute_tool_calls_stream<'a>(
 /// happen, and final results once each call completes.
 #[derive(Debug, Clone)]
 pub enum ToolExecutionStreamItem {
+    /// An [`ToolExecutionEvent`] — informational; may be emitted out of call order.
     Event(ToolExecutionEvent),
+    /// A finished tool's [`ToolResult`] — emitted in the original call order at end of batch.
     Result(ToolResult),
 }
 

@@ -248,6 +248,12 @@ struct StreamingAnthropicToolCall {
     json_input: String,
 }
 
+// === Anthropic wire-format types ===================================================
+// The structs below mirror the JSON shapes documented in the Anthropic Messages
+// API. They're intentionally private and minimal — every field maps 1:1 to a
+// wire field, so doc comments would just restate the JSON schema.
+
+/// One SSE event delivered while streaming a completion.
 #[derive(Debug, Deserialize)]
 struct AnthropicStreamEvent {
     #[serde(rename = "type")]
@@ -300,6 +306,7 @@ struct AnthropicStreamUsage {
     output_tokens: Option<usize>,
 }
 
+/// Top-level body of a `POST /v1/messages` request.
 #[derive(Debug, Serialize)]
 struct AnthropicRequestBody {
     model: String,
@@ -324,6 +331,7 @@ struct AnthropicMessage {
     content: Vec<AnthropicContentBlock>,
 }
 
+/// Anthropic's content-block discriminated union — text, tool call, or tool result.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 enum AnthropicContentBlock {
@@ -344,6 +352,7 @@ enum AnthropicContentBlock {
     },
 }
 
+/// Decoded response body from `POST /v1/messages` (non-streaming).
 #[derive(Debug, Deserialize)]
 struct AnthropicMessageResponse {
     content: Vec<AnthropicContentBlock>,
@@ -412,6 +421,7 @@ fn message_to_anthropic(message: &Message) -> Option<AnthropicMessage> {
     }
 }
 
+/// Extract text-only blocks from a user message (drops anything non-text).
 fn text_blocks_for_anthropic(message: &Message) -> Vec<AnthropicContentBlock> {
     message
         .blocks
@@ -425,6 +435,8 @@ fn text_blocks_for_anthropic(message: &Message) -> Vec<AnthropicContentBlock> {
         .collect()
 }
 
+/// Build assistant content blocks, preserving text + tool calls and dropping
+/// stray tool results (those are sent as a separate user-role message).
 fn assistant_blocks_for_anthropic(message: &Message) -> Vec<AnthropicContentBlock> {
     message
         .blocks
@@ -447,12 +459,14 @@ fn assistant_blocks_for_anthropic(message: &Message) -> Vec<AnthropicContentBloc
         .collect()
 }
 
+/// Map a tool-role message into `tool_result` blocks for the user-role envelope.
 fn tool_result_blocks_for_anthropic(message: &Message) -> Vec<AnthropicContentBlock> {
     message
         .tool_results_iter()
         .map(|result| AnthropicContentBlock::ToolResult {
             tool_use_id: result.tool_call_id.clone(),
             content: result.content.clone(),
+            // Anthropic omits the field when false — `then_some` gives us `None` for the common case.
             is_error: result.is_error.then_some(true),
         })
         .collect()

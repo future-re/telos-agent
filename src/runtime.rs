@@ -259,6 +259,8 @@ impl AgentSession {
 
             let mut iterations = 0;
             loop {
+                // Bail out if the model keeps calling tools forever. The cap
+                // also protects against pathological tool-result loops.
                 if iterations >= self.config.max_iterations {
                     Err(AgentError::MaxIterations(self.config.max_iterations))?;
                 }

@@ -1,12 +1,15 @@
-//! `file_read` tool — read a UTF-8 text file with optional line slicing.
+//! `Read` tool — read a UTF-8 text file with optional line slicing.
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::error::AgentError;
+use crate::tool::FileReadRecord;
 use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
 
-use super::{required_string, resolve_workspace_path};
+use super::{
+    modified_timestamp_ms, optional_usize_any, required_string_any, resolve_workspace_path,
+};
 
 /// Built-in file-read tool. Read-only; safe to run concurrently.
 pub struct FileReadTool;
@@ -15,22 +18,26 @@ pub struct FileReadTool;
 impl Tool for FileReadTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: "file_read".into(),
-            description: "Read a UTF-8 text file relative to the current working directory.".into(),
+            name: "Read".into(),
+            description: "Read a UTF-8 text file. Use this before editing an existing file.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string" },
-                    "start_line": { "type": "integer" },
-                    "max_lines": { "type": "integer" }
+                    "file_path": { "type": "string", "description": "Path to the file to read, absolute or relative to cwd." },
+                    "offset": { "type": "integer", "description": "1-indexed line number to start reading from." },
+                    "limit": { "type": "integer", "description": "Maximum number of lines to read." }
                 },
-                "required": ["path"]
+                "required": ["file_path"]
             }),
         }
     }
 
+    fn aliases(&self) -> &'static [&'static str] {
+        &["file_read"]
+    }
+
     async fn validate(&self, arguments: &Value, _context: &ToolContext) -> Result<(), AgentError> {
-        required_string(arguments, "path").map(|_| ())
+        required_string_any(arguments, &["file_path", "path"]).map(|_| ())
     }
 
     fn is_concurrency_safe(&self, _arguments: &Value) -> bool {
@@ -42,24 +49,32 @@ impl Tool for FileReadTool {
         arguments: Value,
         context: ToolContext,
     ) -> Result<ToolOutput, AgentError> {
-        let path = resolve_workspace_path(&context.cwd, required_string(&arguments, "path")?)?;
-        let content =
-            tokio::fs::read_to_string(&path)
-                .await
-                .map_err(|err| AgentError::ToolExecution {
-                    tool: "file_read".into(),
-                    message: err.to_string(),
-                })?;
-        // `start_line` is 1-indexed for human readability; clamp to >= 1.
-        let start_line = arguments
-            .get("start_line")
-            .and_then(|value| value.as_u64())
+        let input_path = required_string_any(&arguments, &["file_path", "path"])?;
+        let path = resolve_workspace_path(&context.cwd, input_path)?;
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|err| AgentError::ToolExecution {
+                tool: "Read".into(),
+                message: friendly_file_error(&context.cwd, &path, err),
+            })?;
+        if bytes.contains(&0) {
+            return Err(AgentError::ToolExecution {
+                tool: "Read".into(),
+                message:
+                    "file appears to be binary; Read only supports UTF-8 text in tiny_agent_core"
+                        .into(),
+            });
+        }
+        let content = String::from_utf8(bytes).map_err(|_| AgentError::ToolExecution {
+            tool: "Read".into(),
+            message: "file is not valid UTF-8 text".into(),
+        })?;
+        let timestamp_ms = modified_timestamp_ms(&path).await?;
+        // `offset` is 1-indexed for human readability; clamp to >= 1.
+        let start_line = optional_usize_any(&arguments, &["offset", "start_line"])
             .unwrap_or(1)
-            .max(1) as usize;
-        let max_lines = arguments
-            .get("max_lines")
-            .and_then(|value| value.as_u64())
-            .map(|value| value as usize);
+            .max(1);
+        let max_lines = optional_usize_any(&arguments, &["limit", "max_lines"]);
         // Prefix every emitted line with its 1-indexed line number — gives the
         // model an unambiguous anchor for follow-up edits.
         let lines = content
@@ -69,9 +84,51 @@ impl Tool for FileReadTool {
             .take(max_lines.unwrap_or(usize::MAX))
             .map(|(idx, line)| format!("{}: {}", idx + 1, line))
             .collect::<Vec<_>>();
+        let line_count = content.lines().count();
+        let is_partial_view = start_line > 1 || max_lines.is_some_and(|limit| limit < line_count);
+        context.read_file_state.lock().await.insert(
+            path.clone(),
+            FileReadRecord {
+                content: content.clone(),
+                timestamp_ms,
+                is_partial_view,
+                offset: Some(start_line),
+                limit: max_lines,
+            },
+        );
+
+        let rendered = if content.is_empty() {
+            "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>".to_string()
+        } else if lines.is_empty() {
+            format!(
+                "<system-reminder>Warning: the file exists but is shorter than the provided offset ({start_line}). The file has {line_count} lines.</system-reminder>"
+            )
+        } else {
+            lines.join("\n")
+        };
+
         Ok(ToolOutput::json(json!({
+            "file_path": input_path,
             "path": path,
-            "content": lines.join("\n"),
+            "content": rendered,
+            "start_line": start_line,
+            "total_lines": line_count,
         })))
+    }
+}
+
+fn friendly_file_error(
+    cwd: &std::path::Path,
+    path: &std::path::Path,
+    err: std::io::Error,
+) -> String {
+    if err.kind() == std::io::ErrorKind::NotFound {
+        format!(
+            "File does not exist. Current working directory: {}. Requested path: {}",
+            cwd.display(),
+            path.display()
+        )
+    } else {
+        err.to_string()
     }
 }

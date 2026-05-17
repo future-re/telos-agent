@@ -15,7 +15,7 @@ pub struct GlobTool;
 impl Tool for GlobTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: "glob".into(),
+            name: "Glob".into(),
             description: "List files matching a glob pattern under the current working directory."
                 .into(),
             input_schema: json!({
@@ -27,6 +27,10 @@ impl Tool for GlobTool {
                 "required": ["pattern"]
             }),
         }
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &["glob"]
     }
 
     async fn validate(&self, arguments: &Value, _context: &ToolContext) -> Result<(), AgentError> {

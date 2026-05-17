@@ -19,7 +19,7 @@ pub struct GrepTool;
 impl Tool for GrepTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: "grep".into(),
+            name: "Grep".into(),
             description: "Search UTF-8 files for a literal text pattern.".into(),
             input_schema: json!({
                 "type": "object",
@@ -31,6 +31,10 @@ impl Tool for GrepTool {
                 "required": ["pattern"]
             }),
         }
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &["grep"]
     }
 
     async fn validate(&self, arguments: &Value, _context: &ToolContext) -> Result<(), AgentError> {

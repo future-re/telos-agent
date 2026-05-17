@@ -114,9 +114,24 @@ impl PermissionEngine {
         arguments: &serde_json::Value,
         cwd: &std::path::Path,
     ) -> Option<RuleDecision> {
+        self.evaluate_call_any(&[tool_name], arguments, cwd)
+    }
+
+    /// Evaluate a tool call against any accepted tool name for that tool.
+    ///
+    /// This preserves the usual "last matching rule wins" behavior across
+    /// canonical names and legacy aliases.
+    pub fn evaluate_call_any(
+        &self,
+        tool_names: &[&str],
+        arguments: &serde_json::Value,
+        cwd: &std::path::Path,
+    ) -> Option<RuleDecision> {
         let mut result = None;
         for rule in &self.rules {
-            if Self::match_name(&rule.tool_name, tool_name)
+            if tool_names
+                .iter()
+                .any(|tool_name| Self::match_name(&rule.tool_name, tool_name))
                 && Self::match_command_prefix(rule, arguments)
                 && Self::match_cwd_prefix(rule, cwd)
             {

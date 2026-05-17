@@ -7,19 +7,19 @@
 use crate::error::AgentError;
 use crate::tool::ToolRegistry;
 
-mod shell;
+mod file_edit;
 mod file_read;
 mod file_write;
-mod file_edit;
 mod glob;
 mod grep;
+mod shell;
 
-pub use shell::ShellTool;
+pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
 pub use file_write::FileWriteTool;
-pub use file_edit::FileEditTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
+pub use shell::ShellTool;
 
 /// Register every built-in tool with the supplied registry.
 pub fn register_core_tools(registry: &mut ToolRegistry) {
@@ -31,8 +31,9 @@ pub fn register_core_tools(registry: &mut ToolRegistry) {
     registry.register(GrepTool);
 }
 
-use std::path::{Path, PathBuf};
 use serde_json::Value;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 /// Extract a required string field from JSON arguments or return a validation error.
 pub(crate) fn required_string<'a>(arguments: &'a Value, key: &str) -> Result<&'a str, AgentError> {
@@ -40,6 +41,40 @@ pub(crate) fn required_string<'a>(arguments: &'a Value, key: &str) -> Result<&'a
         .get(key)
         .and_then(|value| value.as_str())
         .ok_or_else(|| AgentError::Validation(format!("missing string `{key}`")))
+}
+
+/// Extract the first available string field from JSON arguments.
+pub(crate) fn required_string_any<'a>(
+    arguments: &'a Value,
+    keys: &[&str],
+) -> Result<&'a str, AgentError> {
+    for key in keys {
+        if let Some(value) = arguments.get(*key).and_then(|value| value.as_str()) {
+            return Ok(value);
+        }
+    }
+    Err(AgentError::Validation(format!(
+        "missing string `{}`",
+        keys.join("` or `")
+    )))
+}
+
+/// Extract an optional bool argument with a default.
+pub(crate) fn optional_bool(arguments: &Value, key: &str, default: bool) -> bool {
+    arguments
+        .get(key)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(default)
+}
+
+/// Extract an optional positive integer from any one of several keys.
+pub(crate) fn optional_usize_any(arguments: &Value, keys: &[&str]) -> Option<usize> {
+    keys.iter().find_map(|key| {
+        arguments
+            .get(*key)
+            .and_then(|value| value.as_u64())
+            .map(|value| value as usize)
+    })
 }
 
 /// Resolve a user-supplied path against the workspace cwd, refusing to escape it.
@@ -92,6 +127,28 @@ pub(crate) fn display_relative(cwd: &Path, path: &Path) -> String {
         .to_string()
 }
 
+/// Return a comparable millisecond timestamp for a file's last modification time.
+pub(crate) async fn modified_timestamp_ms(path: &Path) -> Result<u128, AgentError> {
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .map_err(|err| AgentError::ToolExecution {
+            tool: "filesystem".into(),
+            message: err.to_string(),
+        })?;
+    metadata
+        .modified()
+        .map_err(|err| AgentError::ToolExecution {
+            tool: "filesystem".into(),
+            message: err.to_string(),
+        })?
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .map_err(|err| AgentError::ToolExecution {
+            tool: "filesystem".into(),
+            message: err.to_string(),
+        })
+}
+
 /// Heuristic: does this shell command look obviously read-only?
 ///
 /// Used by [`ShellTool`] to auto-approve safe commands without bothering the
@@ -100,13 +157,47 @@ pub(crate) fn display_relative(cwd: &Path, path: &Path) -> String {
 /// inspection-like (`git status`, `git log`); mutating subcommands still pass
 /// here but should be caught upstream via a permission rule if needed.
 pub(crate) fn is_obviously_read_only_command(command: &str) -> bool {
-    let first = command
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .trim_end_matches(';');
+    let command = command.trim();
+    if command.is_empty() {
+        return true;
+    }
+    let mut parts = command.split_whitespace();
+    let first = parts.next().unwrap_or_default().trim_end_matches(';');
+    if first == "git" {
+        let subcommand = parts.next().unwrap_or_default();
+        return matches!(
+            subcommand,
+            "" | "status"
+                | "log"
+                | "show"
+                | "diff"
+                | "branch"
+                | "rev-parse"
+                | "ls-files"
+                | "grep"
+                | "remote"
+                | "describe"
+        );
+    }
     matches!(
         first,
-        "cat" | "head" | "tail" | "ls" | "pwd" | "rg" | "grep" | "find" | "wc" | "sed" | "git"
+        "cat"
+            | "head"
+            | "tail"
+            | "ls"
+            | "pwd"
+            | "rg"
+            | "grep"
+            | "find"
+            | "wc"
+            | "sed"
+            | "awk"
+            | "cut"
+            | "sort"
+            | "uniq"
+            | "tr"
+            | "stat"
+            | "file"
+            | "strings"
     )
 }

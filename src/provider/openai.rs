@@ -353,7 +353,7 @@ fn openai_request_from_completion(
     let mut messages = request
         .messages
         .iter()
-        .filter_map(message_to_openai)
+        .flat_map(message_to_openai)
         .collect::<Vec<_>>();
     if let Some(system_prompt) = &request.system_prompt {
         messages.insert(
@@ -395,15 +395,15 @@ fn openai_request_from_completion(
 /// prepended by [`openai_request_from_completion`]). Tool-role messages map
 /// to OpenAI's `role: "tool"` with `tool_call_id`; only the first result in a
 /// batch is emitted because OpenAI requires one tool message per call.
-fn message_to_openai(message: &Message) -> Option<OpenAIMessage> {
+fn message_to_openai(message: &Message) -> Vec<OpenAIMessage> {
     match message.role {
-        Role::System => None,
-        Role::User => Some(OpenAIMessage {
+        Role::System => vec![],
+        Role::User => vec![OpenAIMessage {
             role: "user".into(),
             content: Some(message.text_content()),
             tool_calls: None,
             tool_call_id: None,
-        }),
+        }],
         Role::Assistant => {
             let tool_calls = message
                 .tool_calls()
@@ -416,22 +416,22 @@ fn message_to_openai(message: &Message) -> Option<OpenAIMessage> {
                     },
                 })
                 .collect::<Vec<_>>();
-            Some(OpenAIMessage {
+            vec![OpenAIMessage {
                 role: "assistant".into(),
                 content: (!message.text_content().is_empty()).then(|| message.text_content()),
                 tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
                 tool_call_id: None,
-            })
+            }]
         }
-        Role::Tool => {
-            let first = message.tool_results_iter().next()?;
-            Some(OpenAIMessage {
+        Role::Tool => message
+            .tool_results_iter()
+            .map(|result| OpenAIMessage {
                 role: "tool".into(),
-                content: Some(first.content.to_string()),
+                content: Some(result.content.to_string()),
                 tool_calls: None,
-                tool_call_id: Some(first.tool_call_id.clone()),
+                tool_call_id: Some(result.tool_call_id.clone()),
             })
-        }
+            .collect(),
     }
 }
 
@@ -488,6 +488,9 @@ fn openai_response_to_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::message::ToolResult;
+    use crate::tool::ToolDefinition;
+    use serde_json::json;
 
     #[test]
     fn parses_openai_tool_call_response() {
@@ -514,5 +517,63 @@ mod tests {
         let completion = openai_response_to_completion(response).unwrap();
         assert_eq!(completion.stop_reason, StopReason::ToolUse);
         assert_eq!(completion.message.tool_calls().count(), 1);
+    }
+
+    #[test]
+    fn builds_one_openai_tool_message_per_tool_result() {
+        let request = CompletionRequest {
+            system_prompt: None,
+            messages: vec![
+                Message {
+                    role: Role::Assistant,
+                    blocks: vec![
+                        ContentBlock::ToolCall(ToolCall {
+                            id: "call-1".into(),
+                            name: "Read".into(),
+                            arguments: json!({ "file_path": "a.txt" }),
+                        }),
+                        ContentBlock::ToolCall(ToolCall {
+                            id: "call-2".into(),
+                            name: "Read".into(),
+                            arguments: json!({ "file_path": "b.txt" }),
+                        }),
+                    ],
+                },
+                Message::tool_results(vec![
+                    ToolResult {
+                        tool_call_id: "call-1".into(),
+                        name: "Read".into(),
+                        content: json!({ "content": "a" }),
+                        is_error: false,
+                    },
+                    ToolResult {
+                        tool_call_id: "call-2".into(),
+                        name: "Read".into(),
+                        content: json!({ "content": "b" }),
+                        is_error: false,
+                    },
+                ]),
+            ],
+            tools: vec![ToolDefinition {
+                name: "Read".into(),
+                description: "Read file".into(),
+                input_schema: json!({ "type": "object" }),
+            }],
+        };
+        let config = OpenAIConfig {
+            api_key: "key".into(),
+            model: "gpt-4".into(),
+            base_url: "https://api.openai.com".into(),
+        };
+
+        let body = openai_request_from_completion(&request, &config);
+        let tool_messages = body
+            .messages
+            .iter()
+            .filter(|message| message.role == "tool")
+            .collect::<Vec<_>>();
+        assert_eq!(tool_messages.len(), 2);
+        assert_eq!(tool_messages[0].tool_call_id.as_deref(), Some("call-1"));
+        assert_eq!(tool_messages[1].tool_call_id.as_deref(), Some("call-2"));
     }
 }

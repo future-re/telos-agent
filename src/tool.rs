@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 
 use crate::error::AgentError;
@@ -59,6 +60,22 @@ pub struct ToolProgress {
     pub data: Option<Value>,
 }
 
+/// Metadata captured when a file is read through the built-in `Read` tool.
+///
+/// Mutating file tools use this to reject stale writes: if the file changed
+/// after the model read it, the model must read it again before editing.
+#[derive(Debug, Clone)]
+pub struct FileReadRecord {
+    pub content: String,
+    pub timestamp_ms: u128,
+    pub is_partial_view: bool,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+}
+
+/// Shared per-session file-read cache.
+pub type FileReadState = Arc<Mutex<HashMap<PathBuf, FileReadRecord>>>;
+
 /// How a tool should respond when an interruption is requested.
 ///
 /// Currently informational — used by hosts that implement Ctrl-C-style cancel.
@@ -99,6 +116,8 @@ pub struct ToolContext {
     pub messages: Vec<Message>,
     /// Channel for emitting [`ToolProgress`] events while the tool runs.
     pub progress: Option<mpsc::UnboundedSender<ToolProgress>>,
+    /// Per-session file-read cache used by filesystem tools to prevent stale writes.
+    pub read_file_state: FileReadState,
 }
 
 /// A tool that can be invoked by the agent.
@@ -109,6 +128,14 @@ pub struct ToolContext {
 pub trait Tool: Send + Sync {
     /// Describe the tool's name, prose description, and JSON-schema input.
     fn definition(&self) -> ToolDefinition;
+
+    /// Backwards-compatible alternate names accepted by the runtime.
+    ///
+    /// Aliases are *not* sent to the model; they only let older transcripts or
+    /// callers invoke renamed tools.
+    fn aliases(&self) -> &'static [&'static str] {
+        &[]
+    }
 
     /// Validate raw arguments before the permission check runs.
     ///
@@ -158,6 +185,7 @@ pub trait Tool: Send + Sync {
 #[derive(Default, Clone)]
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
+    canonical_names: Vec<String>,
 }
 
 impl ToolRegistry {
@@ -171,14 +199,26 @@ impl ToolRegistry {
         T: Tool + 'static,
     {
         let definition = tool.definition();
-        self.tools.insert(definition.name.clone(), Arc::new(tool));
+        let name = definition.name.clone();
+        let aliases = tool.aliases();
+        let tool = Arc::new(tool);
+        self.tools.insert(name.clone(), tool.clone());
+        self.canonical_names.push(name);
+        for alias in aliases {
+            self.tools.insert((*alias).to_string(), tool.clone());
+        }
     }
 
     /// Collect [`ToolDefinition`]s for every registered tool — sent to the provider on each turn.
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         self.tools
-            .values()
-            .map(|tool| tool.definition())
+            .iter()
+            .filter(|(name, _)| {
+                self.canonical_names
+                    .iter()
+                    .any(|canonical| canonical == *name)
+            })
+            .map(|(_, tool)| tool.definition())
             .collect::<Vec<_>>()
     }
 

@@ -14,6 +14,7 @@ use async_stream::try_stream;
 use futures_core::stream::Stream;
 use futures_util::StreamExt;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -25,6 +26,7 @@ use crate::hooks::{HookContext, HookPhase};
 use crate::message::{ContentBlock, Message, Role, TextBlock};
 use crate::provider::{CompletionRequest, ModelProvider, ProviderEvent, StopReason, TokenUsage};
 use crate::storage::Storage;
+use crate::tool::FileReadState;
 use crate::tool::ToolRegistry;
 
 /// Monotonic counter used to mint unique session identifiers within a process.
@@ -61,18 +63,13 @@ pub enum TurnEvent {
         output_tokens: usize,
     },
     /// Incremental text fragment streamed from the assistant.
-    AssistantDelta {
-        text: String,
-    },
+    AssistantDelta { text: String },
     /// The full user message that was just appended to the conversation.
     User(Message),
     /// A completed assistant message (either model output or hook-emitted).
     Assistant(Message),
     /// A tool call has begun executing.
-    ToolCall {
-        tool_call_id: String,
-        name: String,
-    },
+    ToolCall { tool_call_id: String, name: String },
     /// Progress update emitted from inside a long-running tool.
     ToolProgress {
         tool_call_id: Option<String>,
@@ -89,13 +86,9 @@ pub enum TurnEvent {
     /// The aggregated tool-result message appended to the conversation.
     ToolResult(Message),
     /// A compaction pass is starting; `reason` identifies which threshold tripped.
-    CompactionStarted {
-        reason: String,
-    },
+    CompactionStarted { reason: String },
     /// A compaction pass finished.
-    CompactionCompleted {
-        reason: String,
-    },
+    CompactionCompleted { reason: String },
     /// Estimated request size exceeded [`TokenBudget::max_tokens`](crate::TokenBudget::max_tokens);
     /// the turn ends without calling the model.
     TokenBudgetExceeded {
@@ -103,10 +96,7 @@ pub enum TurnEvent {
         max_tokens: usize,
     },
     /// A registered hook is starting.
-    HookStarted {
-        phase: &'static str,
-        name: String,
-    },
+    HookStarted { phase: &'static str, name: String },
     /// A registered hook finished; `emitted_message` is `true` if it appended a follow-up.
     HookCompleted {
         phase: &'static str,
@@ -141,6 +131,8 @@ pub struct AgentSession {
     next_turn_id: u64,
     /// Full conversation, including the optional leading system prompt.
     messages: Vec<Message>,
+    /// Shared state used by filesystem tools to reject stale writes.
+    read_file_state: FileReadState,
 }
 
 impl AgentSession {
@@ -160,6 +152,7 @@ impl AgentSession {
             ),
             next_turn_id: 1,
             messages,
+            read_file_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -178,6 +171,7 @@ impl AgentSession {
         self.messages
             .retain(|message| message.role == crate::message::Role::System);
         self.next_turn_id = 1;
+        self.read_file_state = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     }
 
     /// Persist the conversation if a [`Storage`] backend is configured.
@@ -229,6 +223,7 @@ impl AgentSession {
             session_id,
             next_turn_id: 1,
             messages,
+            read_file_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         })
     }
 
@@ -397,7 +392,8 @@ impl AgentSession {
                     };
                 }
 
-                if stop_reason != StopReason::ToolUse {
+                let tool_calls = assistant_message.tool_calls().cloned().collect::<Vec<_>>();
+                if tool_calls.is_empty() {
                     // No tool calls pending — run Stop hooks and end the turn.
                     for hook in self.config.hooks.hooks_for_phase(HookPhase::Stop) {
                         yield TurnEvent::HookStarted {
@@ -424,16 +420,6 @@ impl AgentSession {
                     break;
                 }
 
-                let tool_calls = assistant_message.tool_calls().cloned().collect::<Vec<_>>();
-                if tool_calls.is_empty() {
-                    // Defensive: provider claimed tool_use but emitted no calls.
-                    yield TurnEvent::TurnFinished {
-                        stop_reason,
-                        final_text: assistant_message.text_content(),
-                    };
-                    break;
-                }
-
                 // Execute the requested tool calls. The executor batches
                 // concurrency-safe tools and interleaves progress events with
                 // result events.
@@ -444,6 +430,7 @@ impl AgentSession {
                     &self.session_id,
                     turn_id,
                     self.messages.clone(),
+                    self.read_file_state.clone(),
                 ));
                 let mut tool_results = Vec::new();
                 while let Some(item) = execution.next().await {

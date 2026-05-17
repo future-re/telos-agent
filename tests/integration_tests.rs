@@ -35,6 +35,10 @@ impl Tool for AddTool {
         }
     }
 
+    fn aliases(&self) -> &'static [&'static str] {
+        &["legacy_add"]
+    }
+
     async fn invoke(
         &self,
         arguments: Value,
@@ -105,6 +109,47 @@ fn multi_step_tool_loop_completes() {
         assert_eq!(result.stop_reason, StopReason::EndTurn);
         assert!(result.events.len() >= 11);
         assert_eq!(session.messages().len(), 5);
+    });
+}
+
+#[test]
+fn tool_calls_continue_even_when_stop_reason_is_end_turn() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "add".into(),
+                        arguments: json!({ "a": 4, "b": 6 }),
+                    })],
+                },
+                // Some providers/proxies get this wrong. The runtime should
+                // follow the actual assistant content blocks.
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("The answer is 10."),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+
+        let mut tools = ToolRegistry::new();
+        tools.register(AddTool);
+        let mut session = AgentSession::new(AgentConfig::default());
+
+        let result = session.run_turn(&provider, &tools, "add").await.unwrap();
+        assert_eq!(result.final_message.text_content(), "The answer is 10.");
+        assert!(
+            result
+                .events
+                .iter()
+                .any(|event| matches!(event, TurnEvent::ToolResult(_)))
+        );
     });
 }
 
@@ -565,6 +610,53 @@ fn permission_engine_allows_tool() {
 }
 
 #[test]
+fn permission_engine_matches_tool_aliases_with_last_rule_wins() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::deny_tool("*"));
+        engine.add_rule(PermissionRule::allow_tool("legacy_add"));
+
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "add".into(),
+                        arguments: json!({ "a": 1, "b": 2 }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("done"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+        let mut tools = ToolRegistry::new();
+        tools.register(AddTool);
+
+        let mut session = AgentSession::new(AgentConfig {
+            permission_engine: Some(engine),
+            ..AgentConfig::default()
+        });
+        let result = session.run_turn(&provider, &tools, "add").await.unwrap();
+        let tool_result = result
+            .events
+            .iter()
+            .find_map(|event| match event {
+                TurnEvent::ToolResult(_) => Some(event),
+                _ => None,
+            })
+            .unwrap();
+        assert!(tool_result.text().contains("\"sum\":3"));
+    });
+}
+
+#[test]
 fn summary_compaction_triggers_when_over_budget() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
@@ -702,6 +794,178 @@ fn builtin_file_read_tool_returns_file_contents() {
             .unwrap();
         assert!(tool_result.text().contains("1: alpha"));
         assert!(tool_result.text().contains("2: beta"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
+fn core_tools_expose_claude_names_and_accept_legacy_aliases() {
+    let mut tools = ToolRegistry::new();
+    register_core_tools(&mut tools);
+
+    let names = tools
+        .definitions()
+        .into_iter()
+        .map(|definition| definition.name)
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"Bash".to_string()));
+    assert!(names.contains(&"Read".to_string()));
+    assert!(names.contains(&"Edit".to_string()));
+    assert!(names.contains(&"Write".to_string()));
+    assert!(!names.contains(&"shell".to_string()));
+    assert!(tools.get("shell").is_ok());
+    assert!(tools.get("file_read").is_ok());
+}
+
+#[test]
+fn edit_requires_prior_full_read() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let dir = std::env::temp_dir().join(format!(
+            "tiny-agent-edit-read-required-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("sample.txt"), "alpha\nbeta\n").unwrap();
+
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "Edit".into(),
+                        arguments: json!({
+                            "file_path": "sample.txt",
+                            "old_string": "beta",
+                            "new_string": "gamma"
+                        }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("done"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+        let mut tools = ToolRegistry::new();
+        register_core_tools(&mut tools);
+        let mut session = AgentSession::new(AgentConfig {
+            cwd: dir.clone(),
+            permission_engine: Some({
+                let mut engine = PermissionEngine::new();
+                engine.add_rule(PermissionRule::allow_tool("Edit"));
+                engine
+            }),
+            ..AgentConfig::default()
+        });
+
+        let result = session.run_turn(&provider, &tools, "edit").await.unwrap();
+        let tool_result = result
+            .events
+            .iter()
+            .find_map(|event| match event {
+                TurnEvent::ToolResult(_) => Some(event.text()),
+                _ => None,
+            })
+            .unwrap();
+        assert!(tool_result.contains("File has not been read yet"));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("sample.txt")).unwrap(),
+            "alpha\nbeta\n"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    });
+}
+
+#[test]
+fn edit_rejects_stale_file_after_read() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let dir =
+            std::env::temp_dir().join(format!("tiny-agent-edit-stale-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("sample.txt");
+        std::fs::write(&file, "alpha\nbeta\n").unwrap();
+
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "Read".into(),
+                        arguments: json!({ "file_path": "sample.txt" }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-2".into(),
+                        name: "Edit".into(),
+                        arguments: json!({
+                            "file_path": "sample.txt",
+                            "old_string": "beta",
+                            "new_string": "gamma"
+                        }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("done"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+        let mut tools = ToolRegistry::new();
+        register_core_tools(&mut tools);
+        let mut session = AgentSession::new(AgentConfig {
+            cwd: dir.clone(),
+            permission_engine: Some({
+                let mut engine = PermissionEngine::new();
+                engine.add_rule(PermissionRule::allow_tool("Edit"));
+                engine
+            }),
+            ..AgentConfig::default()
+        });
+
+        let mut stream = Box::pin(session.run_turn_stream(&provider, &tools, "read then edit"));
+        let mut saw_read_result = false;
+        let mut saw_stale_error = false;
+        while let Some(event) = stream.next().await {
+            let event = event.unwrap();
+            if matches!(event, TurnEvent::ToolResult(_)) && !saw_read_result {
+                saw_read_result = true;
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                std::fs::write(&file, "alpha\nuser change\n").unwrap();
+            } else if let TurnEvent::ToolResult(message) = event {
+                saw_stale_error = message.tool_results_iter().any(|result| {
+                    result
+                        .content
+                        .to_string()
+                        .contains("File has been modified since read")
+                });
+            }
+        }
+
+        assert!(saw_stale_error);
+        assert_eq!(
+            std::fs::read_to_string(file).unwrap(),
+            "alpha\nuser change\n"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     });

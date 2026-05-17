@@ -1,4 +1,4 @@
-//! `shell` tool — run an arbitrary shell command in the workspace cwd.
+//! `Bash` tool — run an arbitrary shell command in the workspace cwd.
 //!
 //! Permission policy: commands that look obviously read-only (see
 //! [`is_obviously_read_only_command`]) are auto-approved; everything else
@@ -7,11 +7,12 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use tokio::process::Command;
+use tokio::time::{Duration, timeout};
 
 use crate::error::AgentError;
 use crate::tool::{PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput};
 
-use super::{is_obviously_read_only_command, required_string};
+use super::{is_obviously_read_only_command, optional_usize_any, required_string};
 
 /// Built-in shell tool. Spawns `sh -c <command>` inside the workspace.
 pub struct ShellTool;
@@ -20,16 +21,22 @@ pub struct ShellTool;
 impl Tool for ShellTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
-            name: "shell".into(),
-            description: "Run a shell command in the current working directory.".into(),
+            name: "Bash".into(),
+            description: "Run a bash command in the current working directory. Prefer Read/Edit/Write/Glob/Grep for file operations.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "command": { "type": "string" }
+                    "command": { "type": "string" },
+                    "description": { "type": "string" },
+                    "timeout_ms": { "type": "integer", "description": "Maximum runtime in milliseconds. Defaults to 120000." }
                 },
                 "required": ["command"]
             }),
         }
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &["shell"]
     }
 
     async fn validate(&self, arguments: &Value, _context: &ToolContext) -> Result<(), AgentError> {
@@ -57,6 +64,16 @@ impl Tool for ShellTool {
         context: ToolContext,
     ) -> Result<ToolOutput, AgentError> {
         let command = required_string(&arguments, "command")?;
+        let timeout_ms = optional_usize_any(&arguments, &["timeout_ms"])
+            .unwrap_or(120_000)
+            .max(1) as u64;
+        if let Some(tx) = &context.progress {
+            let _ = tx.send(crate::tool::ToolProgress {
+                tool_call_id: None,
+                message: format!("running command with {timeout_ms}ms timeout"),
+                data: Some(json!({ "command": command, "timeout_ms": timeout_ms })),
+            });
+        }
         let mut child = Command::new("sh");
         child
             .arg("-c")
@@ -67,22 +84,45 @@ impl Tool for ShellTool {
             // alter behaviour (PROMPT_COMMAND, etc.).
             .env_remove("ENV")
             .env_remove("BASH_ENV");
-        let output = child
-            .output()
+        child.kill_on_drop(true);
+        let output = timeout(Duration::from_millis(timeout_ms), child.output())
             .await
+            .map_err(|_| AgentError::ToolExecution {
+                tool: "Bash".into(),
+                message: format!("Command timed out after {timeout_ms}ms"),
+            })?
             .map_err(|err| AgentError::ToolExecution {
-                tool: "shell".into(),
+                tool: "Bash".into(),
                 message: err.to_string(),
             })?;
 
-        // We don't translate non-zero exit codes into errors — many shell
-        // utilities use them for control flow, and the model can read the
-        // status code from the JSON payload.
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if !output.status.success() {
+            return Err(AgentError::ToolExecution {
+                tool: "Bash".into(),
+                message: format!(
+                    "Command failed with exit code {:?}\nstdout:\n{}\nstderr:\n{}",
+                    output.status.code(),
+                    trim_large_output(&stdout),
+                    trim_large_output(&stderr)
+                ),
+            });
+        }
         Ok(ToolOutput::json(json!({
             "status": output.status.code(),
             "success": output.status.success(),
-            "stdout": String::from_utf8_lossy(&output.stdout),
-            "stderr": String::from_utf8_lossy(&output.stderr),
+            "stdout": trim_large_output(&stdout),
+            "stderr": trim_large_output(&stderr),
         })))
     }
+}
+
+fn trim_large_output(output: &str) -> String {
+    const MAX_CHARS: usize = 20_000;
+    if output.chars().count() <= MAX_CHARS {
+        return output.to_string();
+    }
+    let preview = output.chars().take(MAX_CHARS).collect::<String>();
+    format!("{preview}\n<truncated output after {MAX_CHARS} chars>")
 }

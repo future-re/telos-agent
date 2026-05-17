@@ -19,10 +19,7 @@ use crate::tool::{PermissionDecision, ToolContext, ToolProgress, ToolRegistry};
 #[derive(Debug, Clone)]
 pub enum ToolExecutionEvent {
     /// Emitted once when the tool starts (after permission, before `invoke`).
-    ToolStarted {
-        tool_call_id: String,
-        name: String,
-    },
+    ToolStarted { tool_call_id: String, name: String },
     /// Streaming progress update from inside the tool.
     ToolProgress {
         tool_call_id: Option<String>,
@@ -74,6 +71,7 @@ pub async fn execute_tool_calls(
     session_id: &str,
     turn_id: u64,
     messages: Vec<crate::message::Message>,
+    read_file_state: crate::tool::FileReadState,
 ) -> ToolExecutionOutput {
     let mut output = ToolExecutionOutput {
         events: Vec::new(),
@@ -91,6 +89,7 @@ pub async fn execute_tool_calls(
             env: config.env.clone(),
             messages: messages.clone(),
             progress: None,
+            read_file_state: read_file_state.clone(),
         };
         let concurrency_safe = tools
             .get(&call.name)
@@ -148,6 +147,7 @@ pub fn execute_tool_calls_stream<'a>(
     session_id: &'a str,
     turn_id: u64,
     messages: Vec<crate::message::Message>,
+    read_file_state: crate::tool::FileReadState,
 ) -> impl Stream<Item = ToolExecutionStreamItem> + 'a {
     stream! {
         // Batch identically to the non-streaming variant; see [`execute_tool_calls`] for the rationale.
@@ -160,6 +160,7 @@ pub fn execute_tool_calls_stream<'a>(
                 env: config.env.clone(),
                 messages: messages.clone(),
                 progress: None,
+                read_file_state: read_file_state.clone(),
             };
             let concurrency_safe = tools
                 .get(&call.name)
@@ -440,10 +441,19 @@ async fn invoke_existing_tool(
         Ok(()) => {
             // The global permission engine wins if it has a rule for this
             // call; otherwise we ask the tool itself.
-            let engine_decision = config
-                .permission_engine
-                .as_ref()
-                .and_then(|engine| engine.evaluate_call(&call.name, &call.arguments, &context.cwd));
+            let canonical_name = tool.definition().name;
+            let mut permission_names = vec![call.name.as_str()];
+            if canonical_name != call.name {
+                permission_names.push(canonical_name.as_str());
+            }
+            for &alias in tool.aliases() {
+                if !permission_names.contains(&alias) {
+                    permission_names.push(alias);
+                }
+            }
+            let engine_decision = config.permission_engine.as_ref().and_then(|engine| {
+                engine.evaluate_call_any(&permission_names, &call.arguments, &context.cwd)
+            });
             let permission = match engine_decision {
                 Some(RuleDecision::Allow) => Ok(PermissionDecision::Allow),
                 Some(RuleDecision::Deny) => Ok(PermissionDecision::Deny {

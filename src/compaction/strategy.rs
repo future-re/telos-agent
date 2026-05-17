@@ -1,9 +1,17 @@
+//! Context-level compaction: summarises old messages to keep token usage under budget.
+//!
+//! Implementations of [`CompactionStrategy`] decide *whether* and *how* to
+//! shorten the conversation. The default [`SummaryCompaction`] asks the model
+//! to produce a natural-language summary of older turns, then replaces those
+//! turns with a single synthetic system message.
+
 use async_trait::async_trait;
 
 use crate::error::AgentError;
 use crate::message::{ContentBlock, Message, Role};
 use crate::provider::{CompletionRequest, ModelProvider};
 
+/// Strategy for compacting conversation history when tokens exceed a budget.
 #[async_trait]
 pub trait CompactionStrategy: Send + Sync + std::fmt::Debug {
     /// Attempt to compact `messages` if they exceed a budget.
@@ -16,9 +24,12 @@ pub trait CompactionStrategy: Send + Sync + std::fmt::Debug {
     ) -> Result<bool, AgentError>;
 }
 
+/// Compacts by asking the model to summarise old messages, keeping the most recent N.
 #[derive(Debug)]
 pub struct SummaryCompaction {
+    /// Token ceiling — if estimated usage stays under this, no compaction happens.
     pub max_tokens: usize,
+    /// How many most-recent messages to keep verbatim. Everything older may be summarised.
     pub keep_recent: usize,
 }
 
@@ -38,6 +49,7 @@ impl CompactionStrategy for SummaryCompaction {
         messages: &mut Vec<Message>,
         provider: &dyn ModelProvider,
     ) -> Result<bool, AgentError> {
+        // Estimate tokens block-by-block — each block kind serialises differently.
         let total_tokens: usize = messages
             .iter()
             .map(|m| {
@@ -61,16 +73,20 @@ impl CompactionStrategy for SummaryCompaction {
             return Ok(false);
         }
 
+        // Preserve any leading system prompt — we splice the summary in *after* it.
         let system_idx = messages
             .iter()
             .position(|m| m.role == Role::System)
             .map(|i| i + 1)
             .unwrap_or(0);
 
+        // Split point: everything before this is summarised; everything after is kept.
+        // Clamp so we never summarise into (or past) the system prompt.
         let split_point = messages.len().saturating_sub(self.keep_recent);
         let split_point = split_point.max(system_idx);
 
         if split_point == 0 {
+            // Nothing to summarise — the whole history is "recent" already.
             return Ok(false);
         }
 
@@ -87,6 +103,8 @@ impl CompactionStrategy for SummaryCompaction {
         let response = provider.complete(summary_request).await?;
         let summary_text = response.message.text_content();
 
+        // Wrap the summary in an identifiable XML-ish tag so subsequent
+        // inspection can locate it without parsing the model's prose.
         let summary_msg = Message::system(format!(
             "<conversation_summary>\n{}\n</conversation_summary>",
             summary_text

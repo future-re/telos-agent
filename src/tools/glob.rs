@@ -1,3 +1,5 @@
+//! `glob` tool — list files matching a glob pattern under the workspace.
+
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
@@ -6,6 +8,7 @@ use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
 
 use super::{display_relative, required_string};
 
+/// Built-in glob tool. Read-only; safe to run concurrently.
 pub struct GlobTool;
 
 #[async_trait]
@@ -40,10 +43,12 @@ impl Tool for GlobTool {
         context: ToolContext,
     ) -> Result<ToolOutput, AgentError> {
         let pattern = required_string(&arguments, "pattern")?;
+        // Cap results so a pathological `**/*` doesn't dump millions of paths into the context.
         let max_results = arguments
             .get("max_results")
             .and_then(|value| value.as_u64())
             .unwrap_or(200) as usize;
+        // Anchor the pattern at cwd so the model can write relative globs.
         let full_pattern = context.cwd.join(pattern).to_string_lossy().to_string();
         let mut matches = Vec::new();
         for entry in
@@ -53,6 +58,7 @@ impl Tool for GlobTool {
                 break;
             }
             if let Ok(path) = entry {
+                // Display paths relative to cwd; absolute paths are noisy and leak the host layout.
                 matches.push(display_relative(&context.cwd, &path));
             }
         }

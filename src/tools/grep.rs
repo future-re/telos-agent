@@ -1,3 +1,9 @@
+//! `grep` tool — substring search over files matched by a glob.
+//!
+//! Matches are *literal* substring searches (no regex). For each hit we emit
+//! the path, 1-indexed line number, and the matched line — enough context for
+//! the model to follow up with [`FileReadTool`].
+
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
@@ -6,6 +12,7 @@ use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
 
 use super::{display_relative, required_string};
 
+/// Built-in grep tool. Read-only; safe to run concurrently.
 pub struct GrepTool;
 
 #[async_trait]
@@ -40,6 +47,7 @@ impl Tool for GrepTool {
         context: ToolContext,
     ) -> Result<ToolOutput, AgentError> {
         let pattern = required_string(&arguments, "pattern")?.to_string();
+        // Default to a recursive glob so plain "grep for X" works out of the box.
         let file_glob = arguments
             .get("glob")
             .and_then(|value| value.as_str())
@@ -62,6 +70,7 @@ impl Tool for GrepTool {
             if !path.is_file() {
                 continue;
             }
+            // Silently skip files we can't read as UTF-8 (binary, permissions, etc.).
             let Ok(content) = tokio::fs::read_to_string(&path).await else {
                 continue;
             };

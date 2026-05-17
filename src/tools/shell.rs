@@ -1,3 +1,9 @@
+//! `shell` tool — run an arbitrary shell command in the workspace cwd.
+//!
+//! Permission policy: commands that look obviously read-only (see
+//! [`is_obviously_read_only_command`]) are auto-approved; everything else
+//! requires host approval via [`PermissionDecision::Ask`].
+
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use tokio::process::Command;
@@ -7,6 +13,7 @@ use crate::tool::{PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOut
 
 use super::{is_obviously_read_only_command, required_string};
 
+/// Built-in shell tool. Spawns `sh -c <command>` inside the workspace.
 pub struct ShellTool;
 
 #[async_trait]
@@ -56,6 +63,8 @@ impl Tool for ShellTool {
             .arg(command)
             .current_dir(&context.cwd)
             .envs(context.env.iter())
+            // Strip startup scripts so the inherited env doesn't silently
+            // alter behaviour (PROMPT_COMMAND, etc.).
             .env_remove("ENV")
             .env_remove("BASH_ENV");
         let output = child
@@ -66,6 +75,9 @@ impl Tool for ShellTool {
                 message: err.to_string(),
             })?;
 
+        // We don't translate non-zero exit codes into errors — many shell
+        // utilities use them for control flow, and the model can read the
+        // status code from the JSON payload.
         Ok(ToolOutput::json(json!({
             "status": output.status.code(),
             "success": output.status.success(),

@@ -1,3 +1,15 @@
+//! Agent session and turn loop — the orchestration core of the crate.
+//!
+//! An [`AgentSession`] owns the conversation history and exposes two ways to
+//! run a turn:
+//! - [`AgentSession::run_turn_stream`] — yields [`TurnEvent`]s incrementally
+//!   for live UIs.
+//! - [`AgentSession::run_turn`] — collects the stream into a [`TurnResult`]
+//!   and persists the session afterwards.
+//!
+//! A turn is `(model → optional tool calls → model → …)` until the model
+//! stops or `max_iterations` is hit.
+
 use async_stream::try_stream;
 use futures_core::stream::Stream;
 use futures_util::StreamExt;
@@ -15,89 +27,125 @@ use crate::provider::{CompletionRequest, ModelProvider, ProviderEvent, StopReaso
 use crate::storage::Storage;
 use crate::tool::ToolRegistry;
 
+/// Monotonic counter used to mint unique session identifiers within a process.
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Streaming event emitted during a single turn of the agent loop.
+///
+/// Events are emitted in causal order — e.g. an [`AssistantDelta`](Self::AssistantDelta)
+/// for each streamed text fragment, then [`Assistant`](Self::Assistant) once
+/// the full message is materialised, then per-tool events if the model
+/// requested tool calls.
 #[derive(Debug, Clone, Serialize)]
 pub enum TurnEvent {
+    /// Fired exactly once at the start of a turn with the user's input.
     TurnStarted {
         session_id: String,
         turn_id: u64,
         user_input: String,
     },
+    /// Fired at the top of each model ⇄ tool iteration within the turn.
     IterationStarted {
         iteration: usize,
         message_count: usize,
     },
+    /// About to issue a completion request to the provider.
     ProviderRequest {
         iteration: usize,
         message_count: usize,
         tool_count: usize,
     },
+    /// Provider reported token usage for the just-finished iteration.
     ProviderUsage {
         input_tokens: usize,
         output_tokens: usize,
     },
+    /// Incremental text fragment streamed from the assistant.
     AssistantDelta {
         text: String,
     },
+    /// The full user message that was just appended to the conversation.
     User(Message),
+    /// A completed assistant message (either model output or hook-emitted).
     Assistant(Message),
+    /// A tool call has begun executing.
     ToolCall {
         tool_call_id: String,
         name: String,
     },
+    /// Progress update emitted from inside a long-running tool.
     ToolProgress {
         tool_call_id: Option<String>,
         name: String,
         message: String,
         data: Option<serde_json::Value>,
     },
+    /// A tool call finished (successfully or with an error).
     ToolCompleted {
         tool_call_id: String,
         name: String,
         is_error: bool,
     },
+    /// The aggregated tool-result message appended to the conversation.
     ToolResult(Message),
+    /// A compaction pass is starting; `reason` identifies which threshold tripped.
     CompactionStarted {
         reason: String,
     },
+    /// A compaction pass finished.
     CompactionCompleted {
         reason: String,
     },
+    /// Estimated request size exceeded [`TokenBudget::max_tokens`](crate::TokenBudget::max_tokens);
+    /// the turn ends without calling the model.
     TokenBudgetExceeded {
         used_tokens: usize,
         max_tokens: usize,
     },
+    /// A registered hook is starting.
     HookStarted {
         phase: &'static str,
         name: String,
     },
+    /// A registered hook finished; `emitted_message` is `true` if it appended a follow-up.
     HookCompleted {
         phase: &'static str,
         name: String,
         emitted_message: bool,
     },
+    /// Final event of a turn — the assistant produced an end-of-turn message.
     TurnFinished {
         stop_reason: StopReason,
         final_text: String,
     },
 }
 
+/// Collected result of a turn, returned by [`AgentSession::run_turn`].
 #[derive(Debug, Clone, Serialize)]
 pub struct TurnResult {
+    /// Every event emitted during the turn, in order.
     pub events: Vec<TurnEvent>,
+    /// The last assistant message seen (the answer the caller usually wants).
     pub final_message: Message,
+    /// Why the turn stopped — informational for callers.
     pub stop_reason: StopReason,
 }
 
+/// An agent session that maintains conversation state across turns.
+///
+/// Created via [`AgentSession::new`] or [`AgentSession::resume`].
 pub struct AgentSession {
     config: AgentConfig,
     session_id: String,
+    /// Monotonic counter; incremented at the start of each turn.
     next_turn_id: u64,
+    /// Full conversation, including the optional leading system prompt.
     messages: Vec<Message>,
 }
 
 impl AgentSession {
+    /// Start a fresh session. If `config.system_prompt` is set, it is appended
+    /// as the first message.
     pub fn new(config: AgentConfig) -> Self {
         let mut messages = Vec::new();
         if let Some(system_prompt) = config.system_prompt.as_ref() {
@@ -115,20 +163,24 @@ impl AgentSession {
         }
     }
 
+    /// Snapshot of the current conversation.
     pub fn messages(&self) -> &[Message] {
         &self.messages
     }
 
+    /// Unique identifier minted at construction (or supplied to [`resume`](Self::resume)).
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
 
+    /// Drop all non-system messages and reset the turn counter.
     pub fn reset(&mut self) {
         self.messages
             .retain(|message| message.role == crate::message::Role::System);
         self.next_turn_id = 1;
     }
 
+    /// Persist the conversation if a [`Storage`] backend is configured.
     pub async fn save(&self) -> Result<(), AgentError> {
         if let Some(storage) = &self.config.storage {
             storage
@@ -138,6 +190,11 @@ impl AgentSession {
         Ok(())
     }
 
+    /// Resume a previously persisted session from `storage`.
+    ///
+    /// If the loaded transcript has a different system prompt than `config`,
+    /// the config's prompt wins — the loaded one is overwritten so the session
+    /// behaves consistently across restarts.
     pub async fn resume(
         session_id: impl Into<String>,
         mut config: AgentConfig,
@@ -175,6 +232,11 @@ impl AgentSession {
         })
     }
 
+    /// Run one turn, yielding [`TurnEvent`]s as the turn progresses.
+    ///
+    /// The stream borrows `self` mutably so the conversation is updated in
+    /// place as events are produced. Errors abort the stream; partially
+    /// produced events up to that point are still observed by the consumer.
     pub fn run_turn_stream<'a, P: ModelProvider + 'a>(
         &'a mut self,
         provider: &'a P,
@@ -213,6 +275,10 @@ impl AgentSession {
                     tool_count: tool_definitions.len(),
                 };
 
+                // Two compaction passes:
+                // 1. Token-budget compaction — fires early (at compact_at_tokens) so the
+                //    model never sees a request that exceeds the hard limit.
+                // 2. General compaction — an optional second strategy (e.g. char-based).
                 if let Some(budget) = self.config.token_budget {
                     let estimated_tokens = estimate_message_tokens(&self.messages, provider);
                     if estimated_tokens > budget.max_tokens {
@@ -257,6 +323,8 @@ impl AgentSession {
                         messages: self.messages.clone(),
                         tools: tool_definitions,
                     };
+                    // Drive the provider stream to completion, accumulating
+                    // text and tool-call blocks into a single assistant message.
                     let mut stream = Box::pin(provider.stream_complete(request));
                     let mut blocks = Vec::new();
                     let mut stop_reason = StopReason::EndTurn;
@@ -306,6 +374,9 @@ impl AgentSession {
                     message_count: self.messages.len(),
                 };
 
+                // Run PostSampling hooks every iteration — including iterations
+                // that end with a tool call. Each hook may emit an extra
+                // message that gets appended to the conversation.
                 for hook in self.config.hooks.hooks_for_phase(HookPhase::PostSampling) {
                     yield TurnEvent::HookStarted {
                         phase: "post_sampling",
@@ -325,6 +396,7 @@ impl AgentSession {
                 }
 
                 if stop_reason != StopReason::ToolUse {
+                    // No tool calls pending — run Stop hooks and end the turn.
                     for hook in self.config.hooks.hooks_for_phase(HookPhase::Stop) {
                         yield TurnEvent::HookStarted {
                             phase: "stop",
@@ -352,6 +424,7 @@ impl AgentSession {
 
                 let tool_calls = assistant_message.tool_calls().cloned().collect::<Vec<_>>();
                 if tool_calls.is_empty() {
+                    // Defensive: provider claimed tool_use but emitted no calls.
                     yield TurnEvent::TurnFinished {
                         stop_reason,
                         final_text: assistant_message.text_content(),
@@ -359,6 +432,9 @@ impl AgentSession {
                     break;
                 }
 
+                // Execute the requested tool calls. The executor batches
+                // concurrency-safe tools and interleaves progress events with
+                // result events.
                 let mut execution = Box::pin(execute_tool_calls_stream(
                     tool_calls,
                     tools,
@@ -407,6 +483,9 @@ impl AgentSession {
                     }
                 }
 
+                // Bundle every tool result into a single tool-role message so
+                // the next iteration sees them all at once. Truncate any
+                // oversized payloads first so the model isn't drowned.
                 let tool_message = Message::tool_results(tool_results);
                 let compaction_config = CompactionConfig {
                     max_tool_result_chars: self.config.max_tool_result_chars,
@@ -426,6 +505,9 @@ impl AgentSession {
         }
     }
 
+    /// Run one turn to completion and return the collected events plus the
+    /// final message. Persists the session to [`Storage`] (if configured)
+    /// before returning.
     pub async fn run_turn<P: ModelProvider>(
         &mut self,
         provider: &P,
@@ -466,6 +548,10 @@ impl AgentSession {
 }
 
 impl TurnEvent {
+    /// Return the [`Message`] carried by this event, or panic.
+    ///
+    /// Only call on variants known to carry a message — i.e. [`User`](TurnEvent::User),
+    /// [`Assistant`](TurnEvent::Assistant), [`ToolResult`](TurnEvent::ToolResult).
     pub fn message(&self) -> &Message {
         match self {
             TurnEvent::User(message)
@@ -475,6 +561,7 @@ impl TurnEvent {
         }
     }
 
+    /// Human-readable one-line summary of the event — useful for trace logs / CLIs.
     pub fn text(&self) -> String {
         match self {
             TurnEvent::TurnStarted {
@@ -562,6 +649,10 @@ impl TurnEvent {
     }
 }
 
+/// Sum estimated token counts across every block in `messages`.
+///
+/// Used by the turn loop to decide whether to invoke compaction or abort the
+/// turn before issuing a request the model can't accept.
 fn estimate_message_tokens(messages: &[Message], provider: &dyn ModelProvider) -> usize {
     messages
         .iter()

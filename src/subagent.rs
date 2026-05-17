@@ -1,3 +1,11 @@
+//! In-process subagent tool — runs a nested [`AgentSession`] as a tool call.
+//!
+//! Useful when the parent agent wants to delegate a self-contained sub-task
+//! (e.g. "summarise these files") to an isolated agent that has its own turn
+//! loop, its own message history, and its own iteration cap. The subagent
+//! shares the parent's tool registry and model provider but starts with a
+//! fresh conversation.
+
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde_json::{Value, json};
@@ -11,6 +19,7 @@ use crate::tool::{
     PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
 };
 
+/// Tool that delegates to a nested agent session.
 pub struct SubagentTool {
     provider: Arc<dyn ModelProvider>,
     tools: ToolRegistry,
@@ -73,6 +82,9 @@ impl Tool for SubagentTool {
             .and_then(|value| value.as_str())
             .ok_or_else(|| AgentError::Validation("missing string `prompt`".into()))?;
 
+        // Clone the parent config and override the runtime-specific bits.
+        // Storage is disabled because the subagent is ephemeral; permissions
+        // are forwarded so the nested run still honours global rules.
         let mut config = self.config.clone();
         config.cwd = context.cwd;
         config.env = context.env;
@@ -99,6 +111,8 @@ impl Tool for SubagentTool {
                 Box::pin(session.run_turn_stream(&provider, &self.tools, prompt.to_string()));
             while let Some(event) = stream.next().await {
                 let event = event?;
+                // Forward a coarse-grained progress message to the parent's
+                // tool-progress channel so callers can show "subagent is doing X".
                 if let Some(progress) = progress_summary(&event) {
                     if let Some(tx) = &context.progress {
                         let _ = tx.send(crate::tool::ToolProgress {
@@ -112,6 +126,7 @@ impl Tool for SubagentTool {
             }
         }
 
+        // The subagent's "answer" is the most recent assistant message.
         let final_text = session
             .messages()
             .iter()
@@ -128,6 +143,9 @@ impl Tool for SubagentTool {
     }
 }
 
+/// Newtype wrapper that implements [`ModelProvider`] by delegating to an `Arc`.
+///
+/// Needed because `run_turn_stream` requires `&P` where `P: ModelProvider`, but we only have `Arc<dyn ModelProvider>`.
 struct SharedProvider(Arc<dyn ModelProvider>);
 
 #[async_trait]
@@ -150,6 +168,8 @@ impl ModelProvider for SharedProvider {
     }
 }
 
+/// Translate a subset of subagent events into human-readable progress strings
+/// for the parent agent to surface.
 fn progress_summary(event: &TurnEvent) -> Option<String> {
     match event {
         TurnEvent::ProviderRequest { iteration, .. } => {

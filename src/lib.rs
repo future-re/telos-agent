@@ -1,3 +1,14 @@
+//! Tiny Agent Core — a lightweight, provider-agnostic agent runtime.
+//!
+//! The crate provides:
+//! - [`AgentSession`] — the main turn loop (model → tools → model)
+//! - [`Tool`] trait and [`ToolRegistry`] — pluggable tool system
+//! - [`ModelProvider`] trait — pluggable LLM backends (Anthropic, OpenAI)
+//! - [`Hook`] system — intercept assistant messages (post-sampling, stop)
+//! - Context compaction — token-budget-aware summarization
+//! - Permission engine — rule-based tool allow/deny
+//! - JSONL session storage — save/resume agent state
+
 pub mod compaction;
 pub mod config;
 pub mod error;

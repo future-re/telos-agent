@@ -1,3 +1,9 @@
+//! Anthropic Messages API provider.
+//!
+//! Speaks the `/v1/messages` REST endpoint and its SSE streaming variant.
+//! Translates [`Message`]s and [`ToolDefinition`]s to/from Anthropic's
+//! `content blocks` wire format.
+
 use async_stream::try_stream;
 use async_trait::async_trait;
 use futures_core::stream::Stream;
@@ -12,16 +18,20 @@ use crate::provider::{
     CompletionRequest, CompletionResponse, ModelProvider, ProviderEvent, StopReason, TokenUsage,
 };
 
+/// Configuration for [`AnthropicProvider`].
 #[derive(Debug, Clone)]
 pub struct AnthropicConfig {
     pub api_key: String,
     pub model: String,
+    /// `max_tokens` parameter required by the Messages API (caps response size).
     pub max_tokens: u32,
     pub base_url: String,
+    /// Value of the `anthropic-version` header; pinning protects against breaking-change rollouts.
     pub anthropic_version: String,
 }
 
 impl AnthropicConfig {
+    /// Build a config from `ANTHROPIC_API_KEY` and the given model / token cap.
     pub fn from_env(model: impl Into<String>, max_tokens: u32) -> Result<Self, AgentError> {
         let api_key = std::env::var("ANTHROPIC_API_KEY")
             .map_err(|_| AgentError::Config("missing ANTHROPIC_API_KEY".into()))?;
@@ -36,6 +46,7 @@ impl AnthropicConfig {
     }
 }
 
+/// [`ModelProvider`] implementation backed by Anthropic's Messages API.
 pub struct AnthropicProvider {
     client: Client,
     config: AnthropicConfig,
@@ -49,6 +60,7 @@ impl AnthropicProvider {
         }
     }
 
+    /// Full URL for the `/v1/messages` endpoint, with a trailing slash on `base_url` tolerated.
     fn endpoint(&self) -> String {
         format!("{}/v1/messages", self.config.base_url.trim_end_matches('/'))
     }
@@ -94,6 +106,8 @@ impl ModelProvider for AnthropicProvider {
         request: CompletionRequest,
     ) -> std::pin::Pin<Box<dyn Stream<Item = Result<ProviderEvent, AgentError>> + Send + 'a>> {
         Box::pin(try_stream! {
+            // Re-serialise the base request body and flip `stream: true` so the
+            // server returns SSE instead of a single JSON document.
             let mut body = serde_json::to_value(anthropic_request_from_completion(&request, &self.config))
                 .map_err(|err| AgentError::Provider(format!("invalid anthropic stream request: {err}")))?;
             body["stream"] = Value::Bool(true);
@@ -118,6 +132,8 @@ impl ModelProvider for AnthropicProvider {
             } else {
                 yield ProviderEvent::MessageStart;
                 let mut sse = crate::provider::sse_data_stream(response);
+                // Anthropic streams tool inputs as a series of `input_json_delta`
+                // events — accumulate them here until the matching `content_block_stop`.
                 let mut current_tool: Option<StreamingAnthropicToolCall> = None;
                 let mut usage = TokenUsage::default();
                 let mut stop_reason = StopReason::EndTurn;
@@ -145,6 +161,7 @@ impl ModelProvider for AnthropicProvider {
                                         }
                                     }
                                     "tool_use" => {
+                                        // Begin buffering a tool call; its JSON arguments stream in via deltas.
                                         current_tool = Some(StreamingAnthropicToolCall {
                                             id: block.id.unwrap_or_default(),
                                             name: block.name.unwrap_or_default(),
@@ -173,6 +190,7 @@ impl ModelProvider for AnthropicProvider {
                             }
                         }
                         "content_block_stop" => {
+                            // Flush the buffered tool call (if any) once the block ends.
                             if let Some(tool) = current_tool.take() {
                                 let arguments = if tool.json_input.trim().is_empty() {
                                     json!({})
@@ -226,6 +244,7 @@ impl ModelProvider for AnthropicProvider {
 struct StreamingAnthropicToolCall {
     id: String,
     name: String,
+    /// Raw JSON-encoded arguments accumulated from `input_json_delta` events.
     json_input: String,
 }
 
@@ -339,6 +358,7 @@ struct AnthropicUsage {
     output_tokens: usize,
 }
 
+/// Build the `/v1/messages` request body from a generic [`CompletionRequest`].
 fn anthropic_request_from_completion(
     request: &CompletionRequest,
     config: &AnthropicConfig,
@@ -368,6 +388,12 @@ fn anthropic_request_from_completion(
     }
 }
 
+/// Convert one of our [`Message`]s to Anthropic's role/content shape.
+///
+/// System messages are dropped here because Anthropic accepts the system
+/// prompt as a top-level field on the request body (see [`AnthropicRequestBody`]).
+/// Tool-role messages are folded back into a `user` message containing only
+/// `tool_result` blocks, per Anthropic's wire format.
 fn message_to_anthropic(message: &Message) -> Option<AnthropicMessage> {
     match message.role {
         Role::System => None,
@@ -432,6 +458,7 @@ fn tool_result_blocks_for_anthropic(message: &Message) -> Vec<AnthropicContentBl
         .collect()
 }
 
+/// Translate Anthropic's response into the crate-level [`CompletionResponse`].
 fn anthropic_response_to_completion(
     response: AnthropicMessageResponse,
 ) -> Result<CompletionResponse, AgentError> {

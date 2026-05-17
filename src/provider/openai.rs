@@ -1,3 +1,9 @@
+//! OpenAI Chat Completions API provider.
+//!
+//! Speaks `/v1/chat/completions` and its SSE streaming variant. Compatible
+//! with any service that implements the same wire format (Azure OpenAI,
+//! together.ai, Groq, etc.) — override `base_url` to point elsewhere.
+
 use async_stream::try_stream;
 use async_trait::async_trait;
 use futures_core::stream::Stream;
@@ -12,14 +18,17 @@ use crate::provider::{
     CompletionRequest, CompletionResponse, ModelProvider, ProviderEvent, StopReason, TokenUsage,
 };
 
+/// Configuration for [`OpenAIProvider`].
 #[derive(Debug, Clone)]
 pub struct OpenAIConfig {
     pub api_key: String,
     pub model: String,
+    /// Base URL — override to talk to an OpenAI-compatible service.
     pub base_url: String,
 }
 
 impl OpenAIConfig {
+    /// Build a config from `OPENAI_API_KEY` and the given model.
     pub fn from_env(model: impl Into<String>) -> Result<Self, AgentError> {
         let api_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| AgentError::Config("missing OPENAI_API_KEY".into()))?;
@@ -32,6 +41,7 @@ impl OpenAIConfig {
     }
 }
 
+/// [`ModelProvider`] implementation backed by OpenAI's Chat Completions API.
 pub struct OpenAIProvider {
     client: Client,
     config: OpenAIConfig,
@@ -45,6 +55,7 @@ impl OpenAIProvider {
         }
     }
 
+    /// Full URL for the `/v1/chat/completions` endpoint.
     fn endpoint(&self) -> String {
         format!(
             "{}/v1/chat/completions",
@@ -92,6 +103,8 @@ impl ModelProvider for OpenAIProvider {
         request: CompletionRequest,
     ) -> std::pin::Pin<Box<dyn Stream<Item = Result<ProviderEvent, AgentError>> + Send + 'a>> {
         Box::pin(try_stream! {
+            // Re-serialise the base request body, flip `stream: true`, and ask
+            // for usage stats on the final chunk (otherwise we'd get none).
             let mut body = serde_json::to_value(openai_request_from_completion(&request, &self.config))
                 .map_err(|err| AgentError::Provider(format!("invalid openai stream request: {err}")))?;
             body["stream"] = Value::Bool(true);
@@ -116,6 +129,8 @@ impl ModelProvider for OpenAIProvider {
             } else {
                 yield ProviderEvent::MessageStart;
                 let mut sse = crate::provider::sse_data_stream(response);
+                // OpenAI streams tool calls in indexed deltas — the same call's
+                // fragments share an `index`, so we accumulate them positionally.
                 let mut tool_calls: Vec<StreamingOpenAIToolCall> = Vec::new();
                 let mut stop_reason = StopReason::EndTurn;
                 let mut usage = None;
@@ -139,6 +154,7 @@ impl ModelProvider for OpenAIProvider {
                         if let Some(delta_tool_calls) = choice.delta.tool_calls {
                             for delta_call in delta_tool_calls {
                                 let index = delta_call.index;
+                                // Grow the buffer so `index` is addressable.
                                 while tool_calls.len() <= index {
                                     tool_calls.push(StreamingOpenAIToolCall::default());
                                 }
@@ -151,6 +167,7 @@ impl ModelProvider for OpenAIProvider {
                                         aggregate.name = name;
                                     }
                                     if let Some(arguments) = function.arguments {
+                                        // Arguments come in as partial JSON strings — concat them.
                                         aggregate.arguments.push_str(&arguments);
                                     }
                                 }
@@ -166,6 +183,7 @@ impl ModelProvider for OpenAIProvider {
                     }
                 }
 
+                // SSE stream finished — flush every fully-assembled tool call.
                 for call in tool_calls {
                     if call.id.is_empty() && call.name.is_empty() {
                         continue;
@@ -197,10 +215,12 @@ impl ModelProvider for OpenAIProvider {
     }
 }
 
+/// Scratch state for an in-flight tool call assembled from streaming deltas.
 #[derive(Debug, Default)]
 struct StreamingOpenAIToolCall {
     id: String,
     name: String,
+    /// Raw JSON-encoded arguments concatenated across `arguments` deltas.
     arguments: String,
 }
 
@@ -309,6 +329,10 @@ struct OpenAIChoice {
     finish_reason: Option<String>,
 }
 
+/// Build the `/v1/chat/completions` request body from a generic [`CompletionRequest`].
+///
+/// OpenAI represents the system prompt as a regular message; prepend it here
+/// rather than passing it separately like Anthropic.
 fn openai_request_from_completion(
     request: &CompletionRequest,
     config: &OpenAIConfig,
@@ -352,6 +376,12 @@ fn openai_request_from_completion(
     }
 }
 
+/// Convert one of our [`Message`]s into OpenAI's role/content shape.
+///
+/// System messages are skipped (handled separately as a top-level prompt
+/// prepended by [`openai_request_from_completion`]). Tool-role messages map
+/// to OpenAI's `role: "tool"` with `tool_call_id`; only the first result in a
+/// batch is emitted because OpenAI requires one tool message per call.
 fn message_to_openai(message: &Message) -> Option<OpenAIMessage> {
     match message.role {
         Role::System => None,
@@ -392,6 +422,10 @@ fn message_to_openai(message: &Message) -> Option<OpenAIMessage> {
     }
 }
 
+/// Translate OpenAI's response into the crate-level [`CompletionResponse`].
+///
+/// Only the first choice is consumed — we don't support `n > 1` in
+/// [`CompletionRequest`].
 fn openai_response_to_completion(
     response: OpenAIChatResponse,
 ) -> Result<CompletionResponse, AgentError> {

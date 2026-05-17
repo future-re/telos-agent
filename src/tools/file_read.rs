@@ -1,3 +1,5 @@
+//! `file_read` tool — read a UTF-8 text file with optional line slicing.
+
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
@@ -6,6 +8,7 @@ use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
 
 use super::{required_string, resolve_workspace_path};
 
+/// Built-in file-read tool. Read-only; safe to run concurrently.
 pub struct FileReadTool;
 
 #[async_trait]
@@ -47,6 +50,7 @@ impl Tool for FileReadTool {
                     tool: "file_read".into(),
                     message: err.to_string(),
                 })?;
+        // `start_line` is 1-indexed for human readability; clamp to >= 1.
         let start_line = arguments
             .get("start_line")
             .and_then(|value| value.as_u64())
@@ -56,6 +60,8 @@ impl Tool for FileReadTool {
             .get("max_lines")
             .and_then(|value| value.as_u64())
             .map(|value| value as usize);
+        // Prefix every emitted line with its 1-indexed line number — gives the
+        // model an unambiguous anchor for follow-up edits.
         let lines = content
             .lines()
             .enumerate()

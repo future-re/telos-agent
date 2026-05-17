@@ -1,3 +1,9 @@
+//! Tool execution engine with batching and streaming support.
+//!
+//! Tools marked [`is_concurrency_safe`](crate::Tool::is_concurrency_safe) are grouped into
+//! concurrent batches; others run sequentially. Batches preserve the original
+//! call order in their results so the model always sees deterministic output.
+
 use async_stream::stream;
 use futures_core::stream::Stream;
 use futures_util::stream::{FuturesUnordered, StreamExt};
@@ -9,6 +15,7 @@ use crate::message::{ToolCall, ToolResult};
 use crate::permissions::RuleDecision;
 use crate::tool::{PermissionDecision, ToolContext, ToolProgress, ToolRegistry};
 
+/// Lifecycle event emitted by the executor for one tool invocation.
 #[derive(Debug, Clone)]
 pub enum ToolExecutionEvent {
     ToolStarted {
@@ -28,25 +35,33 @@ pub enum ToolExecutionEvent {
     },
 }
 
+/// Buffered output of [`execute_tool_calls`] — events in chronological order,
+/// results in the original call order.
 #[derive(Debug, Clone)]
 pub struct ToolExecutionOutput {
     pub events: Vec<ToolExecutionEvent>,
     pub results: Vec<ToolResult>,
 }
 
+/// A single tool call paired with the context the executor will hand to it.
 #[derive(Debug, Clone)]
 struct PreparedCall {
+    /// Position in the original call list — used to restore deterministic order after concurrent execution.
     index: usize,
     call: ToolCall,
     context: ToolContext,
 }
 
+/// A contiguous run of calls that can either all run in parallel (when
+/// `concurrency_safe`) or must run sequentially.
 #[derive(Debug, Clone)]
 struct Batch {
     concurrency_safe: bool,
     calls: Vec<PreparedCall>,
 }
 
+/// Non-streaming variant: run every tool call and return all events + results
+/// in one shot. Used by callers that don't need progressive updates.
 pub async fn execute_tool_calls(
     calls: Vec<ToolCall>,
     tools: &ToolRegistry,
@@ -60,6 +75,8 @@ pub async fn execute_tool_calls(
         results: Vec::new(),
     };
 
+    // Partition the call list into contiguous batches of like-flavoured calls.
+    // Switching from concurrency-safe to non-safe (or vice versa) starts a new batch.
     let mut batches = Vec::<Batch>::new();
     for (index, call) in calls.into_iter().enumerate() {
         let context = ToolContext {
@@ -102,6 +119,7 @@ pub async fn execute_tool_calls(
         if batch.concurrency_safe && config.tool_concurrency_limit > 1 {
             run_concurrent_batch(batch, tools, config, &mut output).await;
         } else {
+            // Serial fallback: run one at a time, in declaration order.
             for prepared in batch.calls {
                 let (_, events, result) = run_one_tool(prepared, tools, config).await;
                 output.events.extend(events);
@@ -113,6 +131,11 @@ pub async fn execute_tool_calls(
     output
 }
 
+/// Streaming variant: yield events and results as they happen.
+///
+/// Within a concurrency-safe batch, events from different calls are
+/// interleaved (good for live UIs), but final [`ToolResult`]s are reordered
+/// to match the original call order before being yielded.
 pub fn execute_tool_calls_stream<'a>(
     calls: Vec<ToolCall>,
     tools: &'a ToolRegistry,
@@ -122,6 +145,7 @@ pub fn execute_tool_calls_stream<'a>(
     messages: Vec<crate::message::Message>,
 ) -> impl Stream<Item = ToolExecutionStreamItem> + 'a {
     stream! {
+        // Batch identically to the non-streaming variant; see [`execute_tool_calls`] for the rationale.
         let mut batches = Vec::<Batch>::new();
         for (index, call) in calls.into_iter().enumerate() {
             let context = ToolContext {
@@ -162,6 +186,9 @@ pub fn execute_tool_calls_stream<'a>(
 
         for batch in batches {
             if batch.concurrency_safe && config.tool_concurrency_limit > 1 {
+                // Fan out via tokio tasks. Each task forwards events on a
+                // shared mpsc channel; we cap in-flight tasks at
+                // `tool_concurrency_limit` and spawn more as slots free up.
                 let mut queued = batch.calls.into_iter().peekable();
                 let mut running = 0usize;
                 let mut completed = Vec::new();
@@ -175,16 +202,19 @@ pub fn execute_tool_calls_stream<'a>(
                     running += 1;
                     spawn_live_tool(prepared, tools.clone(), config.clone(), tx.clone());
                 }
+                // Drop the local sender so `rx.recv()` returns None when every task exits.
                 drop(tx);
 
                 while running > 0 {
                     if let Some((index, item)) = rx.recv().await {
                         match item {
                             ToolExecutionStreamItem::Event(event) => {
+                                // Forward events live — order is informational, not load-bearing.
                                 yield ToolExecutionStreamItem::Event(event);
                             }
                             ToolExecutionStreamItem::Result(result) => {
                                 running -= 1;
+                                // Hold results back until the batch finishes so we can sort by `index`.
                                 completed.push((index, result));
                                 if let Some(prepared) = queued.next() {
                                     running += 1;
@@ -194,11 +224,13 @@ pub fn execute_tool_calls_stream<'a>(
                         }
                     }
                 }
+                // Restore deterministic order before yielding results downstream.
                 completed.sort_by_key(|(index, _)| *index);
                 for (_, result) in completed {
                     yield ToolExecutionStreamItem::Result(result);
                 }
             } else {
+                // Serial path: one mpsc per call; drain to completion before starting the next.
                 for prepared in batch.calls {
                     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(usize, ToolExecutionStreamItem)>();
                     spawn_live_tool(prepared, tools.clone(), config.clone(), tx);
@@ -211,12 +243,18 @@ pub fn execute_tool_calls_stream<'a>(
     }
 }
 
+/// Items yielded by [`execute_tool_calls_stream`] — lifecycle events as they
+/// happen, and final results once each call completes.
 #[derive(Debug, Clone)]
 pub enum ToolExecutionStreamItem {
     Event(ToolExecutionEvent),
     Result(ToolResult),
 }
 
+/// Run a batch of concurrency-safe calls in parallel (used by the non-streaming path).
+///
+/// Maintains call ordering in the output so the model sees results in the
+/// same order it requested them.
 async fn run_concurrent_batch(
     batch: Batch,
     tools: &ToolRegistry,
@@ -246,6 +284,12 @@ async fn run_concurrent_batch(
         .extend(completed.into_iter().map(|(_, result)| result));
 }
 
+/// Run a single tool to completion synchronously and collect its events.
+///
+/// Progress events arrive on an mpsc channel — we drain it after the tool
+/// finishes (best-effort) and emit them in order. Used only by the
+/// non-streaming path; the streaming path uses [`spawn_live_tool`] for
+/// real-time progress forwarding.
 async fn run_one_tool(
     prepared: PreparedCall,
     tools: &ToolRegistry,
@@ -288,6 +332,11 @@ async fn run_one_tool(
     (prepared.index, events, result)
 }
 
+/// Spawn a tokio task that runs one tool call and streams its events on `tx`.
+///
+/// Inside, `tokio::select!` races the tool's future against the progress
+/// channel — this guarantees progress events are forwarded the moment the
+/// tool emits them, rather than after the tool finishes.
 fn spawn_live_tool(
     prepared: PreparedCall,
     tools: ToolRegistry,
@@ -325,6 +374,7 @@ fn spawn_live_tool(
 
         let result = loop {
             tokio::select! {
+                // Race: progress event vs. tool completion.
                 maybe_progress = progress_rx.recv() => {
                     if let Some(progress) = maybe_progress {
                         let _ = tx.send((
@@ -339,6 +389,7 @@ fn spawn_live_tool(
                     }
                 }
                 result = &mut result_task => {
+                    // Drain any progress events queued in the same tick as completion.
                     while let Ok(progress) = progress_rx.try_recv() {
                         let _ = tx.send((
                             index,
@@ -367,6 +418,11 @@ fn spawn_live_tool(
     });
 }
 
+/// Run a tool through the full validate → permission → invoke pipeline.
+///
+/// All failure modes (validation, permission, execution) are turned into
+/// `is_error: true` [`ToolResult`]s rather than propagating — the model needs
+/// a tool result for every tool call it made so it can react and recover.
 async fn invoke_existing_tool(
     call: ToolCall,
     tool: Arc<dyn crate::tool::Tool>,
@@ -375,6 +431,8 @@ async fn invoke_existing_tool(
 ) -> ToolResult {
     match tool.validate(&call.arguments, &context).await {
         Ok(()) => {
+            // The global permission engine wins if it has a rule for this
+            // call; otherwise we ask the tool itself.
             let engine_decision = config
                 .permission_engine
                 .as_ref()
@@ -436,6 +494,8 @@ async fn invoke_existing_tool(
     }
 }
 
+/// Build a structured `{ "error": { "kind", "message" } }` payload so the
+/// model can pattern-match on `kind` instead of parsing free text.
 fn json_error_payload(kind: &str, message: String) -> Value {
     json!({
         "error": {

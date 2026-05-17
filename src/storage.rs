@@ -1,3 +1,10 @@
+//! Session storage for persisting and resuming agent conversations.
+//!
+//! The backend is pluggable via the [`Storage`] trait. Two built-in
+//! implementations:
+//! - [`JsonlStorage`] — one JSON line per message, on disk, under `<dir>/<session_id>.jsonl`.
+//! - [`NoopStorage`] — black-hole; useful for tests and ephemeral sessions.
+
 use async_trait::async_trait;
 use std::path::PathBuf;
 use tokio::fs::OpenOptions;
@@ -6,20 +13,29 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use crate::error::AgentError;
 use crate::message::Message;
 
+/// Storage backend for persisting agent sessions.
+///
+/// [`JsonlStorage`] writes one JSON line per message; [`NoopStorage`] discards everything.
 #[async_trait]
 pub trait Storage: Send + Sync + std::fmt::Debug {
+    /// Overwrite the stored conversation with a full snapshot.
     async fn save_snapshot(&self, session_id: &str, messages: &[Message])
     -> Result<(), AgentError>;
+    /// Append messages to the existing log (does not truncate).
     async fn append(&self, session_id: &str, messages: &[Message]) -> Result<(), AgentError>;
+    /// Load all messages for a session. Returns an empty vec when the session is unknown.
     async fn load(&self, session_id: &str) -> Result<Vec<Message>, AgentError>;
 }
 
+/// On-disk JSONL backend. Each message is serialised to one line; the file is
+/// named `<session_id>.jsonl` inside the configured directory.
 #[derive(Debug)]
 pub struct JsonlStorage {
     dir: PathBuf,
 }
 
 impl JsonlStorage {
+    /// Create the storage directory eagerly and return a handle.
     pub fn new(dir: impl Into<PathBuf>) -> Result<Self, AgentError> {
         let dir = dir.into();
         std::fs::create_dir_all(&dir)
@@ -27,6 +43,7 @@ impl JsonlStorage {
         Ok(Self { dir })
     }
 
+    /// Path on disk for the given session ID.
     fn path(&self, session_id: &str) -> PathBuf {
         self.dir.join(format!("{session_id}.jsonl"))
     }
@@ -43,6 +60,7 @@ impl Storage for JsonlStorage {
             .await
             .map_err(|e| AgentError::Config(format!("failed to create storage directory: {e}")))?;
         let path = self.path(session_id);
+        // Truncate-and-rewrite — snapshots fully replace the prior log.
         let file = OpenOptions::new()
             .create(true)
             .truncate(true)
@@ -106,6 +124,7 @@ impl Storage for JsonlStorage {
     async fn load(&self, session_id: &str) -> Result<Vec<Message>, AgentError> {
         let path = self.path(session_id);
         if !path.exists() {
+            // Unknown session — treat as empty rather than an error so resume() can fall back.
             return Ok(Vec::new());
         }
 
@@ -133,6 +152,7 @@ impl Storage for JsonlStorage {
     }
 }
 
+/// Storage backend that discards everything — useful for tests / ephemeral sessions.
 #[derive(Debug)]
 pub struct NoopStorage;
 

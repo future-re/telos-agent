@@ -1,3 +1,10 @@
+//! `file_edit` tool — exact-match find-and-replace on a single UTF-8 text file.
+//!
+//! Requires the `old` string to occur **exactly once** in the file. This is a
+//! deliberate guard against ambiguous edits — if the model wants to replace a
+//! common token it must include enough surrounding context to make the match
+//! unique.
+
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
@@ -6,6 +13,7 @@ use crate::tool::{PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOut
 
 use super::{required_string, resolve_workspace_path};
 
+/// Built-in file-edit tool. Performs a single, unambiguous string replacement.
 pub struct FileEditTool;
 
 #[async_trait]
@@ -58,6 +66,8 @@ impl Tool for FileEditTool {
                 })?;
         let old = required_string(&arguments, "old")?;
         let new = required_string(&arguments, "new")?;
+        // Reject ambiguous (0 or >1) matches so the model is forced to widen
+        // the snippet rather than silently editing the wrong location.
         let count = content.matches(old).count();
         if count != 1 {
             return Err(AgentError::ToolExecution {

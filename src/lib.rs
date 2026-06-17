@@ -66,7 +66,7 @@ pub use provider::{
 // Runtime — the agent session and the streaming turn loop.
 pub use runtime::{AgentSession, TurnEvent, TurnResult};
 // Skills — user-defined slash-commands loaded from markdown files.
-pub use skills::{Skill, SkillArg, SkillLoader, SkillSource};
+pub use skills::{Skill, SkillArg, SkillLoader, SkillRegistry, SkillSource};
 // Storage — persistence backends for saving and resuming sessions.
 pub use storage::{JsonlStorage, NoopStorage, Storage};
 // Subagent — nested agent run exposed as a tool.

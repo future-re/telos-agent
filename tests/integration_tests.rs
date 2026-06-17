@@ -1480,3 +1480,68 @@ fn skill_loader_skips_malformed_yaml() {
     // Malformed YAML should be gracefully skipped
     assert!(skills.is_empty());
 }
+
+#[test]
+fn skill_registry_override_priority() {
+    use tiny_agent_core::skills::{Skill, SkillRegistry, SkillSource};
+
+    let mut reg = SkillRegistry::new();
+    reg.register(Skill {
+        name: "my-skill".into(),
+        description: "bundled desc".into(),
+        when_to_use: Some("for testing".into()),
+        prompt: "bundled prompt".into(),
+        arguments: vec![],
+        body: String::new(),
+        source: SkillSource::Bundled,
+    });
+    reg.register(Skill {
+        name: "my-skill".into(),
+        description: "user desc".into(),
+        when_to_use: Some("for testing".into()),
+        prompt: "user prompt".into(),
+        arguments: vec![],
+        body: String::new(),
+        source: SkillSource::User,
+    });
+    let skill = reg.get("my-skill").unwrap();
+    assert_eq!(skill.prompt, "user prompt");
+}
+
+#[test]
+fn skill_registry_render_for_prompt() {
+    use tiny_agent_core::skills::{Skill, SkillArg, SkillRegistry, SkillSource};
+
+    let mut reg = SkillRegistry::new();
+    reg.register(Skill {
+        name: "verify".into(),
+        description: "Verify code changes".into(),
+        when_to_use: Some("Before committing".into()),
+        prompt: "Verify prompt".into(),
+        arguments: vec![SkillArg {
+            name: "target".into(),
+            description: "What to verify".into(),
+            required: false,
+        }],
+        body: String::new(),
+        source: SkillSource::Bundled,
+    });
+    let rendered = reg.render_for_prompt();
+    assert!(rendered.contains("verify"));
+    assert!(rendered.contains("Verify code changes"));
+    assert!(rendered.contains("Before committing"));
+}
+
+#[test]
+fn skill_registry_empty_renders_empty_string() {
+    use tiny_agent_core::skills::SkillRegistry;
+    let reg = SkillRegistry::new();
+    assert_eq!(reg.render_for_prompt(), "");
+}
+
+#[test]
+fn skill_registry_get_missing_returns_none() {
+    use tiny_agent_core::skills::SkillRegistry;
+    let reg = SkillRegistry::new();
+    assert!(reg.get("nonexistent").is_none());
+}

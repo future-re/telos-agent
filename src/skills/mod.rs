@@ -4,8 +4,10 @@
 //! directories in priority order and injected into the system prompt.
 
 pub mod loader;
+pub mod registry;
 
 pub use loader::SkillLoader;
+pub use registry::SkillRegistry;
 
 /// A loaded skill ready for invocation.
 #[derive(Debug, Clone)]

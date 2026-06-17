@@ -1604,3 +1604,57 @@ fn bundled_skills_load_successfully() {
         assert_eq!(s.source, tiny_agent_core::skills::SkillSource::Bundled);
     }
 }
+
+#[tokio::test]
+async fn prompt_assembly_caches_static_sections() {
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tiny_agent_core::prompt::{PromptAssembly, PromptSection, PromptStability};
+
+    static CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    struct StaticSection;
+    #[async_trait]
+    impl PromptSection for StaticSection {
+        fn name(&self) -> &str {
+            "static_test"
+        }
+        fn stability(&self) -> PromptStability {
+            PromptStability::Static
+        }
+        async fn render(&self, _ctx: &()) -> String {
+            CALL_COUNT.fetch_add(1, Ordering::Relaxed);
+            "static content".into()
+        }
+    }
+
+    struct DynamicSection;
+    #[async_trait]
+    impl PromptSection for DynamicSection {
+        fn name(&self) -> &str {
+            "dynamic_test"
+        }
+        fn stability(&self) -> PromptStability {
+            PromptStability::Dynamic
+        }
+        async fn render(&self, _ctx: &()) -> String {
+            CALL_COUNT.fetch_add(1, Ordering::Relaxed);
+            "dynamic content".into()
+        }
+    }
+
+    let mut assembly = PromptAssembly::new();
+    assembly.add_static(StaticSection);
+    assembly.add_dynamic(DynamicSection);
+
+    let result1 = assembly.build().await;
+    assert!(result1.contains("static content"));
+    assert!(result1.contains("dynamic content"));
+
+    CALL_COUNT.store(0, Ordering::Relaxed);
+    let result2 = assembly.build().await;
+    // Static cached: only dynamic re-renders = 1 call
+    let calls = CALL_COUNT.load(Ordering::Relaxed);
+    assert_eq!(calls, 1, "static section should be cached, only dynamic re-rendered");
+    assert!(result2.contains("static content"));
+}

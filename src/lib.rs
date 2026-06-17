@@ -28,6 +28,7 @@ pub mod message;
 pub mod metrics;
 pub mod mock;
 pub mod permissions;
+pub mod prompt;
 pub mod provider;
 pub mod runtime;
 pub mod skills;
@@ -71,6 +72,8 @@ pub use skills::{Skill, SkillArg, SkillLoader, SkillRegistry, SkillSource};
 pub use storage::{JsonlStorage, NoopStorage, Storage};
 // Subagent — nested agent run exposed as a tool.
 pub use subagent::SubagentTool;
+// Prompt system — modular, cache-aware construction of the system prompt.
+pub use prompt::{PromptAssembly, PromptSection, PromptStability};
 // Tool abstraction — the trait every callable capability implements, plus its registry.
 pub use tool::validate::{ValidationError, ValidationResult, validate_arguments};
 pub use tool::{

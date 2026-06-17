@@ -1658,3 +1658,22 @@ async fn prompt_assembly_caches_static_sections() {
     assert_eq!(calls, 1, "static section should be cached, only dynamic re-rendered");
     assert!(result2.contains("static content"));
 }
+
+#[tokio::test]
+async fn builtin_prompt_sections_render_without_error() {
+    use tiny_agent_core::prompt::PromptAssembly;
+    use tiny_agent_core::prompt::builtins::*;
+    use tiny_agent_core::tool::ToolRegistry;
+
+    let mut assembly = PromptAssembly::new();
+    assembly.add_static(IdentitySection::new(Some("Be helpful.".into())));
+    assembly.add_static(ToolsSection::new(std::sync::Arc::new(ToolRegistry::new())));
+    assembly.add_dynamic(DateSection);
+    assembly.add_dynamic(CwdSection::new(std::env::current_dir().unwrap()));
+    assembly.add_dynamic(GitStatusSection);
+
+    let result = assembly.build().await;
+    assert!(result.contains("tiny-agent"));
+    assert!(result.contains("Today's date"));
+    assert!(result.contains("Working directory"));
+}

@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use crate::memory::index::MemoryStore;
 use crate::prompt::{PromptSection, PromptStability};
 use crate::skills::SkillRegistry;
 use crate::tool::ToolRegistry;
@@ -187,5 +188,48 @@ impl PromptSection for GitStatusSection {
             }
             _ => String::new(),
         }
+    }
+}
+
+// ── Memory ────────────────────────────────────────────────
+
+pub struct MemorySection {
+    store: Arc<Mutex<MemoryStore>>,
+}
+
+impl MemorySection {
+    pub fn new(store: Arc<Mutex<MemoryStore>>) -> Self {
+        Self { store }
+    }
+}
+
+#[async_trait]
+impl PromptSection for MemorySection {
+    fn name(&self) -> &str {
+        "memory"
+    }
+    fn stability(&self) -> PromptStability {
+        PromptStability::Dynamic
+    }
+
+    async fn render(&self, _ctx: &()) -> String {
+        let store = self.store.lock().unwrap();
+        let top = store.top_by_usage(5);
+        if top.is_empty() {
+            return String::new();
+        }
+        let mut lines = vec!["## Relevant Memories".to_string()];
+        for entry in &top {
+            lines.push(format!(
+                "- **{}** ({:?}): {}",
+                entry.name, entry.category, entry.description
+            ));
+            // Include first 200 chars of body as context
+            let preview: String = entry.body.chars().take(200).collect();
+            if !preview.is_empty() {
+                lines.push(format!("  {}", preview));
+            }
+        }
+        lines.join("\n")
     }
 }

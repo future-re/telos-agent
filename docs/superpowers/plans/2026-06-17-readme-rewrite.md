@@ -1,3 +1,35 @@
+# README 全面重写实施计划
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 将 `tiny_agent_core/README.md` 更新为准确、完整、结构清晰的项目入口文档，反映代码库已实现的功能、设计与架构。
+
+**Architecture:** 按「简介 → 功能 → 架构 → 流程 → 对象 → 示例 → 测试 → 边界」组织内容；功能按子系统分组；示例代码须与当前 API 保持一致并可编译。
+
+**Tech Stack:** Markdown、Rust（用于验证示例代码）。
+
+---
+
+### 文件结构
+
+- **修改：** `tiny_agent_core/README.md` — 项目入口文档。
+- **参考：** `tiny_agent_core/docs/superpowers/specs/2026-06-17-readme-rewrite-design.md` — 设计文档。
+- **参考：** 审计报告（由 explore agent 产出）—— 能力、对象、流程、示例修正要点。
+
+---
+
+### Task 1: 重写简介、定位、功能特性
+
+**Files:**
+- Modify: `tiny_agent_core/README.md`（全文替换的开始部分）
+
+**目标：** 更新项目简介、定位，并按子系统分组重写「功能特性」。
+
+- [ ] **Step 1: 写入 README 开头至「功能特性」末尾**
+
+将以下内容写入 `tiny_agent_core/README.md`，覆盖原有开头与「已实现能力」章节：
+
+```markdown
 # tiny_agent_core
 
 `tiny_agent_core` 是一个用 Rust 编写的轻量级 agent runtime，重点覆盖会话管理、模型调用、工具执行和结果回注这一条核心链路。它把一次「用户输入 → 模型采样 → 工具执行 → 结果回注」的完整 turn 封装成可扩展、可观测、可持久化的运行时单元。
@@ -79,7 +111,35 @@
 - `AgentSession::run_turn` 是便利封装，收集所有事件并返回 `TurnResult`。
 - `execute_tool_calls_stream` 直接暴露工具执行流水线的事件流。
 - `ThinkingBlock` / `ThinkingDelta` 已支持 reasoning 内容的采集与回传。
+```
 
+- [ ] **Step 2: 检查格式**
+
+Run: `cat tiny_agent_core/README.md | head -n 120`
+Expected: 文件以 `# tiny_agent_core` 开头，包含「定位与使用场景」和完整的「功能特性」分组列表，无原「已实现能力」标题。
+
+- [ ] **Step 3: Commit**
+
+```bash
+cd tiny_agent_core
+git add README.md
+git commit -m "docs: rewrite intro, positioning and features"
+```
+
+---
+
+### Task 2: 重写架构概览与执行流程
+
+**Files:**
+- Modify: `tiny_agent_core/README.md`
+
+**目标：** 用分层描述替换旧的「执行流程」，并补充详细的执行阶段。
+
+- [ ] **Step 1: 写入「架构概览」与「执行流程」**
+
+在 Task 1 写入的内容之后，追加以下章节：
+
+```markdown
 ## 架构概览
 
 运行时由几条清晰的分层职责构成：
@@ -114,7 +174,35 @@
 8. **结果回注**：对超长 tool result 进行字符预算截断，然后以 `Role::Tool` 消息写回会话。
 9. **Stop 判定**：当没有待处理 tool call 时，触发 `stop` hooks，整理 `TurnResult`。
 10. **持久化与回滚**：出错时回滚消息、turn ID、metrics 和 `read_file_state`；正常结束时通过 `storage` 持久化，`save_error` 会随 `TurnResult` 返回而不掩盖 turn 结果。
+```
 
+- [ ] **Step 2: 检查格式**
+
+Run: `grep -n "## 架构概览\|## 执行流程" tiny_agent_core/README.md`
+Expected: 两行均存在，且中间包含上述 10 步流程。
+
+- [ ] **Step 3: Commit**
+
+```bash
+cd tiny_agent_core
+git add README.md
+git commit -m "docs: rewrite architecture overview and execution flow"
+```
+
+---
+
+### Task 3: 重写核心对象表格与最小示例
+
+**Files:**
+- Modify: `tiny_agent_core/README.md`
+
+**目标：** 用表格形式更新核心对象，并修正最小示例代码使其可编译。
+
+- [ ] **Step 1: 写入「核心对象」与「最小示例」**
+
+在 Task 2 内容之后追加：
+
+```markdown
 ## 核心对象
 
 | 类型 / Trait | 职责 |
@@ -202,7 +290,35 @@ async fn main() -> Result<(), AgentError> {
     Ok(())
 }
 ```
+```
 
+- [ ] **Step 2: 验证最小示例可编译**
+
+Run: `cd tiny_agent_core && cargo check`
+Expected: 编译通过，无 `AgentConfig` 字段或 `CompletionResponse` 字段错误。
+
+- [ ] **Step 3: Commit**
+
+```bash
+cd tiny_agent_core
+git add README.md
+git commit -m "docs: rewrite core objects table and fix minimal example"
+```
+
+---
+
+### Task 4: 补充运行示例、测试与「暂不包含」
+
+**Files:**
+- Modify: `tiny_agent_core/README.md`
+
+**目标：** 保留并更新运行示例与测试章节，重写「暂不包含」列表。
+
+- [ ] **Step 1: 写入剩余章节**
+
+在 Task 3 内容之后追加：
+
+```markdown
 ## 运行示例
 
 仓库中提供了一个基于真实 provider 的工具调用示例：
@@ -227,3 +343,66 @@ cargo test
 - 多模态输入输出。
 - 跨 provider fallback（当前仅支持单 provider 内的重试）。
 - 真正的沙箱级执行环境（当前提供的是规则权限引擎 + bash AST 分析 + 人工审批）。
+```
+
+- [ ] **Step 2: 检查「暂不包含」准确性**
+
+Run: `grep -n "thinking block\|classifier" tiny_agent_core/README.md`
+Expected: 无匹配；确认 thinking block 与 classifier 不再出现在「暂不包含」中。
+
+- [ ] **Step 3: 全文检查**
+
+Run: `cd tiny_agent_core && cargo check`
+Expected: 编译通过。
+
+Run: `grep -n "system_prompt:" tiny_agent_core/README.md`
+Expected: 不再出现旧的 `system_prompt:` 字段用法（最小示例中应为 `base_system_prompt:`）。
+
+- [ ] **Step 4: Commit**
+
+```bash
+cd tiny_agent_core
+git add README.md
+git commit -m "docs: add run example, tests and update out-of-scope section"
+```
+
+---
+
+### Task 5: 最终审阅与收尾
+
+**Files:**
+- Modify: `tiny_agent_core/README.md`
+
+**目标：** 通读全文，修正格式、链接、错别字，确保与设计文档一致。
+
+- [ ] **Step 1: 通读全文并修正**
+
+Run: `cat tiny_agent_core/README.md`
+检查项：
+- 所有 Markdown 标题层级正确（`#`、`##`、`###`）。
+- 代码块语言标记正确（`rust`、`bash`）。
+- 无拼写错误、无断句问题。
+- 功能列表不夸大，与审计报告一致。
+- 核心对象表格无遗漏重要类型。
+
+- [ ] **Step 2: 运行项目测试**
+
+Run: `cd tiny_agent_core && cargo test`
+Expected: 全部通过（README 修改本身不影响编译，但需确认项目整体健康）。
+
+- [ ] **Step 3: 最终提交**
+
+```bash
+cd tiny_agent_core
+git add README.md
+git commit -m "docs: final README review and polish"
+```
+
+---
+
+## Self-Review Checklist
+
+- [ ] Spec coverage：设计文档中的每个章节在新 README 中均有对应任务。
+- [ ] Placeholder scan：计划中没有 TBD、TODO、"implement later"、"similar to Task N" 等占位符。
+- [ ] Type consistency：`AgentConfig::base_system_prompt`、`CompletionResponse::usage`、`TokenUsage` 等字段名称与源码一致。
+- [ ] 示例可编译：Task 3 明确用 `cargo check` 验证最小示例。

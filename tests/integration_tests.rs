@@ -1755,3 +1755,50 @@ async fn memory_write_and_read_tools_roundtrip() {
     assert_eq!(content["body"].as_str().unwrap(), "This is the body content.");
     assert!(content["tags"].as_array().unwrap().iter().any(|t| t.as_str() == Some("test")));
 }
+
+#[tokio::test]
+async fn memory_section_renders_top_entries() {
+    use std::sync::{Arc, Mutex};
+    use tiny_agent_core::memory::{MemoryCategory, MemoryEntry, MemoryStatus, MemoryStore};
+    use tiny_agent_core::prompt::PromptSection;
+    use tiny_agent_core::prompt::builtins::MemorySection;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = MemoryStore::new(dir.path().to_path_buf());
+
+    let entry = MemoryEntry {
+        name: "test-fact".into(),
+        description: "A test fact".into(),
+        category: MemoryCategory::Fact,
+        tags: vec!["test".into()],
+        created: "2026-06-18".into(),
+        updated: "2026-06-18".into(),
+        status: MemoryStatus::Working,
+        times_used: 5,
+        confidence: None,
+        related: vec![],
+        source_session: None,
+        body: "This is a test memory body.".into(),
+    };
+    store.write(entry).unwrap();
+
+    let section = MemorySection::new(Arc::new(Mutex::new(store)));
+    let rendered = section.render(&()).await;
+    assert!(rendered.contains("Relevant Memories"));
+    assert!(rendered.contains("test-fact"));
+    assert!(rendered.contains("A test fact"));
+}
+
+#[tokio::test]
+async fn memory_section_empty_when_no_memories() {
+    use std::sync::{Arc, Mutex};
+    use tiny_agent_core::memory::MemoryStore;
+    use tiny_agent_core::prompt::PromptSection;
+    use tiny_agent_core::prompt::builtins::MemorySection;
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = MemoryStore::new(dir.path().to_path_buf());
+    let section = MemorySection::new(Arc::new(Mutex::new(store)));
+    let rendered = section.render(&()).await;
+    assert!(rendered.is_empty());
+}

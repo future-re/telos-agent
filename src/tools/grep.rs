@@ -12,7 +12,7 @@ use std::path::Path;
 use crate::error::AgentError;
 use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
 
-use super::{display_relative, is_within_cwd, required_string};
+use super::{canonicalize_within_cwd, display_relative, required_string};
 
 /// Built-in grep tool. Read-only; safe to run concurrently.
 pub struct GrepTool;
@@ -82,18 +82,21 @@ impl Tool for GrepTool {
             if !path.is_file() {
                 continue;
             }
-            // Defensive: `../foo` style globs can still resolve outside cwd.
-            if !is_within_cwd(&context.cwd, &path) {
-                continue;
-            }
+            // Defensive: `../foo` style globs can still resolve outside cwd, and
+            // a symlink inside cwd may point outside. Follow symlinks and reject
+            // any file whose canonical location is not under cwd.
+            let canonical_path = match canonicalize_within_cwd(&context.cwd, &path).await {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
             // Skip files that exceed the configured read budget.
-            if let Ok(metadata) = tokio::fs::metadata(&path).await
+            if let Ok(metadata) = tokio::fs::metadata(&canonical_path).await
                 && metadata.len() > context.max_file_read_bytes as u64
             {
                 continue;
             }
             // Silently skip files we can't read as UTF-8 (binary, permissions, etc.).
-            let Ok(content) = tokio::fs::read_to_string(&path).await else {
+            let Ok(content) = tokio::fs::read_to_string(&canonical_path).await else {
                 continue;
             };
             for (idx, line) in content.lines().enumerate() {
@@ -165,5 +168,28 @@ mod tests {
         assert!(matches.iter().all(|m| !m["path"].as_str().unwrap().contains("outside")));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn rejects_symlink_escape() {
+        let dir = std::env::temp_dir().join("tiny_agent_grep_symlink_test");
+        let outside = std::env::temp_dir().join("tiny_agent_grep_symlink_outside");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), "match").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.txt"), dir.join("link.txt")).unwrap();
+
+        let tool = GrepTool;
+        let output = tool
+            .invoke(json!({ "pattern": "match" }), ctx(dir.clone()))
+            .await
+            .unwrap();
+        let matches = output.content["matches"].as_array().unwrap();
+        assert!(matches.is_empty(), "symlink escape should produce no matches");
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 }

@@ -10,7 +10,6 @@ use crate::tools::resolve_workspace_path;
 
 use super::parser::{self, collect_commands, has_glob_or_brace_expansion};
 use super::prefix::{PrefixResult, extract_prefix as extract_prefix_from_node};
-use super::substitution::{SubstitutionAnalysis, analyze_substitutions};
 use super::zsh;
 
 /// Outcome of analyzing a shell command.
@@ -275,42 +274,6 @@ fn classify_base_command(base: &str) -> CommandSafety {
 
     CommandSafety::NeedsReview {
         reason: format!("command `{base}` is not in the read-only allowlist"),
-    }
-}
-
-// ─────────────────────────── Recursive substitution wrapper ───────────────────────────
-
-/// Analyze a command, but allow `$(inner)` if the inner command is safe.
-pub fn analyze_with_substitutions(source: &str) -> CommandSafety {
-    let base = analyze_security(source);
-    match base {
-        SecurityAnalysis::Simple { .. } => analyze(source),
-        SecurityAnalysis::TooComplex { reason } => {
-            // If the reason is command_substitution, try recursive analysis.
-            if reason.contains("command_substitution") {
-                let ast = parser::parse(source).unwrap();
-                match analyze_substitutions(&ast, source) {
-                    SubstitutionAnalysis::Safe => {
-                        // Re-analyze ignoring the substitution as dangerous.
-                        // For now, we still reject because the outer command
-                        // context is hard to verify. Future work: allow safe
-                        // substitutions in safe outer contexts.
-                        CommandSafety::NeedsReview {
-                            reason: "command substitution requires explicit approval".into(),
-                        }
-                    }
-                    SubstitutionAnalysis::None => CommandSafety::NeedsReview { reason },
-                    SubstitutionAnalysis::NeedsReview { reason: inner_reason } => {
-                        CommandSafety::NeedsReview { reason: inner_reason }
-                    }
-                }
-            } else {
-                CommandSafety::NeedsReview { reason }
-            }
-        }
-        SecurityAnalysis::ParseUnavailable => CommandSafety::NeedsReview {
-            reason: "bash parser unavailable".into(),
-        },
     }
 }
 

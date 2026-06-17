@@ -114,13 +114,11 @@ pub async fn execute_tool_calls(
             .ok()
             .map(|tool| tool.is_concurrency_safe(&call.arguments))
             .unwrap_or(false);
-        if concurrency_safe
-            && batches
-                .last()
-                .map(|batch| batch.concurrency_safe)
-                .unwrap_or(false)
+        if let Some(batch) = batches.last_mut()
+            && batch.concurrency_safe
+            && concurrency_safe
         {
-            batches.last_mut().unwrap().calls.push(PreparedCall {
+            batch.calls.push(PreparedCall {
                 index,
                 call,
                 context,
@@ -187,13 +185,11 @@ pub fn execute_tool_calls_stream<'a>(
                 .ok()
                 .map(|tool| tool.is_concurrency_safe(&call.arguments))
                 .unwrap_or(false);
-            if concurrency_safe
-                && batches
-                    .last()
-                    .map(|batch| batch.concurrency_safe)
-                    .unwrap_or(false)
+            if let Some(batch) = batches.last_mut()
+                && batch.concurrency_safe
+                && concurrency_safe
             {
-                batches.last_mut().unwrap().calls.push(PreparedCall {
+                batch.calls.push(PreparedCall {
                     index,
                     call,
                     context,

@@ -101,7 +101,7 @@ impl Tool for SubagentTool {
             config.max_iterations = max_iterations.max(1) as usize;
         }
 
-        let mut session = AgentSession::new(config);
+        let mut session = AgentSession::new(config)?;
         let mut events = Vec::new();
         {
             let mut stream =

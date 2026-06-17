@@ -85,6 +85,8 @@ impl Tool for FileEditTool {
         }
         let replace_all = optional_bool(&arguments, "replace_all", false);
 
+        // Capture pre-existing permissions so we can restore them after writing.
+        let existing_metadata = tokio::fs::metadata(&path).await.ok();
         let content = match tokio::fs::read_to_string(&path).await {
             Ok(content) => content,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound && old.is_empty() => {
@@ -149,6 +151,15 @@ impl Tool for FileEditTool {
                 tool: "Edit".into(),
                 message: err.to_string(),
             })?;
+        // Preserve the original mode bits when editing an existing file.
+        if let Some(metadata) = existing_metadata {
+            if let Err(err) = tokio::fs::set_permissions(&path, metadata.permissions()).await {
+                return Err(AgentError::ToolExecution {
+                    tool: "Edit".into(),
+                    message: format!("failed to restore file permissions: {err}"),
+                });
+            }
+        }
         let updated_content =
             tokio::fs::read_to_string(&path)
                 .await
@@ -173,6 +184,71 @@ impl Tool for FileEditTool {
             "replaced": true,
             "replace_all": replace_all,
         })))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::HashMap;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn ctx(cwd: std::path::PathBuf) -> ToolContext {
+        ToolContext {
+            session_id: "test".into(),
+            turn_id: 1,
+            cwd,
+            env: HashMap::new(),
+            messages: std::sync::Arc::new(vec![]),
+            progress: None,
+            read_file_state: std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            timeout: None,
+            max_file_read_bytes: usize::MAX,
+        }
+    }
+
+    #[tokio::test]
+    async fn preserves_file_permissions() {
+        let dir = std::env::temp_dir().join("tiny_agent_edit_perms_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("script.sh");
+        std::fs::write(&file, "#!/bin/sh\necho old\n").unwrap();
+        // Set an unusual mode so we can detect if it is lost.
+        let mut perms = std::fs::metadata(&file).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&file, perms).unwrap();
+
+        // Prime the read-file state so the edit is allowed.
+        let context = ctx(dir.clone());
+        context.read_file_state.lock().await.insert(
+            file.clone(),
+            crate::tool::FileReadRecord {
+                content: "#!/bin/sh\necho old\n".into(),
+                timestamp_ms: 0,
+                is_partial_view: false,
+                offset: None,
+                limit: None,
+            },
+        );
+
+        let tool = FileEditTool;
+        tool.invoke(
+            json!({
+                "file_path": "script.sh",
+                "old_string": "echo old",
+                "new_string": "echo new"
+            }),
+            context,
+        )
+        .await
+        .unwrap();
+
+        let new_mode = std::fs::metadata(&file).unwrap().permissions().mode();
+        assert_eq!(new_mode & 0o777, 0o755, "file permissions were not preserved");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

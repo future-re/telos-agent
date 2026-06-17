@@ -20,7 +20,9 @@ impl Tool for FileReadTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "Read".into(),
-            description: "Read a UTF-8 text file. Use this before editing an existing file.".into(),
+            description: "Read a UTF-8 text file. Use this before editing an existing file. \
+The returned `content` prefixes each line with its 1-indexed line number for display; \
+provide the original file text (without line-number prefixes) to `Edit` when editing.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {

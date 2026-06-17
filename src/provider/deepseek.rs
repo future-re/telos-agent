@@ -34,10 +34,10 @@ impl std::fmt::Debug for DeepSeekConfig {
 impl DeepSeekConfig {
     /// Build a config from `DEEPSEEK_API_KEY` and the given model.
     ///
-    /// First loads a local `.env` file (if present) via [`dotenvy`], then reads
-    /// the variable from the environment.
+    /// Reads the API key directly from the process environment. Callers that
+    /// want to load a `.env` file should do so explicitly before calling this
+    /// constructor.
     pub fn from_env(model: impl Into<String>) -> Result<Self, AgentError> {
-        dotenvy::dotenv().ok();
         let api_key = std::env::var("DEEPSEEK_API_KEY")
             .map_err(|_| AgentError::Config("missing DEEPSEEK_API_KEY".into()))?;
 

@@ -4,13 +4,14 @@
 //! identifies a distinct failure class so callers can pattern-match instead of
 //! parsing error strings.
 
+use serde::Serialize;
 use thiserror::Error;
 
 /// Structured failure categories for provider (HTTP / API / stream) errors.
 ///
 /// Carrying the HTTP status code lets the runtime decide whether an error is
 /// transient and worth retrying without parsing free-text messages.
-#[derive(Debug, Error, Clone)]
+#[derive(Debug, Error, Clone, Serialize)]
 pub enum ProviderError {
     /// An HTTP response with a non-success status code.
     #[error("HTTP {status}: {message}")]
@@ -36,7 +37,7 @@ pub enum ProviderError {
 }
 
 /// All error conditions surfaced by the agent runtime.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone, Serialize)]
 pub enum AgentError {
     /// The model provider (HTTP transport, API contract, deserialisation, …) failed.
     #[error("provider error: {0}")]

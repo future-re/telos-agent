@@ -55,9 +55,7 @@ impl Tool for ShellTool {
         // Require explicit approval by default; callers can opt into auto-approval
         // via the global permission engine.
         match analyze_command_safety(command) {
-            CommandSafety::Safe => Ok(PermissionDecision::Ask {
-                reason: format!("shell command requires approval: {command}"),
-            }),
+            CommandSafety::Safe => Ok(PermissionDecision::Allow),
             CommandSafety::NeedsReview { reason } => Ok(PermissionDecision::Ask {
                 reason: format!("shell command needs review: {reason}"),
             }),
@@ -85,11 +83,11 @@ impl Tool for ShellTool {
             .arg("-c")
             .arg(command)
             .current_dir(&context.cwd)
-            .envs(context.env.iter())
-            // Strip startup scripts so the inherited env doesn't silently
-            // alter behaviour (PROMPT_COMMAND, etc.).
-            .env_remove("ENV")
-            .env_remove("BASH_ENV");
+            // Start with a clean environment and only add what the caller
+            // explicitly configured. Inheriting the parent process environment
+            // would leak secrets (API keys, tokens) to arbitrary tool calls.
+            .env_clear()
+            .envs(context.env.iter());
         child.kill_on_drop(true);
         let output = timeout(Duration::from_millis(timeout_ms), child.output())
             .await
@@ -131,4 +129,63 @@ fn trim_large_output(output: &str) -> String {
     }
     let preview = output.chars().take(MAX_CHARS).collect::<String>();
     format!("{preview}\n<truncated output after {MAX_CHARS} chars>")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn ctx(cwd: std::path::PathBuf, env: HashMap<String, String>) -> ToolContext {
+        ToolContext {
+            session_id: "test".into(),
+            turn_id: 1,
+            cwd,
+            env,
+            messages: std::sync::Arc::new(vec![]),
+            progress: None,
+            read_file_state: std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            timeout: None,
+            max_file_read_bytes: usize::MAX,
+        }
+    }
+
+    #[tokio::test]
+    async fn safe_command_runs_with_clean_environment() {
+        // Even if the parent process has SECRET set, the shell command should
+        // not see it because ShellTool clears the environment before adding
+        // only the configured variables.
+        unsafe { std::env::set_var("TINY_AGENT_SECRET", "leaked") };
+        let tool = ShellTool;
+        let mut env = HashMap::new();
+        env.insert("PATH".into(), "/usr/local/bin:/usr/bin:/bin".into());
+        let output = tool
+            .invoke(
+                json!({ "command": "echo $TINY_AGENT_SECRET" }),
+                ctx(std::env::temp_dir(), env),
+            )
+            .await
+            .unwrap();
+        let stdout = output.content["stdout"].as_str().unwrap();
+        assert_eq!(stdout.trim(), "");
+        unsafe { std::env::remove_var("TINY_AGENT_SECRET") };
+    }
+
+    #[tokio::test]
+    async fn configured_env_is_passed_through() {
+        let tool = ShellTool;
+        let mut env = HashMap::new();
+        env.insert("PATH".into(), "/usr/local/bin:/usr/bin:/bin".into());
+        env.insert("MY_VAR".into(), "present".into());
+        let output = tool
+            .invoke(
+                json!({ "command": "echo $MY_VAR" }),
+                ctx(std::env::temp_dir(), env),
+            )
+            .await
+            .unwrap();
+        let stdout = output.content["stdout"].as_str().unwrap();
+        assert_eq!(stdout.trim(), "present");
+    }
 }

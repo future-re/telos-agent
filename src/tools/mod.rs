@@ -33,7 +33,7 @@ pub fn register_core_tools(registry: &mut ToolRegistry) {
 
 // Re-export shared helpers that other crate modules use directly.
 pub(crate) use shared::{
-    canonicalize_within_cwd, display_relative, ensure_file_was_read_and_unchanged, is_within_cwd,
+    canonicalize_within_cwd, display_relative, ensure_file_was_read_and_unchanged,
     modified_timestamp_ms, optional_bool, optional_usize_any, required_string, required_string_any,
     resolve_workspace_path,
 };

@@ -143,6 +143,9 @@ pub struct TurnResult {
     pub final_message: Message,
     /// Why the turn stopped — informational for callers.
     pub stop_reason: StopReason,
+    /// If session persistence was configured but failed, the error is surfaced
+    /// here so callers can react without losing the in-memory turn result.
+    pub save_error: Option<AgentError>,
 }
 
 /// An agent session that maintains conversation state across turns.
@@ -177,18 +180,14 @@ enum CompactionResult {
 impl AgentSession {
     /// Start a fresh session. If `config.system_prompt` is set, it is appended
     /// as the first message.
-    pub fn new(config: AgentConfig) -> Self {
-        if let Err(err) = config.validate() {
-            // Panic mirrors the fail-fast behaviour of other invalid configurations
-            // (e.g. missing env vars) while keeping the constructor synchronous.
-            panic!("invalid AgentConfig: {err}");
-        }
+    pub fn new(config: AgentConfig) -> Result<Self, AgentError> {
+        config.validate()?;
         let mut messages = Vec::new();
         if let Some(system_prompt) = config.system_prompt.as_ref() {
             messages.push(Message::system(system_prompt.clone()));
         }
 
-        Self {
+        Ok(Self {
             config,
             session_id: format!(
                 "session-{}",
@@ -198,7 +197,7 @@ impl AgentSession {
             messages,
             read_file_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             metrics: SessionMetrics::new(),
-        }
+        })
     }
 
     /// Snapshot of the current conversation.
@@ -843,15 +842,21 @@ impl AgentSession {
         };
 
         // Persist the session if a backend is configured. A save failure should
-        // not hide a successfully completed turn, so we log it and continue.
-        if let Err(err) = self.save().await {
-            error!(error = %err, "failed to persist session after turn");
-        }
+        // not hide a successfully completed turn, so we surface the error in the
+        // result while still returning the turn output to the caller.
+        let save_error = match self.save().await {
+            Ok(()) => None,
+            Err(err) => {
+                error!(error = %err, "failed to persist session after turn");
+                Some(err)
+            }
+        };
 
         Ok(TurnResult {
             final_message: final_message.unwrap_or_else(|| Message::assistant("")),
             events,
             stop_reason,
+            save_error,
         })
     }
 }
@@ -1037,7 +1042,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut session = AgentSession::new(config.clone());
+        let mut session = AgentSession::new(config.clone()).unwrap();
         let session_id = session.session_id().to_string();
 
         // Run one turn so counters advance and next_turn_id becomes 2.

@@ -106,7 +106,7 @@ async fn main() -> Result<(), AgentError> {
     let mut session = AgentSession::new(AgentConfig {
         system_prompt: Some("You are a concise assistant.".into()),
         ..AgentConfig::default()
-    });
+    }).unwrap();
 
     let result = session.run_turn(&provider, &tools, "hello").await?;
     println!("{}", result.final_message.text_content());

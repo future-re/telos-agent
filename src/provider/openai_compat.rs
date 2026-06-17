@@ -69,7 +69,7 @@ pub(crate) fn build_client(api_key: &str, base_url: &str) -> Client<AsyncOpenAIC
     let config = AsyncOpenAIConfig::new()
         .with_api_key(api_key)
         .with_api_base(api_base)
-        .with_header("User-Agent", "Claude-Code/2.0")
+        .with_header("User-Agent", concat!("tiny_agent_core/", env!("CARGO_PKG_VERSION")))
         .expect("set User-Agent header");
 
     Client::with_config(config)

@@ -18,12 +18,13 @@ pub mod parser;
 pub mod prefix;
 pub mod quote_context;
 pub mod redirect;
-pub mod substitution;
+#[cfg(test)]
+mod substitution;
 pub mod zsh;
 
 pub use analyzer::{
     CommandSafety, SecurityAnalysis, analyze, analyze_security,
-    analyze_with_substitutions, classify_simple_command, extract_command_prefix,
+    classify_simple_command, extract_command_prefix,
 };
 pub use parser::{RedirectOp, SimpleCommand};
 pub use prefix::PrefixResult;

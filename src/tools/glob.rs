@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::error::AgentError;
 use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
 
-use super::{display_relative, is_within_cwd, required_string};
+use super::{canonicalize_within_cwd, display_relative, required_string};
 
 /// Built-in glob tool. Read-only; safe to run concurrently.
 pub struct GlobTool;
@@ -70,8 +70,10 @@ impl Tool for GlobTool {
                 break;
             }
             if let Ok(path) = entry {
-                // Defensive: `../foo` style patterns can still resolve outside cwd.
-                if !is_within_cwd(&context.cwd, &path) {
+                // Defensive: `../foo` style patterns can still resolve outside cwd, and
+                // a symlink inside cwd may point outside. Follow symlinks and reject
+                // any file whose canonical location is not under cwd.
+                if canonicalize_within_cwd(&context.cwd, &path).await.is_err() {
                     continue;
                 }
                 // Display paths relative to cwd; absolute paths are noisy and leak the host layout.
@@ -129,5 +131,28 @@ mod tests {
         assert!(matches.iter().all(|m| !m.as_str().unwrap().contains("outside")));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn rejects_symlink_escape() {
+        let dir = std::env::temp_dir().join("tiny_agent_glob_symlink_test");
+        let outside = std::env::temp_dir().join("tiny_agent_glob_symlink_outside");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), "x").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.txt"), dir.join("link.txt")).unwrap();
+
+        let tool = GlobTool;
+        let output = tool
+            .invoke(json!({ "pattern": "**/*" }), ctx(dir.clone()))
+            .await
+            .unwrap();
+        let matches = output.content["matches"].as_array().unwrap();
+        assert!(matches.is_empty(), "symlink escape should produce no matches");
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 }

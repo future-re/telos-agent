@@ -102,14 +102,6 @@ pub(crate) fn display_relative(cwd: &Path, path: &Path) -> String {
         .to_string()
 }
 
-/// Returns true if `path` is contained within `cwd` after lexical normalization.
-///
-/// Does not follow symlinks; a symlink pointing outside `cwd` will pass this
-/// check and must be guarded separately if that matters for the caller.
-pub(crate) fn is_within_cwd(cwd: &Path, path: &Path) -> bool {
-    normalize_path(path).starts_with(normalize_path(cwd))
-}
-
 /// Resolve a path against `cwd` and follow symlinks, verifying the final
 /// canonical location still lies inside `cwd`.
 ///

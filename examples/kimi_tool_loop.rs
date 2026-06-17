@@ -48,7 +48,7 @@ async fn main() -> Result<(), AgentError> {
         system_prompt: Some("You are a concise coding agent.".into()),
         max_iterations: 6,
         ..AgentConfig::default()
-    });
+    })?;
 
     let result = session.run_turn(&provider, &tools, prompt).await?;
     println!("{}", result.final_message.text_content());

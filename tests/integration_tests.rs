@@ -99,7 +99,7 @@ fn multi_step_tool_loop_completes() {
             system_prompt: Some("You are a coding agent.".into()),
             max_iterations: 4,
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         let result = session
             .run_turn(&provider, &tools, "what is 2 + 3?")
@@ -140,7 +140,7 @@ fn tool_calls_continue_even_when_stop_reason_is_end_turn() {
 
         let mut tools = ToolRegistry::new();
         tools.register(AddTool);
-        let mut session = AgentSession::new(AgentConfig::default());
+        let mut session = AgentSession::new(AgentConfig::default()).unwrap();
 
         let result = session.run_turn(&provider, &tools, "add").await.unwrap();
         assert_eq!(result.final_message.text_content(), "The answer is 10.");
@@ -178,7 +178,7 @@ fn missing_tool_returns_error_result_message() {
         ]);
 
         let tools = ToolRegistry::new();
-        let mut session = AgentSession::new(AgentConfig::default());
+        let mut session = AgentSession::new(AgentConfig::default()).unwrap();
 
         let result = session
             .run_turn(&provider, &tools, "try a tool")
@@ -260,7 +260,7 @@ fn permission_denial_returns_structured_tool_error() {
         let mut tools = ToolRegistry::new();
         tools.register(DenyTool);
 
-        let mut session = AgentSession::new(AgentConfig::default());
+        let mut session = AgentSession::new(AgentConfig::default()).unwrap();
         let result = session
             .run_turn(&provider, &tools, "try deny")
             .await
@@ -316,7 +316,7 @@ fn run_turn_stream_emits_deltas_and_hooks() {
         let mut session = AgentSession::new(AgentConfig {
             hooks: Arc::new(hooks),
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         let events = session
             .run_turn_stream(&provider, &tools, "hi")
@@ -355,7 +355,7 @@ fn stop_hook_does_not_hijack_final_message() {
         let mut session = AgentSession::new(AgentConfig {
             hooks: Arc::new(hooks),
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         let result = session.run_turn(&provider, &tools, "hi").await.unwrap();
         // The last session message is the hook output, but the turn result
@@ -444,7 +444,7 @@ fn tool_result_budget_compacts_large_output() {
         let mut session = AgentSession::new(AgentConfig {
             max_tool_result_chars: 20,
             ..AgentConfig::default()
-        });
+        }).unwrap();
         let result = session.run_turn(&provider, &tools, "run").await.unwrap();
         assert!(
             result
@@ -512,7 +512,7 @@ fn session_save_and_resume_works() {
             system_prompt: Some("sys".into()),
             storage: Some(storage.clone()),
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         session.run_turn(&provider, &tools, "hello").await.unwrap();
         assert_eq!(session.messages().len(), 3); // sys + user + assistant
@@ -571,7 +571,7 @@ fn permission_engine_denies_tool() {
         let mut session = AgentSession::new(AgentConfig {
             permission_engine: Some(engine),
             ..AgentConfig::default()
-        });
+        }).unwrap();
         let result = session.run_turn(&provider, &tools, "add").await.unwrap();
         let tool_result = result
             .events
@@ -615,7 +615,7 @@ fn permission_engine_allows_tool() {
         let mut session = AgentSession::new(AgentConfig {
             permission_engine: Some(engine),
             ..AgentConfig::default()
-        });
+        }).unwrap();
         let result = session.run_turn(&provider, &tools, "add").await.unwrap();
         let tool_result = result
             .events
@@ -659,7 +659,7 @@ fn permission_engine_matches_tool_aliases_with_last_rule_wins() {
         let mut session = AgentSession::new(AgentConfig {
             permission_engine: Some(engine),
             ..AgentConfig::default()
-        });
+        }).unwrap();
         let result = session.run_turn(&provider, &tools, "add").await.unwrap();
         let tool_result = result
             .events
@@ -709,7 +709,7 @@ fn summary_compaction_triggers_when_over_budget() {
             })),
             max_tool_result_chars: usize::MAX,
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         let result = session
             .run_turn(&provider, &tools, "run big")
@@ -748,7 +748,7 @@ fn session_save_replaces_snapshot_without_duplicates() {
         let mut session = AgentSession::new(AgentConfig {
             storage: Some(storage.clone()),
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         session.run_turn(&provider, &tools, "hello").await.unwrap();
         session.save().await.unwrap();
@@ -795,7 +795,7 @@ fn builtin_file_read_tool_returns_file_contents() {
         let mut session = AgentSession::new(AgentConfig {
             cwd: dir.clone(),
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         let result = session.run_turn(&provider, &tools, "read").await.unwrap();
         let tool_result = result
@@ -848,7 +848,7 @@ fn file_read_rejects_symlink_escape() {
         let mut session = AgentSession::new(AgentConfig {
             cwd: dir.clone(),
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         let result = session.run_turn(&provider, &tools, "read symlink").await.unwrap();
         let tool_result = result
@@ -932,7 +932,7 @@ fn edit_requires_prior_full_read() {
                 engine
             }),
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         let result = session.run_turn(&provider, &tools, "edit").await.unwrap();
         let tool_result = result
@@ -1009,7 +1009,7 @@ fn edit_rejects_stale_file_after_read() {
                 engine
             }),
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         let mut stream = Box::pin(session.run_turn_stream(&provider, &tools, "read then edit"));
         let mut saw_read_result = false;
@@ -1071,7 +1071,7 @@ fn permission_engine_allows_shell_by_command_prefix() {
         let mut session = AgentSession::new(AgentConfig {
             permission_engine: Some(engine),
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         let result = session.run_turn(&provider, &tools, "shell").await.unwrap();
         let tool_result = result
@@ -1098,7 +1098,10 @@ fn shell_requires_approval_by_default() {
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "shell".into(),
-                        arguments: json!({ "command": "echo hello" }),
+                        // Use a command that the analyzer classifies as needing
+                        // review (output redirect) now that safe commands are
+                        // auto-approved.
+                        arguments: json!({ "command": "echo hello > file.txt" }),
                     })],
                 },
                 stop_reason: StopReason::ToolUse,
@@ -1112,7 +1115,7 @@ fn shell_requires_approval_by_default() {
         ]);
         let mut tools = ToolRegistry::new();
         register_core_tools(&mut tools);
-        let mut session = AgentSession::new(AgentConfig::default());
+        let mut session = AgentSession::new(AgentConfig::default()).unwrap();
 
         let result = session.run_turn(&provider, &tools, "shell").await.unwrap();
         let tool_result = result
@@ -1153,7 +1156,7 @@ fn tool_progress_streams_before_tool_result() {
         ]);
         let mut tools = ToolRegistry::new();
         tools.register(ProgressTool);
-        let mut session = AgentSession::new(AgentConfig::default());
+        let mut session = AgentSession::new(AgentConfig::default()).unwrap();
 
         let events = session
             .run_turn_stream(&provider, &tools, "go")
@@ -1205,7 +1208,7 @@ fn token_budget_triggers_auto_compaction() {
                 compact_at_tokens: 10,
             }),
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         let result = session
             .run_turn(&provider, &tools, "x".repeat(200))
@@ -1265,7 +1268,7 @@ fn subagent_tool_runs_in_process_agent() {
                 decision: ApprovalDecision::Allow,
             })),
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         let result = session
             .run_turn(&outer_provider, &tools, "delegate")
@@ -1303,7 +1306,7 @@ fn thinking_blocks_are_separate_from_final_text() {
         }]);
 
         let tools = ToolRegistry::new();
-        let mut session = AgentSession::new(AgentConfig::default());
+        let mut session = AgentSession::new(AgentConfig::default()).unwrap();
 
         let result = session.run_turn(&provider, &tools, "what is 3 + 4?").await.unwrap();
         assert_eq!(result.final_message.text_content(), "The answer is 7.");
@@ -1352,7 +1355,7 @@ fn schema_validation_rejects_invalid_tool_arguments() {
         let mut tools = ToolRegistry::new();
         tools.register(AddTool);
 
-        let mut session = AgentSession::new(AgentConfig::default());
+        let mut session = AgentSession::new(AgentConfig::default()).unwrap();
         let result = session.run_turn(&provider, &tools, "add wrong types").await.unwrap();
         let tool_result = result
             .events
@@ -1394,7 +1397,7 @@ fn schema_validation_can_be_disabled() {
         let mut session = AgentSession::new(AgentConfig {
             auto_validate_schema: false,
             ..AgentConfig::default()
-        });
+        }).unwrap();
         let result = session.run_turn(&provider, &tools, "add wrong types").await.unwrap();
         let tool_result = result
             .events
@@ -1442,7 +1445,7 @@ fn approval_handler_allows_asked_tool_call() {
                 decision: tiny_agent_core::ApprovalDecision::Allow,
             })),
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         let result = session.run_turn(&provider, &tools, "add").await.unwrap();
         let tool_result = result
@@ -1504,7 +1507,7 @@ fn approval_handler_denies_asked_tool_call() {
                 },
             })),
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         let result = session.run_turn(&provider, &tools, "add").await.unwrap();
         let tool_result = result
@@ -1554,7 +1557,7 @@ fn approval_handler_modifies_asked_tool_call() {
                 },
             })),
             ..AgentConfig::default()
-        });
+        }).unwrap();
 
         let result = session.run_turn(&provider, &tools, "add").await.unwrap();
         let tool_result = result

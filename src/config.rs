@@ -98,10 +98,11 @@ impl Default for AgentConfig {
             system_prompt: None,
             max_iterations: 8,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            // Start with an empty environment for shell tools. Callers that need
+            // Start with a minimal environment for shell tools. Callers that need
             // specific variables can add them explicitly; inheriting the entire
             // process environment risks leaking secrets to arbitrary tool calls.
-            env: HashMap::new(),
+            // A default PATH keeps simple safe commands (`ls`, `cat`, etc.) working.
+            env: HashMap::from([("PATH".into(), "/usr/local/bin:/usr/bin:/bin".into())]),
             max_tool_result_chars: usize::MAX,
             hooks: Arc::new(HookRegistry::new()),
             storage: None,
@@ -176,8 +177,12 @@ impl RetryConfig {
     };
 
     /// Whether the error is retryable and we still have attempts left.
+    ///
+    /// `attempts` is the number of provider calls already made (1-indexed).
+    /// Retrying is allowed while `attempts <= max_retries`, so `max_retries: 3`
+    /// yields up to three retry attempts after the initial call.
     pub fn should_retry(&self, error: &crate::error::AgentError, attempts: usize) -> bool {
-        attempts < self.max_retries && error.is_retryable()
+        attempts <= self.max_retries && error.is_retryable()
     }
 
     /// Exponential backoff delay for the given attempt (1-indexed).
@@ -258,9 +263,10 @@ mod tests {
     }
 
     #[test]
-    fn default_env_is_empty() {
+    fn default_env_contains_only_path() {
         let config = AgentConfig::default();
-        assert!(config.env.is_empty());
+        assert_eq!(config.env.len(), 1);
+        assert_eq!(config.env.get("PATH"), Some(&"/usr/local/bin:/usr/bin:/bin".into()));
     }
 
     #[test]

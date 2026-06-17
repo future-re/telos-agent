@@ -48,8 +48,17 @@ pub trait ModelProvider: Send + Sync {
     }
 
     /// Estimate the number of tokens for the given text.
-    /// This is a local approximation used for budget checks before calling the API.
-    fn estimate_tokens(&self, text: &str) -> usize;
+    ///
+    /// The default implementation uses the `cl100k_base` tokenizer (via
+    /// `tiktoken-rs`). Since DeepSeek, Kimi, and most OpenAI-compatible
+    /// providers all use cl100k_base-compatible BPE tokenizers, this gives
+    /// ±5% accuracy across all built-in providers.
+    ///
+    /// Providers with a different tokenizer (e.g. Gemini's SentencePiece)
+    /// can override this.
+    fn estimate_tokens(&self, text: &str) -> usize {
+        crate::tokens::count_tokens(text)
+    }
 }
 
 /// A newtype that implements [`ModelProvider`] by delegating to an erased

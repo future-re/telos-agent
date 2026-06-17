@@ -1,10 +1,13 @@
-//! In-process subagent tool — runs a nested [`AgentSession`] as a tool call.
-//!
-//! Useful when the parent agent wants to delegate a self-contained sub-task
-//! (e.g. "summarise these files") to an isolated agent that has its own turn
-//! loop, its own message history, and its own iteration cap. The subagent
-//! shares the parent's tool registry and model provider but starts with a
-//! fresh conversation.
+//! Subagent module — in-process nested agents and the Fork concurrent-execution engine.
+
+pub mod fork;
+pub use fork::{ForkExecution, ForkLens, ForkResult, ForkShared, Synapse};
+
+// In-process subagent tool — runs a nested agent session as a tool call.
+// Useful when the parent agent wants to delegate a self-contained sub-task
+// to an isolated agent that has its own turn loop, its own message history,
+// and its own iteration cap. The subagent shares the parent's tool registry
+// and model provider but starts with a fresh conversation.
 
 use async_trait::async_trait;
 use futures_util::StreamExt;

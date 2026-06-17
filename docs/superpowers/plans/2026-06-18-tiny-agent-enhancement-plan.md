@@ -459,3 +459,213 @@ fn sanitize_filename(name: &str) -> String {
 **Test:** Memory section renders with entries, empty when no memories.
 
 - [ ] **Step 1: Write, test, commit**
+
+---
+
+## Phase 1 — Sprint 4: Profiles + Consolidation
+
+### Task 12: ProfileManager with user/project/active profiles
+
+**Files:**
+- Create: `src/memory/profile.rs`
+- Modify: `src/memory/mod.rs`
+
+**Interfaces:**
+- Produces: `ProfileManager::new(memory_root: PathBuf, project_root: PathBuf)`, `user_profile() -> String`, `project_profile() -> String`, `active_state() -> String`, `update_active_state(session_summary: &str)`, `consolidate_user_profile()`, `consolidate_project_profile()`
+- Profile files stored at `~/.tiny-agent/profile/user.md` and `.tiny-agent/profile/{project,active}.md`
+
+**Code:** ProfileManager reads/writes profile markdown files. Active state updated per-session. User and project profiles updated during consolidation (Dream).
+
+- [ ] **Step 1: Write profile.rs, test, commit**
+
+---
+
+### Task 13: ProfileSection for prompt injection
+
+**Files:**
+- Modify: `src/prompt/builtins.rs`
+
+**Interfaces:**
+- Produces: `ProfileSection::new(profile_manager: Arc<ProfileManager>)` — renders all three profiles as a single prompt section with "## User Profile", "## Project Profile", "## Active State"
+
+- [ ] **Step 1: Write web_search.rs, test, commit**
+
+---
+
+## Phase 3: Agent Enhancement Layer
+
+### Task 20: Fork engine — ForkLens + Synapse
+
+**Files:**
+- Create: `src/subagent/fork.rs`
+- Modify: `src/subagent/mod.rs`
+- Modify: `src/subagent.rs` — extend SubagentTool with fork mode
+
+**Interfaces:**
+- Produces: `ForkShared { provider, tool_registry, messages, config, cwd }`, `ForkLens { lens, system_prompt, task, output_schema, allowed_tools }`, `ForkResult::Text|Structured`, `Synapse::new(max_concurrent)`, `run_all(lenses, f)`
+- Synapse uses `tokio::sync::Semaphore` for concurrency control
+
+**Code:** Fork engine creates multiple lightweight "lenses" that share the parent session's provider/tools/messages but each gets its own system prompt + task. All lenses run concurrently via Synapse, results collected. No subprocess spawning.
+
+- [ ] **Step 1: Write fork.rs with ForkLens, ForkShared, Synapse, test concurrent execution, commit**
+
+---
+
+### Task 21: Extend SubagentTool with fork mode
+
+**Files:**
+- Modify: `src/subagent.rs`
+
+**Changes:** Add a `mode` parameter to SubagentTool: when `mode: "fork"`, use ForkEngine instead of full AgentSession. Fork mode passes a context summary (not all messages) to keep it lightweight.
+
+- [ ] **Step 1: Extend SubagentTool, add fork integration test, commit**
+
+---
+
+### Task 22: Hooks enhancement — new phases and types
+
+**Files:**
+- Modify: `src/hooks.rs`
+
+**Interfaces:**
+- New `HookPhase` variants: `PreToolUse { tool_name: String }`, `PostToolUse { tool_name: String }`, `PostToolUseFailure { tool_name: String }`, `SessionStart`, `UserPromptSubmit`
+- New `HookType` enum: `Command`, `Prompt`, `Http`
+- `HookCondition { tool_name: Option<String> }` for filtering
+- `HookEntry` wraps `Hook` + `condition` + `once` + `async_exec`
+
+- [ ] **Step 1: Extend hooks.rs with new phases/types/conditions, test phase filtering, commit**
+
+---
+
+### Task 23: Hook executors (prompt, http)
+
+**Files:**
+- Create: `src/hooks/prompt.rs`
+- Create: `src/hooks/http.rs`
+- Modify: `src/hooks/mod.rs`
+
+**Interfaces:**
+- Prompt hook: takes a short prompt, calls provider (lightweight model), returns result
+- HTTP hook: POST to URL with JSON body
+
+- [ ] **Step 1: Write prompt.rs + http.rs, test, commit**
+
+---
+
+### Task 24: Task management system
+
+**Files:**
+- Create: `src/tasks/mod.rs`
+- Create: `src/tasks/task.rs`
+- Create: `src/tasks/tool.rs`
+- Create: `src/tasks/persistence.rs`
+- Modify: `src/lib.rs`
+- Modify: `src/tools/mod.rs`
+
+**Interfaces:**
+- `Task { id, subject, description, status, blocks, blocked_by, output }`, `TaskStatus::Pending|InProgress|Completed|Deleted`
+- Tools: `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`
+- Persistence: `.tiny-agent/tasks/<id>.json` files
+
+- [ ] **Step 1: Write task types + manager + tools + tests, commit**
+
+---
+
+### Task 25: Integrate task tracking with fork
+
+**Files:**
+- Modify: `src/subagent/fork.rs`
+
+**Changes:** ForkExecution creates a Task for each lens, updates status during execution. Completed task results available via TaskGet.
+
+- [ ] **Step 1: Add task tracking to ForkExecution, integration test, commit**
+
+---
+
+## Phase 2: Extension Layer
+
+### Task 14: Simple stdio MCP client
+
+**Files:**
+- Create: `src/mcp/mod.rs`
+- Create: `src/mcp/client.rs`
+- Create: `src/mcp/config.rs`
+- Modify: `src/lib.rs`
+- Add to Cargo.toml: `reqwest = { version = "0.12", features = ["json"] }` (for Phase 2 tools)
+
+**Interfaces:**
+- Produces: `McpServerConfig { command, args, env, cwd, auto_connect, timeout_ms }`, `McpClient::new(config)`, `connect() -> Result<()>`, `list_tools() -> Result<Vec<McpTool>>`, `call_tool(name, args) -> Result<Value>`, `McpTool { name, description, input_schema }`
+- Implements JSON-RPC 2.0 over stdio (spawn process, stdin/stdout)
+
+**Design:** Self-implemented stdio MCP client. Spawns the command as a child process, sends JSON-RPC requests on stdin, reads responses from stdout. Supports initialize handshake, tools/list, and tools/call. No external MCP crate dependency.
+
+- [ ] **Step 1: Write mcp/client.rs with JSON-RPC + stdio transport, test with a simple echo script, commit**
+
+---
+
+### Task 15: MCP config loading and McpManager
+
+**Files:**
+- Create: `src/mcp/manager.rs`
+- Modify: `src/mcp/mod.rs`
+
+**Interfaces:**
+- Produces: `McpManager::load_config(path: &Path)`, `connect_all()`, `all_tools() -> Vec<(String, McpTool)>`, `call_tool(server_id, tool_name, args)`, `disconnect_all()`
+- Config from `.tiny-agent/mcp.json` with format: `{"mcpServers": {"name": {"command": "...", "args": [...]}}}`
+
+- [ ] **Step 1: Write manager.rs, test config loading, commit**
+
+---
+
+### Task 16: McpToolBridge and prompt injection
+
+**Files:**
+- Create: `src/mcp/bridge.rs`
+- Modify: `src/mcp/mod.rs`
+- Modify: `src/prompt/builtins.rs` — add `McpSection`
+
+**Interfaces:**
+- Produces: `McpToolBridge::new(server_id, mcp_tool, manager)` — implements `Tool` trait
+- `McpSection::new(manager)` — PromptSection rendering available MCP tools
+
+- [ ] **Step 1: Write bridge.rs + McpSection, test, commit**
+
+---
+
+### Task 17: WebFetchTool
+
+**Files:**
+- Create: `src/tools/web_fetch.rs`
+- Modify: `src/tools/mod.rs`, `src/lib.rs`
+
+**Interfaces:**
+- Produces: `WebFetchTool` — fetches URL, returns markdown text. Cached per-URL for 15 min.
+- Uses `reqwest` for HTTP, simple HTML-to-text conversion (strip tags)
+
+- [ ] **Step 1: Write web_fetch.rs, test with a static page, commit**
+
+---
+
+### Task 18: WebSearchTool
+
+**Files:**
+- Create: `src/tools/web_search.rs`
+- Modify: `src/tools/mod.rs`, `src/lib.rs`
+
+**Interfaces:**
+- Produces: `WebSearchTool` — searches via DuckDuckGo (no API key), returns titles+URLs+snippets
+
+- [ ] **Step 1: Write web_search.rs, test, commit**
+
+---
+
+### Task 19: AskUserQuestionTool
+
+**Files:**
+- Create: `src/tools/ask_user_question.rs`
+- Modify: `src/tools/mod.rs`, `src/lib.rs`
+
+**Interfaces:**
+- Produces: `AskUserQuestionTool` — presents questions to user, collects answers. Single-select and multi-select support.
+
+- [ ] **Step 1: Write ask_user_question.rs, test, commit**

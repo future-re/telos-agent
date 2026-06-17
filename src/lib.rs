@@ -36,6 +36,7 @@ pub mod runtime;
 pub mod skills;
 pub mod storage;
 pub mod subagent;
+pub mod tokens;
 pub mod tool;
 pub mod tools;
 
@@ -78,8 +79,8 @@ pub use runtime::{AgentSession, TurnEvent, TurnResult};
 pub use skills::{Skill, SkillArg, SkillLoader, SkillRegistry, SkillSource};
 // Storage — persistence backends for saving and resuming sessions.
 pub use storage::{JsonlStorage, NoopStorage, Storage};
-// Subagent — nested agent run exposed as a tool.
-pub use subagent::SubagentTool;
+// Subagent — nested agent run exposed as a tool and Fork concurrent-execution engine.
+pub use subagent::{ForkExecution, ForkLens, ForkResult, ForkShared, SubagentTool, Synapse};
 // MCP — stdio-based Model Context Protocol client + manager + bridge.
 pub use mcp::{McpClient, McpManager, McpTool, McpToolBridge};
 // Prompt system — modular, cache-aware construction of the system prompt.

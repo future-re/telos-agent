@@ -83,11 +83,6 @@ impl ModelProvider for DeepSeekProvider {
             request,
         )
     }
-
-    fn estimate_tokens(&self, text: &str) -> usize {
-        // Rough heuristic for cl100k_base-like tokenizers.
-        (text.len() as f64 / 4.0).ceil() as usize
-    }
 }
 
 #[cfg(test)]

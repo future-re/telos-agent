@@ -1,6 +1,26 @@
 use crate::skills::{Skill, SkillArg, SkillSource};
 use std::path::Path;
 
+impl SkillLoader {
+    /// Load all skills compiled into the binary.
+    pub fn load_bundled_skills() -> Vec<Skill> {
+        let mut skills = Vec::new();
+        let files: &[(&str, &str)] = &[
+            ("verify.md", include_str!("bundled/verify.md")),
+            ("debug.md", include_str!("bundled/debug.md")),
+            ("remember.md", include_str!("bundled/remember.md")),
+            ("brainstorm.md", include_str!("bundled/brainstorm.md")),
+            ("update-config.md", include_str!("bundled/update-config.md")),
+        ];
+        for (_name, content) in files {
+            if let Some(skill) = Self::parse_skill(content, SkillSource::Bundled) {
+                skills.push(skill);
+            }
+        }
+        skills
+    }
+}
+
 /// Loads skills from a directory of markdown files.
 pub struct SkillLoader;
 

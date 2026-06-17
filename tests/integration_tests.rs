@@ -1591,3 +1591,16 @@ fn skill_registry_get_missing_returns_none() {
     let reg = SkillRegistry::new();
     assert!(reg.get("nonexistent").is_none());
 }
+
+#[test]
+fn bundled_skills_load_successfully() {
+    use tiny_agent_core::skills::SkillLoader;
+    let skills = SkillLoader::load_bundled_skills();
+    assert!(skills.len() >= 5, "expected >=5 bundled skills, got {}", skills.len());
+    for s in &skills {
+        assert!(!s.name.is_empty(), "skill has empty name");
+        assert!(!s.description.is_empty(), "skill '{}' has empty description", s.name);
+        assert!(!s.prompt.is_empty(), "skill '{}' has empty prompt", s.name);
+        assert_eq!(s.source, tiny_agent_core::skills::SkillSource::Bundled);
+    }
+}

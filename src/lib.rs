@@ -55,6 +55,7 @@ pub use hooks::{Hook, HookContext, HookPhase, HookRegistry};
 // Message model — the lingua franca between session, provider, and tools.
 pub use message::{ContentBlock, Message, Role, TextBlock, ThinkingBlock, ToolCall, ToolResult};
 // Memory — persistent cross-session agent memory.
+pub use memory::ProfileManager;
 pub use memory::{MemoryCategory, MemoryEntry, MemoryFormat, MemoryStatus, MemoryStore};
 pub use memory::{
     MemoryEditTool, MemoryGrepTool, MemoryReadTool, MemoryStatusTool, MemoryWriteTool,

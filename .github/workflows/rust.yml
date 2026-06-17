@@ -68,6 +68,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
       - uses: actions/cache@v4
         with:
           path: |
@@ -75,14 +77,14 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-coverage-
-      - name: Install cargo-tarpaulin
+          key: ${{ runner.os }}-cargo-llvm-cov-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-llvm-cov-
+      - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-tarpaulin
+          tool: cargo-llvm-cov
       - name: Generate coverage
-        run: cargo tarpaulin --out xml
+        run: cargo llvm-cov --cobertura --output-path cobertura.xml
       - name: Upload to codecov
         uses: codecov/codecov-action@v4
         with:

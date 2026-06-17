@@ -80,8 +80,8 @@ pub use skills::{Skill, SkillArg, SkillLoader, SkillRegistry, SkillSource};
 pub use storage::{JsonlStorage, NoopStorage, Storage};
 // Subagent — nested agent run exposed as a tool.
 pub use subagent::SubagentTool;
-// MCP — stdio-based Model Context Protocol client.
-pub use mcp::{McpClient, McpTool};
+// MCP — stdio-based Model Context Protocol client + manager + bridge.
+pub use mcp::{McpClient, McpManager, McpTool, McpToolBridge};
 // Prompt system — modular, cache-aware construction of the system prompt.
 pub use prompt::{PromptAssembly, PromptSection, PromptStability};
 // Tool abstraction — the trait every callable capability implements, plus its registry.

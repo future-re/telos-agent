@@ -1811,7 +1811,8 @@ async fn profile_section_renders_profiles() {
     use tiny_agent_core::prompt::builtins::ProfileSection;
 
     let dir = tempfile::tempdir().unwrap();
-    let mgr = Arc::new(ProfileManager::new(dir.path().to_path_buf(), dir.path().to_path_buf()));
+    let mgr =
+        Arc::new(ProfileManager::new(dir.path().to_path_buf(), dir.path().to_path_buf()).unwrap());
     mgr.set_user_profile("Test user profile content").unwrap();
     mgr.set_project_profile("Test project profile content").unwrap();
 
@@ -1821,4 +1822,28 @@ async fn profile_section_renders_profiles() {
     assert!(rendered.contains("Test user profile content"));
     assert!(rendered.contains("Project Profile"));
     assert!(rendered.contains("Test project profile content"));
+}
+
+#[tokio::test]
+async fn profile_section_rerenders_when_profiles_change() {
+    use std::sync::Arc;
+    use tiny_agent_core::memory::ProfileManager;
+    use tiny_agent_core::prompt::PromptAssembly;
+    use tiny_agent_core::prompt::builtins::ProfileSection;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mgr =
+        Arc::new(ProfileManager::new(dir.path().to_path_buf(), dir.path().to_path_buf()).unwrap());
+    mgr.set_user_profile("Before").unwrap();
+
+    let mut assembly = PromptAssembly::new();
+    assembly.add_dynamic(ProfileSection::new(mgr.clone()));
+
+    let first = assembly.build().await;
+    assert!(first.contains("Before"));
+
+    mgr.set_user_profile("After").unwrap();
+    let second = assembly.build().await;
+    assert!(second.contains("After"));
+    assert!(!second.contains("Before"));
 }

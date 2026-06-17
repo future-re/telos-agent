@@ -1,6 +1,6 @@
-use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
@@ -30,16 +30,15 @@ pub struct McpTool {
 ///
 /// # Thread safety
 ///
-/// All mutable state is behind `RefCell`, making `&self` the only
-/// shared reference needed for every operation.  The struct is *not*
-/// `Sync` and must be used from a single async task.
+/// All mutable state is behind `Mutex`, making `&self` the only
+/// shared reference needed for every operation. The struct is `Sync`.
 pub struct McpClient {
     config: McpServerConfig,
-    process: RefCell<Option<Child>>,
-    stdin: RefCell<Option<std::process::ChildStdin>>,
-    reader: RefCell<Option<BufReader<std::process::ChildStdout>>>,
-    server_info: RefCell<Option<Value>>,
-    tools: RefCell<Vec<McpTool>>,
+    process: Mutex<Option<Child>>,
+    stdin: Mutex<Option<std::process::ChildStdin>>,
+    reader: Mutex<Option<BufReader<std::process::ChildStdout>>>,
+    server_info: Mutex<Option<Value>>,
+    tools: Mutex<Vec<McpTool>>,
 }
 
 impl McpClient {
@@ -49,11 +48,11 @@ impl McpClient {
     pub fn new(config: McpServerConfig) -> Self {
         Self {
             config,
-            process: RefCell::new(None),
-            stdin: RefCell::new(None),
-            reader: RefCell::new(None),
-            server_info: RefCell::new(None),
-            tools: RefCell::new(Vec::new()),
+            process: Mutex::new(None),
+            stdin: Mutex::new(None),
+            reader: Mutex::new(None),
+            server_info: Mutex::new(None),
+            tools: Mutex::new(Vec::new()),
         }
     }
 
@@ -88,9 +87,9 @@ impl McpClient {
             message: "failed to open child stdout".into(),
         })?;
 
-        *self.stdin.borrow_mut() = Some(stdin);
-        *self.reader.borrow_mut() = Some(BufReader::new(stdout));
-        *self.process.borrow_mut() = Some(child);
+        *self.stdin.lock().unwrap() = Some(stdin);
+        *self.reader.lock().unwrap() = Some(BufReader::new(stdout));
+        *self.process.lock().unwrap() = Some(child);
 
         // MCP initialize handshake
         let init_response = self
@@ -104,21 +103,21 @@ impl McpClient {
             )
             .await?;
 
-        self.server_info.replace(Some(init_response));
+        self.server_info.lock().unwrap().replace(init_response);
 
         // Send initialized notification
         self.send_notification("notifications/initialized", json!({})).await?;
 
         // Fetch tools
         let tools_response = self.send_request("tools/list", json!({})).await?;
-        *self.tools.borrow_mut() = Self::parse_tools(&tools_response);
+        *self.tools.lock().unwrap() = Self::parse_tools(&tools_response);
 
         Ok(())
     }
 
     /// Return the cached tool list.
     pub fn tools(&self) -> Vec<McpTool> {
-        self.tools.borrow().clone()
+        self.tools.lock().unwrap().clone()
     }
 
     /// Call an MCP tool by name with the given arguments.
@@ -130,12 +129,12 @@ impl McpClient {
 
     /// Kill the server process and release I/O handles.
     pub fn disconnect(&self) {
-        if let Some(mut child) = self.process.borrow_mut().take() {
+        if let Some(mut child) = self.process.lock().unwrap().take() {
             let _ = child.kill();
             let _ = child.wait();
         }
-        *self.stdin.borrow_mut() = None;
-        *self.reader.borrow_mut() = None;
+        *self.stdin.lock().unwrap() = None;
+        *self.reader.lock().unwrap() = None;
     }
 
     // ── internal helpers ────────────────────────────────────────────
@@ -152,7 +151,7 @@ impl McpClient {
         let request_str = serde_json::to_string(&request).unwrap();
 
         // Write request to child stdin
-        if let Some(ref mut stdin) = *self.stdin.borrow_mut() {
+        if let Some(ref mut stdin) = *self.stdin.lock().unwrap() {
             writeln!(stdin, "{request_str}").map_err(|e| AgentError::ToolExecution {
                 tool: "McpClient".into(),
                 message: format!("write to MCP server stdin failed: {e}"),
@@ -166,7 +165,7 @@ impl McpClient {
         }
 
         // Read one response line from child stdout
-        if let Some(ref mut reader) = *self.reader.borrow_mut() {
+        if let Some(ref mut reader) = *self.reader.lock().unwrap() {
             let mut line = String::new();
             reader.read_line(&mut line).map_err(|e| AgentError::ToolExecution {
                 tool: "McpClient".into(),
@@ -215,7 +214,7 @@ impl McpClient {
         });
         let notif_str = serde_json::to_string(&notification).unwrap();
 
-        if let Some(ref mut stdin) = *self.stdin.borrow_mut() {
+        if let Some(ref mut stdin) = *self.stdin.lock().unwrap() {
             writeln!(stdin, "{notif_str}").ok();
             stdin.flush().ok();
         }

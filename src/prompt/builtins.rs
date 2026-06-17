@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use crate::mcp::manager::McpManager;
 use crate::memory::index::MemoryStore;
 use crate::memory::profile::ProfileManager;
 use crate::prompt::{PromptSection, PromptStability};
@@ -253,10 +254,45 @@ impl PromptSection for ProfileSection {
         "profile"
     }
     fn stability(&self) -> PromptStability {
-        PromptStability::Static
+        PromptStability::Dynamic
     }
 
     async fn render(&self, _ctx: &()) -> String {
         self.profile_manager.render_all()
+    }
+}
+
+// ── MCP ────────────────────────────────────────────────────
+
+/// Renders a list of tools provided by connected MCP servers.
+pub struct McpSection {
+    manager: Arc<McpManager>,
+}
+
+impl McpSection {
+    pub fn new(manager: Arc<McpManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl PromptSection for McpSection {
+    fn name(&self) -> &str {
+        "mcp"
+    }
+    fn stability(&self) -> PromptStability {
+        PromptStability::Dynamic
+    }
+
+    async fn render(&self, _ctx: &()) -> String {
+        let tools = self.manager.all_tools().await;
+        if tools.is_empty() {
+            return String::new();
+        }
+        let mut lines = vec!["## MCP Tools".to_string()];
+        for (server_id, tool) in &tools {
+            lines.push(format!("- **mcp__{}__{}**: {}", server_id, tool.name, tool.description));
+        }
+        lines.join("\n")
     }
 }

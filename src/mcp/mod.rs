@@ -23,7 +23,11 @@
 //! # }
 //! ```
 
+pub mod bridge;
 pub mod client;
 pub mod config;
+pub mod manager;
+pub use bridge::McpToolBridge;
 pub use client::{McpClient, McpTool};
 pub use config::McpServerConfig;
+pub use manager::McpManager;

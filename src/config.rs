@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use crate::compaction::CompactionStrategy;
 use crate::hooks::HookRegistry;
@@ -42,6 +43,16 @@ pub struct AgentConfig {
     pub tool_concurrency_limit: usize,
     /// Optional token budget that triggers proactive compaction.
     pub token_budget: Option<TokenBudget>,
+    /// Retry configuration for transient provider failures.
+    /// When `None`, provider calls are not retried.
+    pub retry: RetryConfig,
+    /// Shared cancellation flag. Set to `true` from another task to cancel the
+    /// running turn as soon as the next checkpoint is reached.
+    pub cancelled: Arc<AtomicBool>,
+    /// Per-tool execution timeout in milliseconds. When set, any tool that runs
+    /// longer than this will be interrupted and its result will be an
+    /// `is_error: true` timeout so the model can recover.
+    pub tool_timeout_ms: Option<u64>,
 }
 
 impl Default for AgentConfig {
@@ -58,6 +69,9 @@ impl Default for AgentConfig {
             permission_engine: None,
             tool_concurrency_limit: 10,
             token_budget: None,
+            retry: RetryConfig::default(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            tool_timeout_ms: None,
         }
     }
 }
@@ -82,9 +96,73 @@ pub struct TokenBudget {
 impl TokenBudget {
     /// Build a budget with `compact_at_tokens` set to 80% of `max_tokens`.
     pub fn new(max_tokens: usize) -> Self {
+        Self { max_tokens, compact_at_tokens: ((max_tokens as f64) * 0.8).ceil() as usize }
+    }
+}
+
+/// Retry behaviour for transient provider failures.
+///
+/// When a provider call fails with a retryable error (network errors, 429, 5xx),
+/// the runtime will retry with exponential backoff up to `max_retries` times.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetryConfig {
+    /// Maximum number of retry attempts (0 = no retries).
+    pub max_retries: usize,
+    /// Initial backoff delay in milliseconds.
+    pub base_delay_ms: u64,
+    /// Maximum backoff delay in milliseconds.
+    pub max_delay_ms: u64,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
         Self {
-            max_tokens,
-            compact_at_tokens: ((max_tokens as f64) * 0.8).ceil() as usize,
+            max_retries: 3,
+            base_delay_ms: 500,
+            max_delay_ms: 10_000,
         }
+    }
+}
+
+impl RetryConfig {
+    /// No retries at all — a convenient sentinel that can replace `Option<RetryConfig>`.
+    pub const NONE: Self = Self {
+        max_retries: 0,
+        base_delay_ms: 0,
+        max_delay_ms: 0,
+    };
+
+    /// Whether the error is retryable and we still have attempts left.
+    pub fn should_retry(&self, error: &crate::error::AgentError, attempts: usize) -> bool {
+        attempts < self.max_retries && error.is_retryable()
+    }
+
+    /// Exponential backoff delay for the given attempt (1-indexed).
+    pub fn delay_for(&self, attempt: usize) -> std::time::Duration {
+        let delay = self.base_delay_ms.saturating_mul(1u64 << (attempt.saturating_sub(1)));
+        let capped = delay.min(self.max_delay_ms);
+        std::time::Duration::from_millis(capped)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_budget_new_sets_compact_at_80_percent() {
+        let budget = TokenBudget::new(1000);
+        assert_eq!(budget.max_tokens, 1000);
+        assert_eq!(budget.compact_at_tokens, 800);
+    }
+
+    #[test]
+    fn token_budget_rounds_up() {
+        let budget = TokenBudget::new(100);
+        // 80% of 100 = 80, ceil(80) = 80
+        assert_eq!(budget.compact_at_tokens, 80);
+        let budget2 = TokenBudget::new(101);
+        // 80% of 101 = 80.8, ceil = 81
+        assert_eq!(budget2.compact_at_tokens, 81);
     }
 }

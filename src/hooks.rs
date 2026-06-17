@@ -60,9 +60,7 @@ pub struct HookRegistry {
 
 impl std::fmt::Debug for HookRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HookRegistry")
-            .field("hook_count", &self.hooks.len())
-            .finish()
+        f.debug_struct("HookRegistry").field("hook_count", &self.hooks.len()).finish()
     }
 }
 
@@ -81,10 +79,67 @@ impl HookRegistry {
 
     /// Snapshot of hooks for the given phase, preserving registration order.
     pub fn hooks_for_phase(&self, phase: HookPhase) -> Vec<Arc<dyn Hook>> {
-        self.hooks
-            .iter()
-            .filter(|hook| hook.phase() == phase)
-            .cloned()
-            .collect()
+        self.hooks.iter().filter(|hook| hook.phase() == phase).cloned().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+
+    struct TestHook {
+        name: &'static str,
+        phase: HookPhase,
+    }
+
+    #[async_trait]
+    impl Hook for TestHook {
+        fn name(&self) -> &str {
+            self.name
+        }
+        fn phase(&self) -> HookPhase {
+            self.phase
+        }
+        async fn run(
+            &self,
+            _ctx: &HookContext,
+            _msg: &Message,
+        ) -> Result<Option<Message>, AgentError> {
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn registry_is_empty_by_default() {
+        let r = HookRegistry::new();
+        assert!(r.hooks_for_phase(HookPhase::PostSampling).is_empty());
+        assert!(r.hooks_for_phase(HookPhase::Stop).is_empty());
+    }
+
+    #[test]
+    fn registry_filters_hooks_by_phase() {
+        let mut r = HookRegistry::new();
+        r.register(TestHook { name: "post", phase: HookPhase::PostSampling });
+        r.register(TestHook { name: "stop", phase: HookPhase::Stop });
+        assert_eq!(r.hooks_for_phase(HookPhase::PostSampling).len(), 1);
+        assert_eq!(r.hooks_for_phase(HookPhase::Stop).len(), 1);
+    }
+
+    #[test]
+    fn registry_preserves_registration_order() {
+        let mut r = HookRegistry::new();
+        r.register(TestHook { name: "a", phase: HookPhase::Stop });
+        r.register(TestHook { name: "b", phase: HookPhase::Stop });
+        let hooks = r.hooks_for_phase(HookPhase::Stop);
+        assert_eq!(hooks[0].name(), "a");
+        assert_eq!(hooks[1].name(), "b");
+    }
+
+    #[test]
+    fn empty_registry_returns_empty_vec_for_any_phase() {
+        let r = HookRegistry::new();
+        assert!(r.hooks_for_phase(HookPhase::PostSampling).is_empty());
+        assert!(r.hooks_for_phase(HookPhase::Stop).is_empty());
     }
 }

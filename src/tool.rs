@@ -19,7 +19,7 @@ use crate::message::Message;
 /// Public-facing description of a tool sent to the model.
 ///
 /// `input_schema` is JSON Schema; providers translate it into their native
-/// tool-spec format (Anthropic `input_schema`, OpenAI `function.parameters`).
+/// tool-spec format (OpenAI-compatible `function.parameters`).
 #[derive(Debug, Clone)]
 pub struct ToolDefinition {
     pub name: String,
@@ -38,9 +38,7 @@ pub struct ToolOutput {
 impl ToolOutput {
     /// Wrap a plain text result as `{ "text": "…" }`.
     pub fn text(text: impl Into<String>) -> Self {
-        Self {
-            content: json!({ "text": text.into() }),
-        }
+        Self { content: json!({ "text": text.into() }) }
     }
 
     /// Wrap an arbitrary JSON value as the tool output.
@@ -118,6 +116,9 @@ pub struct ToolContext {
     pub progress: Option<mpsc::UnboundedSender<ToolProgress>>,
     /// Per-session file-read cache used by filesystem tools to prevent stale writes.
     pub read_file_state: FileReadState,
+    /// Optional per-call timeout. The executor will cancel `invoke` if it
+    /// exceeds this duration and return an `is_error: true` result.
+    pub timeout: Option<std::time::Duration>,
 }
 
 /// A tool that can be invoked by the agent.
@@ -213,20 +214,105 @@ impl ToolRegistry {
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         self.tools
             .iter()
-            .filter(|(name, _)| {
-                self.canonical_names
-                    .iter()
-                    .any(|canonical| canonical == *name)
-            })
+            .filter(|(name, _)| self.canonical_names.iter().any(|canonical| canonical == *name))
             .map(|(_, tool)| tool.definition())
             .collect::<Vec<_>>()
     }
 
     /// Look up a tool by name. Returns [`AgentError::ToolNotFound`] if absent.
     pub fn get(&self, name: &str) -> Result<Arc<dyn Tool>, AgentError> {
-        self.tools
-            .get(name)
-            .cloned()
-            .ok_or_else(|| AgentError::ToolNotFound(name.to_string()))
+        self.tools.get(name).cloned().ok_or_else(|| AgentError::ToolNotFound(name.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use serde_json::json;
+
+    struct FakeTool {
+        def: ToolDefinition,
+        aliases: &'static [&'static str],
+    }
+
+    impl FakeTool {
+        fn new(name: &str, aliases: &'static [&'static str]) -> Self {
+            Self {
+                def: ToolDefinition {
+                    name: name.into(),
+                    description: "test".into(),
+                    input_schema: json!({"type": "object"}),
+                },
+                aliases,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Tool for FakeTool {
+        fn definition(&self) -> ToolDefinition {
+            self.def.clone()
+        }
+        fn aliases(&self) -> &'static [&'static str] {
+            self.aliases
+        }
+        async fn invoke(
+            &self,
+            _arguments: Value,
+            _context: ToolContext,
+        ) -> Result<ToolOutput, AgentError> {
+            Ok(ToolOutput::text("ok"))
+        }
+    }
+
+    #[test]
+    fn registry_returns_definitions_for_canonical_names_only() {
+        let mut registry = ToolRegistry::new();
+        registry.register(FakeTool::new("Bash", &["shell"]));
+        let defs = registry.definitions();
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].name, "Bash");
+    }
+
+    #[test]
+    fn registry_lookup_by_canonical_name() {
+        let mut registry = ToolRegistry::new();
+        registry.register(FakeTool::new("Read", &[]));
+        assert!(registry.get("Read").is_ok());
+    }
+
+    #[test]
+    fn registry_lookup_by_alias() {
+        let mut registry = ToolRegistry::new();
+        registry.register(FakeTool::new("Bash", &["shell"]));
+        assert!(registry.get("shell").is_ok());
+        assert!(registry.get("Bash").is_ok());
+    }
+
+    #[test]
+    fn registry_get_unknown_tool_returns_tool_not_found() {
+        let registry = ToolRegistry::new();
+        assert!(matches!(registry.get("nonexistent"), Err(AgentError::ToolNotFound(_))));
+    }
+
+    #[test]
+    fn registry_canonical_names_do_not_duplicate() {
+        let mut registry = ToolRegistry::new();
+        registry.register(FakeTool::new("A", &[]));
+        registry.register(FakeTool::new("B", &[]));
+        let defs = registry.definitions();
+        assert_eq!(defs.len(), 2);
+    }
+
+    #[test]
+    fn registry_re_register_overrides() {
+        let mut registry = ToolRegistry::new();
+        registry.register(FakeTool::new("X", &[]));
+        // Register again with same canonical name
+        registry.register(FakeTool::new("X", &[]));
+        // Still returns one definition (canonical name is deduplicated in the filter)
+        let defs = registry.definitions();
+        assert_eq!(defs.len(), 1);
     }
 }

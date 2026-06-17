@@ -10,8 +10,8 @@ use serde_json::Value;
 
 /// Speaker of a message in the conversation.
 ///
-/// Providers may map these to their own role taxonomies (e.g. OpenAI renders
-/// `Tool` results as a `user` message — see provider implementations).
+/// Providers may map these to their own role taxonomies (e.g. OpenAI-compatible
+/// APIs render `Tool` results as separate `tool` messages — see provider implementations).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Role {
     /// Instructions/persona supplied before the conversation starts.

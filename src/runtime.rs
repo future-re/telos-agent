@@ -17,6 +17,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tracing::{debug, error, info, info_span, warn};
 
 use crate::compaction::{CompactionConfig, compact_tool_result_message};
 use crate::config::AgentConfig;
@@ -24,7 +25,10 @@ use crate::error::AgentError;
 use crate::executor::{ToolExecutionEvent, ToolExecutionStreamItem, execute_tool_calls_stream};
 use crate::hooks::{HookContext, HookPhase};
 use crate::message::{ContentBlock, Message, Role, TextBlock};
-use crate::provider::{CompletionRequest, ModelProvider, ProviderEvent, StopReason, TokenUsage};
+use crate::metrics::SessionMetrics;
+use crate::provider::{
+    CompletionRequest, ModelProvider, ProviderEvent, StopReason, TokenUsage,
+};
 use crate::storage::Storage;
 use crate::tool::FileReadState;
 use crate::tool::ToolRegistry;
@@ -103,6 +107,12 @@ pub enum TurnEvent {
         name: String,
         emitted_message: bool,
     },
+    /// A provider call failed with a retryable error and is being retried.
+    ProviderRetry {
+        attempt: usize,
+        max_retries: usize,
+        delay_ms: u64,
+    },
     /// Final event of a turn — the assistant produced an end-of-turn message.
     TurnFinished {
         stop_reason: StopReason,
@@ -133,6 +143,8 @@ pub struct AgentSession {
     messages: Vec<Message>,
     /// Shared state used by filesystem tools to reject stale writes.
     read_file_state: FileReadState,
+    /// Accumulated session-level metrics updated by the runtime.
+    metrics: SessionMetrics,
 }
 
 impl AgentSession {
@@ -153,6 +165,7 @@ impl AgentSession {
             next_turn_id: 1,
             messages,
             read_file_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            metrics: SessionMetrics::new(),
         }
     }
 
@@ -164,6 +177,11 @@ impl AgentSession {
     /// Unique identifier minted at construction (or supplied to [`resume`](Self::resume)).
     pub fn session_id(&self) -> &str {
         &self.session_id
+    }
+
+    /// Snapshot of the accumulated session metrics.
+    pub fn metrics(&self) -> &SessionMetrics {
+        &self.metrics
     }
 
     /// Drop all non-system messages and reset the turn counter.
@@ -224,6 +242,7 @@ impl AgentSession {
             next_turn_id: 1,
             messages,
             read_file_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            metrics: SessionMetrics::new(),
         })
     }
 
@@ -252,6 +271,13 @@ impl AgentSession {
             };
             yield TurnEvent::User(user_message);
 
+            self.metrics.add_turn();
+
+            {
+                let _guard = info_span!("turn", session_id = %self.session_id, turn_id).entered();
+                info!("turn started");
+            }
+
             let mut iterations = 0;
             loop {
                 // Bail out if the model keeps calling tools forever. The cap
@@ -260,7 +286,19 @@ impl AgentSession {
                     Err(AgentError::MaxIterations(self.config.max_iterations))?;
                 }
                 iterations += 1;
+                self.metrics.add_iteration();
+
+                // Check for cancellation before each iteration.
+                if self.config.cancelled.load(Ordering::Relaxed) {
+                    warn!("turn cancelled during iteration {}", iterations);
+                    Err(AgentError::Cancelled)?;
+                }
+
                 let tool_definitions = tools.definitions();
+                {
+                    let _guard = info_span!("iteration", iteration = iterations, messages = self.messages.len()).entered();
+                    debug!("iteration started");
+                }
 
                 yield TurnEvent::IterationStarted {
                     iteration: iterations,
@@ -279,6 +317,11 @@ impl AgentSession {
                 if let Some(budget) = self.config.token_budget {
                     let estimated_tokens = estimate_message_tokens(&self.messages, provider);
                     if estimated_tokens > budget.max_tokens {
+                        warn!(
+                            used_tokens = estimated_tokens,
+                            max_tokens = budget.max_tokens,
+                            "token budget exceeded"
+                        );
                         yield TurnEvent::TokenBudgetExceeded {
                             used_tokens: estimated_tokens,
                             max_tokens: budget.max_tokens,
@@ -292,6 +335,8 @@ impl AgentSession {
                     if estimated_tokens >= budget.compact_at_tokens {
                         if let Some(compaction) = self.config.compaction.clone() {
                             if compaction.compact(&mut self.messages, provider).await? {
+                                self.metrics.add_compaction();
+                                info!("token-budget compaction applied");
                                 yield TurnEvent::CompactionStarted {
                                     reason: "token_budget".into(),
                                 };
@@ -305,6 +350,8 @@ impl AgentSession {
 
                 if let Some(compaction) = self.config.compaction.clone() {
                     if compaction.compact(&mut self.messages, provider).await? {
+                        self.metrics.add_compaction();
+                        info!("char-budget compaction applied");
                         yield TurnEvent::CompactionStarted {
                             reason: "char_budget".into(),
                         };
@@ -315,48 +362,112 @@ impl AgentSession {
                 }
 
                 let (assistant_message, stop_reason, usage) = {
-                    let request = CompletionRequest {
-                        system_prompt: self.config.system_prompt.clone(),
-                        messages: self.messages.clone(),
-                        tools: tool_definitions,
-                    };
-                    // Drive the provider stream to completion, accumulating
-                    // text and tool-call blocks into a single assistant message.
-                    let mut stream = Box::pin(provider.stream_complete(request));
-                    let mut blocks = Vec::new();
-                    let mut stop_reason = StopReason::EndTurn;
-                    let mut usage = None;
-                    while let Some(event) = stream.next().await {
-                        match event? {
-                            ProviderEvent::MessageStart => {}
-                            ProviderEvent::TextDelta(text) => {
-                                yield TurnEvent::AssistantDelta {
-                                    text: text.clone(),
-                                };
-                                blocks.push(ContentBlock::Text(TextBlock { text }));
-                            }
-                            ProviderEvent::ToolCall(call) => {
-                                blocks.push(ContentBlock::ToolCall(call));
-                            }
-                            ProviderEvent::MessageStop {
-                                stop_reason: reason,
-                                usage: event_usage,
-                            } => {
-                                stop_reason = reason;
-                                usage = event_usage;
+                    let mut attempts = 0;
+                    loop {
+                        attempts += 1;
+                        // Honour cancellation between retries (and before the first attempt).
+                        if self.config.cancelled.load(Ordering::Relaxed) {
+                            Err(AgentError::Cancelled)?;
+                        }
+                        let request = CompletionRequest {
+                            system_prompt: self.config.system_prompt.clone(),
+                            messages: self.messages.clone(),
+                            tools: tool_definitions.clone(),
+                        };
+                        // Drive the provider stream to completion, accumulating
+                        // text and tool-call blocks into a single assistant
+                        // message. Consecutive TextDelta events are merged into a
+                        // single TextBlock so text_content() doesn't inject
+                        // spurious newlines.
+                        let mut stream = Box::pin(provider.stream_complete(request));
+                        let mut blocks = Vec::new();
+                        let mut stop_reason = StopReason::EndTurn;
+                        let mut usage = None;
+                        let mut text_buf: Option<String> = None;
+                        let mut stream_error: Option<AgentError> = None;
+                        while let Some(event) = stream.next().await {
+                            match event {
+                                Ok(ProviderEvent::MessageStart) => {}
+                                Ok(ProviderEvent::TextDelta(text)) => {
+                                    yield TurnEvent::AssistantDelta {
+                                        text: text.clone(),
+                                    };
+                                    text_buf
+                                        .get_or_insert_with(String::new)
+                                        .push_str(&text);
+                                }
+                                Ok(ProviderEvent::ToolCall(call)) => {
+                                    // Flush buffered text before the tool call.
+                                    if let Some(t) = text_buf.take() {
+                                        blocks.push(ContentBlock::Text(TextBlock {
+                                            text: t,
+                                        }));
+                                    }
+                                    blocks.push(ContentBlock::ToolCall(call));
+                                }
+                                Ok(ProviderEvent::MessageStop {
+                                    stop_reason: reason,
+                                    usage: event_usage,
+                                }) => {
+                                    stop_reason = reason;
+                                    usage = event_usage;
+                                }
+                                Err(e) => {
+                                    stream_error = Some(e);
+                                    break;
+                                }
                             }
                         }
+                        if let Some(e) = stream_error {
+                            if self.config.retry.should_retry(&e, attempts) {
+                                let delay = self.config.retry.delay_for(attempts);
+                                warn!(
+                                    attempt = attempts,
+                                    delay_ms = delay.as_millis() as u64,
+                                    error = %e,
+                                    "provider call failed, retrying"
+                                );
+                                self.metrics.add_retry();
+                                yield TurnEvent::ProviderRetry {
+                                    attempt: attempts,
+                                    max_retries: self.config.retry.max_retries,
+                                    delay_ms: delay.as_millis() as u64,
+                                };
+                                tokio::time::sleep(delay).await;
+                                continue;
+                            }
+                            error!(
+                                attempts,
+                                error = %e,
+                                "provider retries exhausted"
+                            );
+                            Err(AgentError::ProviderRetriesExhausted {
+                                attempts,
+                                last_error: e.to_string(),
+                            })?;
+                        }
+                        // Flush any remaining buffered text after the stream ends.
+                        if let Some(t) = text_buf.take() {
+                            blocks.push(ContentBlock::Text(TextBlock { text: t }));
+                        }
+                        break (
+                            Message {
+                                role: Role::Assistant,
+                                blocks,
+                            },
+                            stop_reason,
+                            usage,
+                        );
                     }
-                    (
-                        Message {
-                            role: Role::Assistant,
-                            blocks,
-                        },
-                        stop_reason,
-                        usage,
-                    )
                 };
                 if let Some(TokenUsage { input_tokens, output_tokens }) = usage {
+                    self.metrics.add_input_tokens(input_tokens);
+                    self.metrics.add_output_tokens(output_tokens);
+                    debug!(
+                        input_tokens,
+                        output_tokens,
+                        "provider usage"
+                    );
                     yield TurnEvent::ProviderUsage {
                         input_tokens,
                         output_tokens,
@@ -417,7 +528,13 @@ impl AgentSession {
                         stop_reason,
                         final_text: assistant_message.text_content(),
                     };
+                    info!(?stop_reason, "turn finished");
                     break;
+                }
+
+                // Check for cancellation before executing tools.
+                if self.config.cancelled.load(Ordering::Relaxed) {
+                    Err(AgentError::Cancelled)?;
                 }
 
                 // Execute the requested tool calls. The executor batches
@@ -469,6 +586,14 @@ impl AgentSession {
                         ToolExecutionStreamItem::Result(result) => {
                             tool_results.push(result);
                         }
+                    }
+                }
+
+                // Count tool calls and errors for metrics.
+                for result in &tool_results {
+                    self.metrics.add_tool_call();
+                    if result.is_error {
+                        self.metrics.add_tool_error();
                     }
                 }
 
@@ -615,6 +740,13 @@ impl TurnEvent {
                 name,
                 emitted_message,
             } => format!("hook_completed:{phase}:{name}:{emitted_message}"),
+            TurnEvent::ProviderRetry {
+                attempt,
+                max_retries,
+                delay_ms,
+            } => {
+                format!("provider_retry:{attempt}/{max_retries} delay={delay_ms}ms")
+            }
             TurnEvent::TurnFinished {
                 stop_reason,
                 final_text,

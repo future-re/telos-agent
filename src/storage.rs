@@ -174,3 +174,78 @@ impl Storage for NoopStorage {
         Ok(Vec::new())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn jsonl_roundtrip_save_and_load() {
+        let dir = std::env::temp_dir().join("tiny_agent_test_storage_roundtrip");
+        let _ = std::fs::remove_dir_all(&dir);
+        let storage = JsonlStorage::new(&dir).unwrap();
+
+        let msgs =
+            vec![Message::system("system"), Message::user("hello"), Message::assistant("hi there")];
+
+        storage.save_snapshot("test-session", &msgs).await.unwrap();
+        let loaded = storage.load("test-session").await.unwrap();
+        assert_eq!(loaded.len(), 3);
+        assert_eq!(loaded[0].text_content(), "system");
+        assert_eq!(loaded[1].text_content(), "hello");
+        assert_eq!(loaded[2].text_content(), "hi there");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn jsonl_load_unknown_session_returns_empty() {
+        let storage =
+            JsonlStorage::new(std::env::temp_dir().join("tiny_agent_test_storage_unknown"))
+                .unwrap();
+        let loaded = storage.load("nonexistent-session").await.unwrap();
+        assert!(loaded.is_empty());
+    }
+
+    #[tokio::test]
+    async fn jsonl_append_preserves_existing_messages() {
+        let dir = std::env::temp_dir().join("tiny_agent_test_storage_append");
+        let _ = std::fs::remove_dir_all(&dir);
+        let storage = JsonlStorage::new(&dir).unwrap();
+
+        storage.save_snapshot("s", &[Message::user("first")]).await.unwrap();
+        storage.append("s", &[Message::assistant("second")]).await.unwrap();
+        let loaded = storage.load("s").await.unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].text_content(), "first"); // snapshot was truncated, so snapshot wrote it
+        assert_eq!(loaded[1].text_content(), "second");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn jsonl_snapshot_replaces_content() {
+        let dir = std::env::temp_dir().join("tiny_agent_test_storage_snapshot");
+        let _ = std::fs::remove_dir_all(&dir);
+        let storage = JsonlStorage::new(&dir).unwrap();
+
+        storage.save_snapshot("s", &[Message::user("old")]).await.unwrap();
+        storage.save_snapshot("s", &[Message::user("new")]).await.unwrap();
+        let loaded = storage.load("s").await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].text_content(), "new");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn noop_storage_always_returns_empty() {
+        let storage = NoopStorage;
+        storage.save_snapshot("x", &[Message::user("hi")]).await.unwrap();
+        let loaded = storage.load("x").await.unwrap();
+        assert!(loaded.is_empty());
+        storage.append("x", &[Message::user("more")]).await.unwrap();
+        let loaded2 = storage.load("x").await.unwrap();
+        assert!(loaded2.is_empty());
+    }
+}

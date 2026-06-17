@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use tiny_agent_core::{
-    AgentConfig, AgentError, AgentSession, AnthropicConfig, AnthropicProvider, Tool, ToolContext,
+    AgentConfig, AgentError, AgentSession, KimiConfig, KimiProvider, Tool, ToolContext,
     ToolDefinition, ToolOutput, ToolRegistry,
 };
 
@@ -28,9 +28,7 @@ impl Tool for EchoJsonTool {
         arguments: Value,
         _context: ToolContext,
     ) -> Result<ToolOutput, AgentError> {
-        Ok(ToolOutput {
-            content: json!({ "echo": arguments }),
-        })
+        Ok(ToolOutput { content: json!({ "echo": arguments }) })
     }
 }
 
@@ -40,8 +38,8 @@ async fn main() -> Result<(), AgentError> {
         "Call echo_json with value='hello from tool' and summarize the result.".into()
     });
 
-    let config = AnthropicConfig::from_env("claude-sonnet-4-5", 1024)?;
-    let provider = AnthropicProvider::new(config);
+    let config = KimiConfig::from_env("kimi-k2-0711-preview")?;
+    let provider = KimiProvider::new(config);
 
     let mut tools = ToolRegistry::new();
     tools.register(EchoJsonTool);

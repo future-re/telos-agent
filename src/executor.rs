@@ -11,7 +11,9 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 use crate::config::AgentConfig;
+use crate::error::AgentError;
 use crate::message::{ToolCall, ToolResult};
+use tracing::{Instrument, debug, error, info_span, warn};
 use crate::permissions::RuleDecision;
 use crate::tool::{PermissionDecision, ToolContext, ToolProgress, ToolRegistry};
 
@@ -90,6 +92,7 @@ pub async fn execute_tool_calls(
             messages: messages.clone(),
             progress: None,
             read_file_state: read_file_state.clone(),
+            timeout: config.tool_timeout_ms.map(std::time::Duration::from_millis),
         };
         let concurrency_safe = tools
             .get(&call.name)
@@ -161,6 +164,7 @@ pub fn execute_tool_calls_stream<'a>(
                 messages: messages.clone(),
                 progress: None,
                 read_file_state: read_file_state.clone(),
+                timeout: config.tool_timeout_ms.map(std::time::Duration::from_millis),
             };
             let concurrency_safe = tools
                 .get(&call.name)
@@ -467,19 +471,55 @@ async fn invoke_existing_tool(
 
             match permission {
                 Ok(PermissionDecision::Allow) => {
-                    match tool.invoke(call.arguments.clone(), context).await {
-                        Ok(output) => ToolResult {
-                            tool_call_id: call.id,
-                            name: call.name,
-                            content: output.content,
-                            is_error: false,
-                        },
-                        Err(err) => ToolResult {
-                            tool_call_id: call.id,
-                            name: call.name.clone(),
-                            content: json_error_payload("execution_error", err.to_string()),
-                            is_error: true,
-                        },
+                    let invoke_span =
+                        info_span!("tool_execution", tool = %call.name, tool_call_id = %call.id);
+                    let tool_name = call.name.clone();
+                    let invoke_result = {
+                        let invoke_fut = tool.invoke(call.arguments.clone(), context);
+                        let timeout = config.tool_timeout_ms;
+                        async move {
+                            if let Some(ms) = timeout {
+                                match tokio::time::timeout(
+                                    std::time::Duration::from_millis(ms),
+                                    invoke_fut,
+                                )
+                                .await
+                                {
+                                    Ok(result) => result,
+                                    Err(_elapsed) => {
+                                        warn!("tool timed out after {}ms", ms);
+                                        Err(AgentError::ToolExecution {
+                                            tool: tool_name,
+                                            message: format!("timed out after {}ms", ms),
+                                        })
+                                    }
+                                }
+                            } else {
+                                invoke_fut.await
+                            }
+                        }
+                        .instrument(invoke_span)
+                        .await
+                    };
+                    match invoke_result {
+                        Ok(output) => {
+                            debug!("tool succeeded");
+                            ToolResult {
+                                tool_call_id: call.id,
+                                name: call.name,
+                                content: output.content,
+                                is_error: false,
+                            }
+                        }
+                        Err(err) => {
+                            error!(error = %err, "tool failed");
+                            ToolResult {
+                                tool_call_id: call.id,
+                                name: call.name.clone(),
+                                content: json_error_payload("execution_error", err.to_string()),
+                                is_error: true,
+                            }
+                        }
                     }
                 }
                 Ok(PermissionDecision::Deny { reason }) => ToolResult {

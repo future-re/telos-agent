@@ -11,14 +11,14 @@
 
 - 会话级 `AgentSession`
 - 通用 `ModelProvider` 抽象
-- `AnthropicProvider`
-- `OpenAIProvider`
+- `KimiProvider`
+- `DeepSeekProvider`
 - 工具注册、参数校验、权限判断和执行结果回注
 - `TurnEvent` 事件流
 - `HookRegistry`，支持 `post_sampling` 和 `stop` 两个 hook phase
 - tool result 压缩
 - provider streaming 事件抽象，非流式 provider 可通过默认实现兼容
-- Anthropic / OpenAI 原生 SSE streaming 主干解析
+- 基于 async-openai 的 SSE streaming
 - 基础工具执行编排，支持并发安全工具分批执行和实时 tool progress
 - `TokenBudget` + auto compact 触发
 - `SubagentTool`，支持 in-process 子 agent
@@ -119,8 +119,8 @@ async fn main() -> Result<(), AgentError> {
 仓库中提供了一个基于真实 provider 的工具调用示例：
 
 ```bash
-export ANTHROPIC_API_KEY=...
-cargo run --example anthropic_tool_loop -- "Use the echo_json tool once, then summarize."
+export MOONSHOT_API_KEY=...
+cargo run --example kimi_tool_loop -- "Use the echo_json tool once, then summarize."
 ```
 
 ## 测试

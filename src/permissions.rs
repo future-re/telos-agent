@@ -100,11 +100,7 @@ impl PermissionEngine {
     ///
     /// Returns `None` if no rule matches, leaving the decision to the tool itself.
     pub fn evaluate(&self, tool_name: &str) -> Option<RuleDecision> {
-        self.evaluate_call(
-            tool_name,
-            &serde_json::Value::Null,
-            std::path::Path::new("."),
-        )
+        self.evaluate_call(tool_name, &serde_json::Value::Null, std::path::Path::new("."))
     }
 
     /// Evaluate a tool call against all rules. Later rules override earlier ones.
@@ -129,9 +125,7 @@ impl PermissionEngine {
     ) -> Option<RuleDecision> {
         let mut result = None;
         for rule in &self.rules {
-            if tool_names
-                .iter()
-                .any(|tool_name| Self::match_name(&rule.tool_name, tool_name))
+            if tool_names.iter().any(|tool_name| Self::match_name(&rule.tool_name, tool_name))
                 && Self::match_command_prefix(rule, arguments)
                 && Self::match_cwd_prefix(rule, cwd)
             {
@@ -171,5 +165,187 @@ impl PermissionEngine {
             return true;
         };
         cwd.starts_with(prefix)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // --- match_name ---
+
+    #[test]
+    fn wildcard_star_matches_any_name() {
+        assert!(PermissionEngine::match_name("*", "anything"));
+        assert!(PermissionEngine::match_name("*", ""));
+    }
+
+    #[test]
+    fn prefix_wildcard_matches() {
+        assert!(PermissionEngine::match_name("Bash*", "Bash"));
+        assert!(PermissionEngine::match_name("Bash*", "BashExtended"));
+        assert!(!PermissionEngine::match_name("Bash*", "bash_lowercase"));
+        assert!(!PermissionEngine::match_name("Bash*", "XxxBash"));
+    }
+
+    #[test]
+    fn exact_match_no_wildcard() {
+        assert!(PermissionEngine::match_name("Write", "Write"));
+        assert!(!PermissionEngine::match_name("Write", "write"));
+        assert!(!PermissionEngine::match_name("Write", "WriteTool"));
+    }
+
+    // --- evaluate (name-only) ---
+
+    #[test]
+    fn evaluate_returns_none_when_no_rules() {
+        let engine = PermissionEngine::new();
+        assert_eq!(engine.evaluate("Read"), None);
+    }
+
+    #[test]
+    fn evaluate_returns_last_matching_rule() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::deny_tool("*"));
+        engine.add_rule(PermissionRule::allow_tool("Read"));
+        assert_eq!(engine.evaluate("Read"), Some(RuleDecision::Allow));
+        assert_eq!(engine.evaluate("Write"), Some(RuleDecision::Deny));
+    }
+
+    #[test]
+    fn evaluate_falls_through_when_no_match() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::allow_tool("Read"));
+        assert_eq!(engine.evaluate("Write"), None);
+    }
+
+    // --- evaluate_call_any (aliases) ---
+
+    #[test]
+    fn evaluate_call_any_respects_aliases() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::deny_tool("shell"));
+        // The tool is registered as "Bash" with alias "shell" — both should hit.
+        assert!(
+            engine
+                .evaluate_call_any(&["Bash", "shell"], &json!({}), &std::path::Path::new("."))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn evaluate_call_any_last_alias_wins() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::allow_tool("Bash"));
+        engine.add_rule(PermissionRule::deny_tool("shell"));
+        // "Bash" and "shell" are both accepted names for the same call;
+        // the last matching rule wins.
+        assert_eq!(
+            engine.evaluate_call_any(&["Bash", "shell"], &json!({}), &std::path::Path::new(".")),
+            Some(RuleDecision::Deny)
+        );
+    }
+
+    // --- command_prefix ---
+
+    #[test]
+    fn command_prefix_matches_when_set() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::allow_tool("Bash").command_prefix("git "));
+        assert_eq!(
+            engine.evaluate_call(
+                "Bash",
+                &json!({"command": "git status"}),
+                &std::path::Path::new(".")
+            ),
+            Some(RuleDecision::Allow)
+        );
+    }
+
+    #[test]
+    fn command_prefix_no_match_when_wrong_command() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::allow_tool("Bash").command_prefix("ls "));
+        assert_eq!(
+            engine.evaluate_call(
+                "Bash",
+                &json!({"command": "rm -rf /"}),
+                &std::path::Path::new(".")
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn command_prefix_does_not_match_without_command_key() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::allow_tool("Bash").command_prefix("ls "));
+        assert_eq!(engine.evaluate_call("Bash", &json!({}), &std::path::Path::new(".")), None);
+    }
+
+    // --- cwd_prefix ---
+
+    #[test]
+    fn cwd_prefix_matches_when_cwd_under_prefix() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(
+            PermissionRule::allow_tool("Write").cwd_prefix(std::path::PathBuf::from("/safe")),
+        );
+        assert_eq!(
+            engine.evaluate_call("Write", &json!({}), &std::path::Path::new("/safe/sub/dir")),
+            Some(RuleDecision::Allow)
+        );
+    }
+
+    #[test]
+    fn cwd_prefix_rejects_cwd_outside_prefix() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(
+            PermissionRule::allow_tool("Write").cwd_prefix(std::path::PathBuf::from("/safe")),
+        );
+        assert_eq!(
+            engine.evaluate_call("Write", &json!({}), &std::path::Path::new("/unsafe")),
+            None
+        );
+    }
+
+    // --- combined filters ---
+
+    #[test]
+    fn command_and_cwd_both_applied() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(
+            PermissionRule::deny_tool("Bash")
+                .command_prefix("rm ")
+                .cwd_prefix(std::path::PathBuf::from("/protected")),
+        );
+        // correct command, wrong dir — no match
+        assert_eq!(
+            engine.evaluate_call(
+                "Bash",
+                &json!({"command": "rm file"}),
+                &std::path::Path::new("/tmp")
+            ),
+            None
+        );
+        // wrong command, correct dir — no match
+        assert_eq!(
+            engine.evaluate_call(
+                "Bash",
+                &json!({"command": "ls"}),
+                &std::path::Path::new("/protected/dir")
+            ),
+            None
+        );
+        // both match — rule fires
+        assert_eq!(
+            engine.evaluate_call(
+                "Bash",
+                &json!({"command": "rm file"}),
+                &std::path::Path::new("/protected/dir")
+            ),
+            Some(RuleDecision::Deny)
+        );
     }
 }

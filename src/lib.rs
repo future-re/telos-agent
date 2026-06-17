@@ -3,7 +3,7 @@
 //! The crate provides:
 //! - [`AgentSession`] — the main turn loop (model → tools → model)
 //! - [`Tool`] trait and [`ToolRegistry`] — pluggable tool system
-//! - [`ModelProvider`] trait — pluggable LLM backends (Anthropic, OpenAI)
+//! - [`ModelProvider`] trait — pluggable LLM backends (DeepSeek, Kimi)
 //! - [`Hook`] system — intercept assistant messages (post-sampling, stop)
 //! - Context compaction — token-budget-aware summarization
 //! - Permission engine — rule-based tool allow/deny
@@ -23,6 +23,7 @@ pub mod error;
 pub mod executor;
 pub mod hooks;
 pub mod message;
+pub mod metrics;
 pub mod mock;
 pub mod permissions;
 pub mod provider;
@@ -44,14 +45,16 @@ pub use executor::{ToolExecutionEvent, ToolExecutionOutput, execute_tool_calls};
 pub use hooks::{Hook, HookContext, HookPhase, HookRegistry};
 // Message model — the lingua franca between session, provider, and tools.
 pub use message::{ContentBlock, Message, Role, TextBlock, ToolCall, ToolResult};
+// Metrics — session-level counters accumulated by the runtime.
+pub use metrics::SessionMetrics;
 // Test helper — pre-canned [`ModelProvider`] for unit tests.
 pub use mock::MockProvider;
 // Permissions — rule-based gating of tool calls.
 pub use permissions::{PermissionEngine, PermissionRule, RuleDecision};
 // Provider — the trait downstream LLM backends implement, plus built-in impls.
 pub use provider::{
-    AnthropicConfig, AnthropicProvider, CompletionRequest, CompletionResponse, ModelProvider,
-    OpenAIConfig, OpenAIProvider, ProviderEvent, StopReason, TokenUsage,
+    CompletionRequest, CompletionResponse, DeepSeekConfig, DeepSeekProvider, ErasedProvider,
+    KimiConfig, KimiProvider, ModelProvider, ProviderEvent, StopReason, TokenUsage,
 };
 // Runtime — the agent session and the streaming turn loop.
 pub use runtime::{AgentSession, TurnEvent, TurnResult};

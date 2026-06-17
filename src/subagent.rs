@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use crate::config::AgentConfig;
 use crate::error::AgentError;
-use crate::provider::{CompletionRequest, CompletionResponse, ModelProvider, ProviderEvent};
+use crate::provider::ModelProvider;
 use crate::runtime::{AgentSession, TurnEvent};
 use crate::tool::{
     PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
@@ -21,18 +21,18 @@ use crate::tool::{
 
 /// Tool that delegates to a nested agent session.
 pub struct SubagentTool {
-    provider: Arc<dyn ModelProvider>,
+    provider: Arc<dyn ModelProvider + Send + Sync>,
     tools: ToolRegistry,
     config: AgentConfig,
 }
 
 impl SubagentTool {
-    pub fn new(provider: Arc<dyn ModelProvider>, tools: ToolRegistry, config: AgentConfig) -> Self {
-        Self {
-            provider,
-            tools,
-            config,
-        }
+    pub fn new(
+        provider: Arc<dyn ModelProvider + Send + Sync>,
+        tools: ToolRegistry,
+        config: AgentConfig,
+    ) -> Self {
+        Self { provider, tools, config }
     }
 }
 
@@ -90,25 +90,21 @@ impl Tool for SubagentTool {
         config.env = context.env;
         config.storage = None;
         config.permission_engine = self.config.permission_engine.clone();
-        if let Some(system_prompt) = arguments
-            .get("system_prompt")
-            .and_then(|value| value.as_str())
+        if let Some(system_prompt) = arguments.get("system_prompt").and_then(|value| value.as_str())
         {
             config.system_prompt = Some(system_prompt.to_string());
         }
-        if let Some(max_iterations) = arguments
-            .get("max_iterations")
-            .and_then(|value| value.as_u64())
+        if let Some(max_iterations) =
+            arguments.get("max_iterations").and_then(|value| value.as_u64())
         {
             config.max_iterations = max_iterations.max(1) as usize;
         }
 
-        let provider = SharedProvider(self.provider.clone());
         let mut session = AgentSession::new(config);
         let mut events = Vec::new();
         {
             let mut stream =
-                Box::pin(session.run_turn_stream(&provider, &self.tools, prompt.to_string()));
+                Box::pin(session.run_turn_stream(&self.provider, &self.tools, prompt.to_string()));
             while let Some(event) = stream.next().await {
                 let event = event?;
                 // Forward a coarse-grained progress message to the parent's
@@ -140,31 +136,6 @@ impl Tool for SubagentTool {
             "final_text": final_text,
             "event_count": events.len(),
         })))
-    }
-}
-
-/// Newtype wrapper that implements [`ModelProvider`] by delegating to an `Arc`.
-///
-/// Needed because `run_turn_stream` requires `&P` where `P: ModelProvider`, but we only have `Arc<dyn ModelProvider>`.
-struct SharedProvider(Arc<dyn ModelProvider>);
-
-#[async_trait]
-impl ModelProvider for SharedProvider {
-    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AgentError> {
-        self.0.complete(request).await
-    }
-
-    fn stream_complete<'a>(
-        &'a self,
-        request: CompletionRequest,
-    ) -> std::pin::Pin<
-        Box<dyn futures_core::stream::Stream<Item = Result<ProviderEvent, AgentError>> + Send + 'a>,
-    > {
-        self.0.stream_complete(request)
-    }
-
-    fn estimate_tokens(&self, text: &str) -> usize {
-        self.0.estimate_tokens(text)
     }
 }
 

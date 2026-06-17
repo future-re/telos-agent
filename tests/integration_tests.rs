@@ -1708,3 +1708,50 @@ fn prompt_assembly_integration_with_session() {
     let session = AgentSession::new(config).unwrap();
     assert!(session.messages().is_empty()); // assembly renders at turn time
 }
+
+#[tokio::test]
+async fn memory_write_and_read_tools_roundtrip() {
+    use std::sync::{Arc, Mutex};
+    use tiny_agent_core::memory::{MemoryReadTool, MemoryStore, MemoryWriteTool};
+    use tiny_agent_core::tool::{Tool, ToolContext};
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Mutex::new(MemoryStore::new(dir.path().to_path_buf())));
+    let write_tool = MemoryWriteTool::new(store.clone());
+    let read_tool = MemoryReadTool::new(store.clone());
+
+    let ctx = ToolContext {
+        session_id: "test".into(),
+        turn_id: 1,
+        cwd: std::env::current_dir().unwrap(),
+        env: Default::default(),
+        messages: Arc::new(vec![]),
+        progress: None,
+        read_file_state: Arc::new(tokio::sync::Mutex::new(Default::default())),
+        timeout: None,
+        max_file_read_bytes: 50 * 1024 * 1024,
+    };
+
+    // Write
+    write_tool
+        .invoke(
+            serde_json::json!({
+                "name": "test-memory",
+                "description": "A test memory entry",
+                "category": "fact",
+                "body": "This is the body content.",
+                "tags": ["test", "example"]
+            }),
+            ctx.clone(),
+        )
+        .await
+        .unwrap();
+
+    // Read
+    let result =
+        read_tool.invoke(serde_json::json!({"name": "test-memory"}), ctx.clone()).await.unwrap();
+    let content = result.content;
+    assert_eq!(content["name"].as_str().unwrap(), "test-memory");
+    assert_eq!(content["body"].as_str().unwrap(), "This is the body content.");
+    assert!(content["tags"].as_array().unwrap().iter().any(|t| t.as_str() == Some("test")));
+}

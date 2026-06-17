@@ -4,3 +4,6 @@ pub use format::{MemoryCategory, MemoryEntry, MemoryFormat, MemoryStatus};
 
 pub mod index;
 pub use index::MemoryStore;
+
+pub mod tool;
+pub use tool::{MemoryEditTool, MemoryGrepTool, MemoryReadTool, MemoryStatusTool, MemoryWriteTool};

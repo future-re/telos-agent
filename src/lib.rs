@@ -56,6 +56,9 @@ pub use hooks::{Hook, HookContext, HookPhase, HookRegistry};
 pub use message::{ContentBlock, Message, Role, TextBlock, ThinkingBlock, ToolCall, ToolResult};
 // Memory — persistent cross-session agent memory.
 pub use memory::{MemoryCategory, MemoryEntry, MemoryFormat, MemoryStatus, MemoryStore};
+pub use memory::{
+    MemoryEditTool, MemoryGrepTool, MemoryReadTool, MemoryStatusTool, MemoryWriteTool,
+};
 // Metrics — session-level counters accumulated by the runtime.
 pub use metrics::SessionMetrics;
 // Test helper — pre-canned [`ModelProvider`] for unit tests.

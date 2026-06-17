@@ -1802,3 +1802,23 @@ async fn memory_section_empty_when_no_memories() {
     let rendered = section.render(&()).await;
     assert!(rendered.is_empty());
 }
+
+#[tokio::test]
+async fn profile_section_renders_profiles() {
+    use std::sync::Arc;
+    use tiny_agent_core::memory::ProfileManager;
+    use tiny_agent_core::prompt::PromptSection;
+    use tiny_agent_core::prompt::builtins::ProfileSection;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mgr = Arc::new(ProfileManager::new(dir.path().to_path_buf(), dir.path().to_path_buf()));
+    mgr.set_user_profile("Test user profile content").unwrap();
+    mgr.set_project_profile("Test project profile content").unwrap();
+
+    let section = ProfileSection::new(mgr);
+    let rendered = section.render(&()).await;
+    assert!(rendered.contains("User Profile"));
+    assert!(rendered.contains("Test user profile content"));
+    assert!(rendered.contains("Project Profile"));
+    assert!(rendered.contains("Test project profile content"));
+}

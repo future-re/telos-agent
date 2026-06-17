@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::memory::index::MemoryStore;
+use crate::memory::profile::ProfileManager;
 use crate::prompt::{PromptSection, PromptStability};
 use crate::skills::SkillRegistry;
 use crate::tool::ToolRegistry;
@@ -231,5 +232,31 @@ impl PromptSection for MemorySection {
             }
         }
         lines.join("\n")
+    }
+}
+
+// ── Profile ────────────────────────────────────────────────
+
+pub struct ProfileSection {
+    profile_manager: Arc<ProfileManager>,
+}
+
+impl ProfileSection {
+    pub fn new(profile_manager: Arc<ProfileManager>) -> Self {
+        Self { profile_manager }
+    }
+}
+
+#[async_trait]
+impl PromptSection for ProfileSection {
+    fn name(&self) -> &str {
+        "profile"
+    }
+    fn stability(&self) -> PromptStability {
+        PromptStability::Static
+    }
+
+    async fn render(&self, _ctx: &()) -> String {
+        self.profile_manager.render_all()
     }
 }

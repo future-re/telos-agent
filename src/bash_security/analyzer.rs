@@ -49,9 +49,9 @@ pub fn analyze(source: &str) -> CommandSafety {
             classify_simple_command(&commands[0], None)
         }
         SecurityAnalysis::TooComplex { reason } => CommandSafety::NeedsReview { reason },
-        SecurityAnalysis::ParseUnavailable => CommandSafety::NeedsReview {
-            reason: "bash parser unavailable".into(),
-        },
+        SecurityAnalysis::ParseUnavailable => {
+            CommandSafety::NeedsReview { reason: "bash parser unavailable".into() }
+        }
     }
 }
 
@@ -59,15 +59,11 @@ pub fn analyze(source: &str) -> CommandSafety {
 pub fn analyze_security(source: &str) -> SecurityAnalysis {
     let trimmed = source.trim();
     if trimmed.is_empty() {
-        return SecurityAnalysis::Simple {
-            commands: Vec::new(),
-        };
+        return SecurityAnalysis::Simple { commands: Vec::new() };
     }
 
     if zsh::has_control_chars(trimmed) {
-        return SecurityAnalysis::TooComplex {
-            reason: "contains control characters".into(),
-        };
+        return SecurityAnalysis::TooComplex { reason: "contains control characters".into() };
     }
     if zsh::has_invisible_whitespace(trimmed) {
         return SecurityAnalysis::TooComplex {
@@ -96,9 +92,7 @@ pub fn analyze_security(source: &str) -> SecurityAnalysis {
     };
 
     if ast.has_descendant("ERROR") {
-        return SecurityAnalysis::TooComplex {
-            reason: "parse produced ERROR nodes".into(),
-        };
+        return SecurityAnalysis::TooComplex { reason: "parse produced ERROR nodes".into() };
     }
 
     for kind in parser::DANGEROUS_KINDS {
@@ -112,17 +106,13 @@ pub fn analyze_security(source: &str) -> SecurityAnalysis {
     // Reject globs and brace expansion. tree-sitter-bash keeps simple globs
     // inside `word` nodes and brace expansions inside `concatenation` nodes.
     if has_glob_or_brace_expansion(&ast) {
-        return SecurityAnalysis::TooComplex {
-            reason: "contains glob or brace expansion".into(),
-        };
+        return SecurityAnalysis::TooComplex { reason: "contains glob or brace expansion".into() };
     }
 
     let commands = collect_commands(&ast);
 
     if commands.is_empty() {
-        return SecurityAnalysis::TooComplex {
-            reason: "no simple command found".into(),
-        };
+        return SecurityAnalysis::TooComplex { reason: "no simple command found".into() };
     }
 
     if commands.len() > 1 {
@@ -221,9 +211,8 @@ pub fn classify_simple_command(cmd: &parser::SimpleCommand, cwd: Option<&Path>) 
 
 fn classify_git_command(args: &[&str]) -> CommandSafety {
     let subcommand = args.first().copied().unwrap_or("");
-    const SAFE_GIT_SUBCOMMANDS: &[&str] = &[
-        "status", "log", "show", "diff", "ls-files", "grep", "rev-parse", "describe",
-    ];
+    const SAFE_GIT_SUBCOMMANDS: &[&str] =
+        &["status", "log", "show", "diff", "ls-files", "grep", "rev-parse", "describe"];
     if SAFE_GIT_SUBCOMMANDS.contains(&subcommand) {
         return CommandSafety::Safe;
     }
@@ -235,9 +224,7 @@ fn classify_git_command(args: &[&str]) -> CommandSafety {
 fn classify_sed_command(args: &[&str]) -> CommandSafety {
     for arg in args {
         if *arg == "-i" || arg.starts_with("-i") {
-            return CommandSafety::NeedsReview {
-                reason: "sed -i mutates files in place".into(),
-            };
+            return CommandSafety::NeedsReview { reason: "sed -i mutates files in place".into() };
         }
     }
     CommandSafety::Safe
@@ -305,12 +292,9 @@ mod tests {
 
     #[test]
     fn compound_operators_need_review() {
-        for cmd in [
-            "git status; rm -rf /",
-            "cat file && rm file",
-            "ls || rm -rf /",
-            "cat file | sh",
-        ] {
+        for cmd in
+            ["git status; rm -rf /", "cat file && rm file", "ls || rm -rf /", "cat file | sh"]
+        {
             assert!(!analyze(cmd).is_safe(), "expected review: {cmd}");
         }
     }

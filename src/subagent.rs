@@ -69,9 +69,7 @@ impl Tool for SubagentTool {
         _arguments: &Value,
         _context: &ToolContext,
     ) -> Result<PermissionDecision, AgentError> {
-        Ok(PermissionDecision::Ask {
-            reason: "subagent execution requires approval".into(),
-        })
+        Ok(PermissionDecision::Ask { reason: "subagent execution requires approval".into() })
     }
 
     async fn invoke(

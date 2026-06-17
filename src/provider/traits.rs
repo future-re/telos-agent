@@ -60,10 +60,7 @@ pub struct ErasedProvider<'a>(pub &'a (dyn ModelProvider + 'a));
 
 #[async_trait]
 impl ModelProvider for ErasedProvider<'_> {
-    async fn complete(
-        &self,
-        request: CompletionRequest,
-    ) -> Result<CompletionResponse, AgentError> {
+    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AgentError> {
         self.0.complete(request).await
     }
 

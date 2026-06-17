@@ -54,20 +54,15 @@ impl Tool for GrepTool {
     ) -> Result<ToolOutput, AgentError> {
         let pattern = required_string(&arguments, "pattern")?.to_string();
         // Default to a recursive glob so plain "grep for X" works out of the box.
-        let file_glob = arguments
-            .get("glob")
-            .and_then(|value| value.as_str())
-            .unwrap_or("**/*");
+        let file_glob = arguments.get("glob").and_then(|value| value.as_str()).unwrap_or("**/*");
         // Reject absolute globs — they would bypass the cwd anchor.
         if Path::new(file_glob).is_absolute() {
             return Err(AgentError::PermissionDenied(format!(
                 "absolute glob patterns are not allowed: {file_glob}"
             )));
         }
-        let max_results = arguments
-            .get("max_results")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(200) as usize;
+        let max_results =
+            arguments.get("max_results").and_then(|value| value.as_u64()).unwrap_or(200) as usize;
         let full_pattern = context.cwd.join(file_glob).to_string_lossy().to_string();
         let mut results = Vec::new();
         for entry in
@@ -158,10 +153,7 @@ mod tests {
 
         let tool = GrepTool;
         let output = tool
-            .invoke(
-                json!({ "pattern": "match", "glob": "../**/*.txt" }),
-                ctx(dir.join("sub")),
-            )
+            .invoke(json!({ "pattern": "match", "glob": "../**/*.txt" }), ctx(dir.join("sub")))
             .await
             .unwrap();
         let matches = output.content["matches"].as_array().unwrap();
@@ -182,10 +174,7 @@ mod tests {
         std::os::unix::fs::symlink(outside.join("secret.txt"), dir.join("link.txt")).unwrap();
 
         let tool = GrepTool;
-        let output = tool
-            .invoke(json!({ "pattern": "match" }), ctx(dir.clone()))
-            .await
-            .unwrap();
+        let output = tool.invoke(json!({ "pattern": "match" }), ctx(dir.clone())).await.unwrap();
         let matches = output.content["matches"].as_array().unwrap();
         assert!(matches.is_empty(), "symlink escape should produce no matches");
 

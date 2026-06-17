@@ -7,6 +7,7 @@ use tiny_agent_core::AgentError;
 use tiny_agent_core::MockProvider;
 use tiny_agent_core::register_core_tools;
 use tiny_agent_core::{AgentConfig, AgentSession, TurnEvent};
+use tiny_agent_core::{ApprovalDecision, FixedDecisionHandler, SubagentTool, TokenBudget};
 use tiny_agent_core::{CompletionResponse, StopReason};
 use tiny_agent_core::{ContentBlock, Message, ToolCall};
 use tiny_agent_core::{Hook, HookContext, HookPhase, HookRegistry};
@@ -14,7 +15,6 @@ use tiny_agent_core::{JsonlStorage, PermissionEngine, PermissionRule, Storage, S
 use tiny_agent_core::{
     PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
 };
-use tiny_agent_core::{ApprovalDecision, FixedDecisionHandler, SubagentTool, TokenBudget};
 
 struct AddTool;
 
@@ -44,22 +44,16 @@ impl Tool for AddTool {
         arguments: Value,
         _context: ToolContext,
     ) -> Result<ToolOutput, AgentError> {
-        let a = arguments["a"]
-            .as_i64()
-            .ok_or_else(|| AgentError::ToolExecution {
-                tool: "add".into(),
-                message: "missing integer `a`".into(),
-            })?;
-        let b = arguments["b"]
-            .as_i64()
-            .ok_or_else(|| AgentError::ToolExecution {
-                tool: "add".into(),
-                message: "missing integer `b`".into(),
-            })?;
+        let a = arguments["a"].as_i64().ok_or_else(|| AgentError::ToolExecution {
+            tool: "add".into(),
+            message: "missing integer `a`".into(),
+        })?;
+        let b = arguments["b"].as_i64().ok_or_else(|| AgentError::ToolExecution {
+            tool: "add".into(),
+            message: "missing integer `b`".into(),
+        })?;
 
-        Ok(ToolOutput {
-            content: json!({ "sum": a + b }),
-        })
+        Ok(ToolOutput { content: json!({ "sum": a + b }) })
     }
 }
 
@@ -99,12 +93,10 @@ fn multi_step_tool_loop_completes() {
             system_prompt: Some("You are a coding agent.".into()),
             max_iterations: 4,
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
 
-        let result = session
-            .run_turn(&provider, &tools, "what is 2 + 3?")
-            .await
-            .unwrap();
+        let result = session.run_turn(&provider, &tools, "what is 2 + 3?").await.unwrap();
         assert_eq!(result.final_message.text_content(), "The answer is 5.");
         assert_eq!(result.stop_reason, StopReason::EndTurn);
         assert!(result.events.len() >= 11);
@@ -144,12 +136,7 @@ fn tool_calls_continue_even_when_stop_reason_is_end_turn() {
 
         let result = session.run_turn(&provider, &tools, "add").await.unwrap();
         assert_eq!(result.final_message.text_content(), "The answer is 10.");
-        assert!(
-            result
-                .events
-                .iter()
-                .any(|event| matches!(event, TurnEvent::ToolResult(_)))
-        );
+        assert!(result.events.iter().any(|event| matches!(event, TurnEvent::ToolResult(_))));
     });
 }
 
@@ -180,22 +167,12 @@ fn missing_tool_returns_error_result_message() {
         let tools = ToolRegistry::new();
         let mut session = AgentSession::new(AgentConfig::default()).unwrap();
 
-        let result = session
-            .run_turn(&provider, &tools, "try a tool")
-            .await
-            .unwrap();
-        let tool_result_event = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)));
+        let result = session.run_turn(&provider, &tools, "try a tool").await.unwrap();
+        let tool_result_event =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_)));
 
         assert!(tool_result_event.is_some());
-        assert!(
-            tool_result_event
-                .unwrap()
-                .text()
-                .contains("tool not found: missing")
-        );
+        assert!(tool_result_event.unwrap().text().contains("tool not found: missing"));
     });
 }
 
@@ -216,9 +193,7 @@ impl Tool for DenyTool {
         _arguments: &Value,
         _context: &ToolContext,
     ) -> Result<PermissionDecision, AgentError> {
-        Ok(PermissionDecision::Deny {
-            reason: "policy blocked".into(),
-        })
+        Ok(PermissionDecision::Deny { reason: "policy blocked".into() })
     }
 
     async fn invoke(
@@ -226,10 +201,7 @@ impl Tool for DenyTool {
         _arguments: Value,
         _context: ToolContext,
     ) -> Result<ToolOutput, AgentError> {
-        Err(AgentError::ToolExecution {
-            tool: "deny".into(),
-            message: "should not run".into(),
-        })
+        Err(AgentError::ToolExecution { tool: "deny".into(), message: "should not run".into() })
     }
 }
 
@@ -261,21 +233,11 @@ fn permission_denial_returns_structured_tool_error() {
         tools.register(DenyTool);
 
         let mut session = AgentSession::new(AgentConfig::default()).unwrap();
-        let result = session
-            .run_turn(&provider, &tools, "try deny")
-            .await
-            .unwrap();
-        let tool_result_event = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
+        let result = session.run_turn(&provider, &tools, "try deny").await.unwrap();
+        let tool_result_event =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
 
-        assert!(
-            tool_result_event
-                .text()
-                .contains("\"kind\":\"permission_denied\"")
-        );
+        assert!(tool_result_event.text().contains("\"kind\":\"permission_denied\""));
     });
 }
 
@@ -313,10 +275,9 @@ fn run_turn_stream_emits_deltas_and_hooks() {
             usage: None,
         }]);
         let tools = ToolRegistry::new();
-        let mut session = AgentSession::new(AgentConfig {
-            hooks: Arc::new(hooks),
-            ..AgentConfig::default()
-        }).unwrap();
+        let mut session =
+            AgentSession::new(AgentConfig { hooks: Arc::new(hooks), ..AgentConfig::default() })
+                .unwrap();
 
         let events = session
             .run_turn_stream(&provider, &tools, "hi")
@@ -332,10 +293,7 @@ fn run_turn_stream_emits_deltas_and_hooks() {
         assert!(events.iter().any(|event| {
             matches!(event, TurnEvent::HookStarted { phase, .. } if *phase == "stop")
         }));
-        assert_eq!(
-            session.messages().last().unwrap().text_content(),
-            "hook-ran"
-        );
+        assert_eq!(session.messages().last().unwrap().text_content(), "hook-ran");
     });
 }
 
@@ -352,10 +310,9 @@ fn stop_hook_does_not_hijack_final_message() {
             usage: None,
         }]);
         let tools = ToolRegistry::new();
-        let mut session = AgentSession::new(AgentConfig {
-            hooks: Arc::new(hooks),
-            ..AgentConfig::default()
-        }).unwrap();
+        let mut session =
+            AgentSession::new(AgentConfig { hooks: Arc::new(hooks), ..AgentConfig::default() })
+                .unwrap();
 
         let result = session.run_turn(&provider, &tools, "hi").await.unwrap();
         // The last session message is the hook output, but the turn result
@@ -382,9 +339,7 @@ impl Tool for BigTool {
         _arguments: Value,
         _context: ToolContext,
     ) -> Result<ToolOutput, AgentError> {
-        Ok(ToolOutput {
-            content: json!({ "blob": "x".repeat(100) }),
-        })
+        Ok(ToolOutput { content: json!({ "blob": "x".repeat(100) }) })
     }
 }
 
@@ -441,16 +396,12 @@ fn tool_result_budget_compacts_large_output() {
         ]);
         let mut tools = ToolRegistry::new();
         tools.register(BigTool);
-        let mut session = AgentSession::new(AgentConfig {
-            max_tool_result_chars: 20,
-            ..AgentConfig::default()
-        }).unwrap();
+        let mut session =
+            AgentSession::new(AgentConfig { max_tool_result_chars: 20, ..AgentConfig::default() })
+                .unwrap();
         let result = session.run_turn(&provider, &tools, "run").await.unwrap();
         assert!(
-            result
-                .events
-                .iter()
-                .any(|event| matches!(event, TurnEvent::CompactionStarted { .. }))
+            result.events.iter().any(|event| matches!(event, TurnEvent::CompactionStarted { .. }))
         );
         assert!(
             result
@@ -458,11 +409,8 @@ fn tool_result_budget_compacts_large_output() {
                 .iter()
                 .any(|event| matches!(event, TurnEvent::CompactionCompleted { .. }))
         );
-        let tool_result = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
         assert!(tool_result.text().contains("truncated"));
     });
 }
@@ -476,11 +424,8 @@ fn jsonl_storage_roundtrips_messages() {
         let _ = std::fs::remove_dir_all(&dir);
         let storage = JsonlStorage::new(&dir).unwrap();
 
-        let messages = vec![
-            Message::system("sys"),
-            Message::user("hello"),
-            Message::assistant("world"),
-        ];
+        let messages =
+            vec![Message::system("sys"), Message::user("hello"), Message::assistant("world")];
         storage.append("s1", &messages).await.unwrap();
 
         let loaded = storage.load("s1").await.unwrap();
@@ -512,7 +457,8 @@ fn session_save_and_resume_works() {
             system_prompt: Some("sys".into()),
             storage: Some(storage.clone()),
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
 
         session.run_turn(&provider, &tools, "hello").await.unwrap();
         assert_eq!(session.messages().len(), 3); // sys + user + assistant
@@ -571,13 +517,11 @@ fn permission_engine_denies_tool() {
         let mut session = AgentSession::new(AgentConfig {
             permission_engine: Some(engine),
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
         let result = session.run_turn(&provider, &tools, "add").await.unwrap();
-        let tool_result = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
         assert!(tool_result.text().contains("permission_denied"));
         assert!(tool_result.text().contains("permission rule"));
     });
@@ -615,13 +559,11 @@ fn permission_engine_allows_tool() {
         let mut session = AgentSession::new(AgentConfig {
             permission_engine: Some(engine),
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
         let result = session.run_turn(&provider, &tools, "add").await.unwrap();
-        let tool_result = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
         assert!(tool_result.text().contains("\"sum\":3"));
     });
 }
@@ -659,13 +601,11 @@ fn permission_engine_matches_tool_aliases_with_last_rule_wins() {
         let mut session = AgentSession::new(AgentConfig {
             permission_engine: Some(engine),
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
         let result = session.run_turn(&provider, &tools, "add").await.unwrap();
-        let tool_result = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
         assert!(tool_result.text().contains("\"sum\":3"));
     });
 }
@@ -703,23 +643,15 @@ fn summary_compaction_triggers_when_over_budget() {
         tools.register(BigTool);
 
         let mut session = AgentSession::new(AgentConfig {
-            compaction: Some(Arc::new(SummaryCompaction {
-                max_tokens: 10,
-                keep_recent: 2,
-            })),
+            compaction: Some(Arc::new(SummaryCompaction { max_tokens: 10, keep_recent: 2 })),
             max_tool_result_chars: usize::MAX,
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
 
-        let result = session
-            .run_turn(&provider, &tools, "run big")
-            .await
-            .unwrap();
+        let result = session.run_turn(&provider, &tools, "run big").await.unwrap();
         assert!(
-            result
-                .events
-                .iter()
-                .any(|event| matches!(event, TurnEvent::CompactionStarted { .. }))
+            result.events.iter().any(|event| matches!(event, TurnEvent::CompactionStarted { .. }))
         );
         assert!(
             result
@@ -748,7 +680,8 @@ fn session_save_replaces_snapshot_without_duplicates() {
         let mut session = AgentSession::new(AgentConfig {
             storage: Some(storage.clone()),
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
 
         session.run_turn(&provider, &tools, "hello").await.unwrap();
         session.save().await.unwrap();
@@ -792,17 +725,12 @@ fn builtin_file_read_tool_returns_file_contents() {
         ]);
         let mut tools = ToolRegistry::new();
         register_core_tools(&mut tools);
-        let mut session = AgentSession::new(AgentConfig {
-            cwd: dir.clone(),
-            ..AgentConfig::default()
-        }).unwrap();
+        let mut session =
+            AgentSession::new(AgentConfig { cwd: dir.clone(), ..AgentConfig::default() }).unwrap();
 
         let result = session.run_turn(&provider, &tools, "read").await.unwrap();
-        let tool_result = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
         assert!(tool_result.text().contains("1: alpha"));
         assert!(tool_result.text().contains("2: beta"));
 
@@ -816,7 +744,8 @@ fn file_read_rejects_symlink_escape() {
     runtime.block_on(async {
         let dir =
             std::env::temp_dir().join(format!("tiny-agent-symlink-test-{}", std::process::id()));
-        let outside = std::env::temp_dir().join(format!("tiny-agent-symlink-outside-{}", std::process::id()));
+        let outside =
+            std::env::temp_dir().join(format!("tiny-agent-symlink-outside-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&outside);
         std::fs::create_dir_all(&dir).unwrap();
@@ -845,17 +774,12 @@ fn file_read_rejects_symlink_escape() {
         ]);
         let mut tools = ToolRegistry::new();
         register_core_tools(&mut tools);
-        let mut session = AgentSession::new(AgentConfig {
-            cwd: dir.clone(),
-            ..AgentConfig::default()
-        }).unwrap();
+        let mut session =
+            AgentSession::new(AgentConfig { cwd: dir.clone(), ..AgentConfig::default() }).unwrap();
 
         let result = session.run_turn(&provider, &tools, "read symlink").await.unwrap();
-        let tool_result = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
         assert!(
             tool_result.text().contains("permission_denied")
                 || tool_result.text().contains("escapes cwd"),
@@ -873,11 +797,8 @@ fn core_tools_expose_claude_names_and_accept_legacy_aliases() {
     let mut tools = ToolRegistry::new();
     register_core_tools(&mut tools);
 
-    let names = tools
-        .definitions()
-        .into_iter()
-        .map(|definition| definition.name)
-        .collect::<Vec<_>>();
+    let names =
+        tools.definitions().into_iter().map(|definition| definition.name).collect::<Vec<_>>();
     assert!(names.contains(&"Bash".to_string()));
     assert!(names.contains(&"Read".to_string()));
     assert!(names.contains(&"Edit".to_string()));
@@ -891,10 +812,8 @@ fn core_tools_expose_claude_names_and_accept_legacy_aliases() {
 fn edit_requires_prior_full_read() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
-        let dir = std::env::temp_dir().join(format!(
-            "tiny-agent-edit-read-required-test-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir()
+            .join(format!("tiny-agent-edit-read-required-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("sample.txt"), "alpha\nbeta\n").unwrap();
@@ -932,7 +851,8 @@ fn edit_requires_prior_full_read() {
                 engine
             }),
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
 
         let result = session.run_turn(&provider, &tools, "edit").await.unwrap();
         let tool_result = result
@@ -944,10 +864,7 @@ fn edit_requires_prior_full_read() {
             })
             .unwrap();
         assert!(tool_result.contains("File has not been read yet"));
-        assert_eq!(
-            std::fs::read_to_string(dir.join("sample.txt")).unwrap(),
-            "alpha\nbeta\n"
-        );
+        assert_eq!(std::fs::read_to_string(dir.join("sample.txt")).unwrap(), "alpha\nbeta\n");
 
         let _ = std::fs::remove_dir_all(&dir);
     });
@@ -1009,7 +926,8 @@ fn edit_rejects_stale_file_after_read() {
                 engine
             }),
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
 
         let mut stream = Box::pin(session.run_turn_stream(&provider, &tools, "read then edit"));
         let mut saw_read_result = false;
@@ -1022,19 +940,13 @@ fn edit_rejects_stale_file_after_read() {
                 std::fs::write(&file, "alpha\nuser change\n").unwrap();
             } else if let TurnEvent::ToolResult(message) = event {
                 saw_stale_error = message.tool_results_iter().any(|result| {
-                    result
-                        .content
-                        .to_string()
-                        .contains("File has been modified since read")
+                    result.content.to_string().contains("File has been modified since read")
                 });
             }
         }
 
         assert!(saw_stale_error);
-        assert_eq!(
-            std::fs::read_to_string(file).unwrap(),
-            "alpha\nuser change\n"
-        );
+        assert_eq!(std::fs::read_to_string(file).unwrap(), "alpha\nuser change\n");
 
         let _ = std::fs::remove_dir_all(&dir);
     });
@@ -1071,19 +983,13 @@ fn permission_engine_allows_shell_by_command_prefix() {
         let mut session = AgentSession::new(AgentConfig {
             permission_engine: Some(engine),
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
 
         let result = session.run_turn(&provider, &tools, "shell").await.unwrap();
-        let tool_result = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
-        assert!(
-            tool_result.text().contains("allowed"),
-            "{}",
-            tool_result.text()
-        );
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
+        assert!(tool_result.text().contains("allowed"), "{}", tool_result.text());
     });
 }
 
@@ -1118,16 +1024,9 @@ fn shell_requires_approval_by_default() {
         let mut session = AgentSession::new(AgentConfig::default()).unwrap();
 
         let result = session.run_turn(&provider, &tools, "shell").await.unwrap();
-        let tool_result = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
-        assert!(
-            tool_result.text().contains("permission_required"),
-            "{}",
-            tool_result.text()
-        );
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
+        assert!(tool_result.text().contains("permission_required"), "{}", tool_result.text());
     });
 }
 
@@ -1190,41 +1089,24 @@ fn token_budget_triggers_auto_compaction() {
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
-                usage: Some(tiny_agent_core::TokenUsage {
-                    input_tokens: 10,
-                    output_tokens: 2,
-                }),
+                usage: Some(tiny_agent_core::TokenUsage { input_tokens: 10, output_tokens: 2 }),
             },
         ]);
         let tools = ToolRegistry::new();
         let mut session = AgentSession::new(AgentConfig {
             system_prompt: Some("sys".into()),
-            compaction: Some(Arc::new(SummaryCompaction {
-                max_tokens: 50,
-                keep_recent: 0,
-            })),
-            token_budget: Some(TokenBudget {
-                max_tokens: 1_000,
-                compact_at_tokens: 10,
-            }),
+            compaction: Some(Arc::new(SummaryCompaction { max_tokens: 50, keep_recent: 0 })),
+            token_budget: Some(TokenBudget { max_tokens: 1_000, compact_at_tokens: 10 }),
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
 
-        let result = session
-            .run_turn(&provider, &tools, "x".repeat(200))
-            .await
-            .unwrap();
+        let result = session.run_turn(&provider, &tools, "x".repeat(200)).await.unwrap();
         assert!(result.events.iter().any(|event| {
             matches!(event, TurnEvent::CompactionStarted { reason } if reason == "token_budget")
         }));
         assert!(result.events.iter().any(|event| {
-            matches!(
-                event,
-                TurnEvent::ProviderUsage {
-                    input_tokens: 10,
-                    output_tokens: 2
-                }
-            )
+            matches!(event, TurnEvent::ProviderUsage { input_tokens: 10, output_tokens: 2 })
         }));
     });
 }
@@ -1268,17 +1150,12 @@ fn subagent_tool_runs_in_process_agent() {
                 decision: ApprovalDecision::Allow,
             })),
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
 
-        let result = session
-            .run_turn(&outer_provider, &tools, "delegate")
-            .await
-            .unwrap();
-        let tool_result = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
+        let result = session.run_turn(&outer_provider, &tools, "delegate").await.unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
         assert!(tool_result.text().contains("inner answer"));
     });
 }
@@ -1310,18 +1187,10 @@ fn thinking_blocks_are_separate_from_final_text() {
 
         let result = session.run_turn(&provider, &tools, "what is 3 + 4?").await.unwrap();
         assert_eq!(result.final_message.text_content(), "The answer is 7.");
-        assert_eq!(
-            result.final_message.thinking_content(),
-            "I need to reason about this."
-        );
+        assert_eq!(result.final_message.thinking_content(), "I need to reason about this.");
 
         // The streaming turn loop should emit at least one thinking delta.
-        assert!(
-            result
-                .events
-                .iter()
-                .any(|event| matches!(event, TurnEvent::ThinkingDelta { .. }))
-        );
+        assert!(result.events.iter().any(|event| matches!(event, TurnEvent::ThinkingDelta { .. })));
 
         // text_content should not leak into the final answer.
         assert!(!result.final_message.text_content().contains("reason"));
@@ -1357,11 +1226,8 @@ fn schema_validation_rejects_invalid_tool_arguments() {
 
         let mut session = AgentSession::new(AgentConfig::default()).unwrap();
         let result = session.run_turn(&provider, &tools, "add wrong types").await.unwrap();
-        let tool_result = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
         assert!(tool_result.text().contains("validation_error"));
         assert!(tool_result.text().contains("schema validation"));
     });
@@ -1397,13 +1263,11 @@ fn schema_validation_can_be_disabled() {
         let mut session = AgentSession::new(AgentConfig {
             auto_validate_schema: false,
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
         let result = session.run_turn(&provider, &tools, "add wrong types").await.unwrap();
-        let tool_result = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
         // The tool's own invoke fails because it expects an integer, not schema validation.
         assert!(tool_result.text().contains("missing integer `a`"));
     });
@@ -1445,26 +1309,18 @@ fn approval_handler_allows_asked_tool_call() {
                 decision: tiny_agent_core::ApprovalDecision::Allow,
             })),
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
 
         let result = session.run_turn(&provider, &tools, "add").await.unwrap();
-        let tool_result = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
         assert!(tool_result.text().contains("\"sum\":5"));
         assert!(
-            result
-                .events
-                .iter()
-                .any(|event| matches!(event, TurnEvent::ApprovalRequested { .. }))
+            result.events.iter().any(|event| matches!(event, TurnEvent::ApprovalRequested { .. }))
         );
         assert!(
-            result
-                .events
-                .iter()
-                .any(|event| matches!(event, TurnEvent::ApprovalResolved { .. }))
+            result.events.iter().any(|event| matches!(event, TurnEvent::ApprovalResolved { .. }))
         );
     });
 }
@@ -1502,19 +1358,15 @@ fn approval_handler_denies_asked_tool_call() {
         let mut session = AgentSession::new(AgentConfig {
             permission_engine: Some(engine),
             approval_handler: Some(Arc::new(tiny_agent_core::FixedDecisionHandler {
-                decision: tiny_agent_core::ApprovalDecision::Deny {
-                    reason: "not today".into(),
-                },
+                decision: tiny_agent_core::ApprovalDecision::Deny { reason: "not today".into() },
             })),
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
 
         let result = session.run_turn(&provider, &tools, "add").await.unwrap();
-        let tool_result = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
         assert!(tool_result.text().contains("permission_denied"));
     });
 }
@@ -1557,14 +1409,44 @@ fn approval_handler_modifies_asked_tool_call() {
                 },
             })),
             ..AgentConfig::default()
-        }).unwrap();
+        })
+        .unwrap();
 
         let result = session.run_turn(&provider, &tools, "add").await.unwrap();
-        let tool_result = result
-            .events
-            .iter()
-            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
-            .unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
         assert!(tool_result.text().contains("\"sum\":15"));
     });
+}
+
+#[tokio::test]
+async fn skill_loader_parses_valid_markdown() {
+    use tiny_agent_core::skills::{SkillLoader, SkillSource};
+
+    let dir = tempfile::tempdir().unwrap();
+    let skill_content = r#"---
+name: test-skill
+description: A test skill
+whenToUse: When testing
+prompt: "You are a test skill. Args: {{args}}"
+arguments:
+  - name: args
+    description: Optional args
+    required: false
+---
+This is the body text.
+"#;
+    std::fs::write(dir.path().join("test-skill.md"), skill_content).unwrap();
+
+    let skills = SkillLoader::load_from_dir(dir.path()).unwrap();
+    assert_eq!(skills.len(), 1);
+    let s = &skills[0];
+    assert_eq!(s.name, "test-skill");
+    assert_eq!(s.description, "A test skill");
+    assert_eq!(s.when_to_use, Some("When testing".into()));
+    assert!(s.prompt.contains("You are a test skill"));
+    assert!(s.body.contains("This is the body text"));
+    assert_eq!(s.arguments.len(), 1);
+    assert_eq!(s.arguments[0].name, "args");
+    assert_eq!(s.source, SkillSource::Project);
 }

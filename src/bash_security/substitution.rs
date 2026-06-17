@@ -81,10 +81,7 @@ mod tests {
     fn dangerous_inner_command_rejected() {
         let ast = parser::parse("echo $(rm -rf /)").unwrap();
         let result = analyze_substitutions(&ast, "echo $(rm -rf /)");
-        assert!(
-            matches!(result, SubstitutionAnalysis::NeedsReview { .. }),
-            "expected review"
-        );
+        assert!(matches!(result, SubstitutionAnalysis::NeedsReview { .. }), "expected review");
     }
 
     #[test]

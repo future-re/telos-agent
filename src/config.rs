@@ -160,21 +160,13 @@ pub struct RetryConfig {
 
 impl Default for RetryConfig {
     fn default() -> Self {
-        Self {
-            max_retries: 3,
-            base_delay_ms: 500,
-            max_delay_ms: 10_000,
-        }
+        Self { max_retries: 3, base_delay_ms: 500, max_delay_ms: 10_000 }
     }
 }
 
 impl RetryConfig {
     /// No retries at all — a convenient sentinel that can replace `Option<RetryConfig>`.
-    pub const NONE: Self = Self {
-        max_retries: 0,
-        base_delay_ms: 0,
-        max_delay_ms: 0,
-    };
+    pub const NONE: Self = Self { max_retries: 0, base_delay_ms: 0, max_delay_ms: 0 };
 
     /// Whether the error is retryable and we still have attempts left.
     ///
@@ -201,24 +193,16 @@ impl AgentConfig {
     /// dangerous or nonsensical combination.
     pub fn validate(&self) -> Result<(), AgentError> {
         if self.max_iterations == 0 {
-            return Err(AgentError::Config(
-                "max_iterations must be greater than 0".into(),
-            ));
+            return Err(AgentError::Config("max_iterations must be greater than 0".into()));
         }
         if self.tool_concurrency_limit == 0 {
-            return Err(AgentError::Config(
-                "tool_concurrency_limit must be greater than 0".into(),
-            ));
+            return Err(AgentError::Config("tool_concurrency_limit must be greater than 0".into()));
         }
         if self.max_file_read_bytes == 0 {
-            return Err(AgentError::Config(
-                "max_file_read_bytes must be greater than 0".into(),
-            ));
+            return Err(AgentError::Config("max_file_read_bytes must be greater than 0".into()));
         }
         if self.max_tool_result_chars == 0 {
-            return Err(AgentError::Config(
-                "max_tool_result_chars must be greater than 0".into(),
-            ));
+            return Err(AgentError::Config("max_tool_result_chars must be greater than 0".into()));
         }
         if let Some(budget) = self.token_budget {
             if budget.max_tokens == 0 {
@@ -277,20 +261,14 @@ mod tests {
 
     #[test]
     fn zero_max_iterations_invalid() {
-        let config = AgentConfig {
-            max_iterations: 0,
-            ..AgentConfig::default()
-        };
+        let config = AgentConfig { max_iterations: 0, ..AgentConfig::default() };
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn token_budget_compact_exceeding_max_invalid() {
         let config = AgentConfig {
-            token_budget: Some(TokenBudget {
-                max_tokens: 100,
-                compact_at_tokens: 200,
-            }),
+            token_budget: Some(TokenBudget { max_tokens: 100, compact_at_tokens: 200 }),
             ..AgentConfig::default()
         };
         assert!(config.validate().is_err());

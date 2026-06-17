@@ -15,9 +15,9 @@ use std::sync::Arc;
 use crate::config::AgentConfig;
 use crate::error::AgentError;
 use crate::message::{ToolCall, ToolResult};
-use tracing::{Instrument, debug, error, info_span, warn};
 use crate::permissions::RuleDecision;
 use crate::tool::{PermissionDecision, ToolContext, ToolProgress, ToolRegistry};
+use tracing::{Instrument, debug, error, info_span, warn};
 
 /// Lifecycle event emitted by the executor for one tool invocation.
 #[derive(Debug, Clone)]
@@ -32,23 +32,11 @@ pub enum ToolExecutionEvent {
         data: Option<Value>,
     },
     /// Emitted once when the tool finishes (success or error).
-    ToolCompleted {
-        tool_call_id: String,
-        name: String,
-        is_error: bool,
-    },
+    ToolCompleted { tool_call_id: String, name: String, is_error: bool },
     /// A tool call has been suspended pending human approval.
-    ApprovalRequested {
-        tool_call_id: String,
-        name: String,
-        reason: String,
-    },
+    ApprovalRequested { tool_call_id: String, name: String, reason: String },
     /// Human approval has been resolved for a suspended tool call.
-    ApprovalResolved {
-        tool_call_id: String,
-        name: String,
-        decision: String,
-    },
+    ApprovalResolved { tool_call_id: String, name: String, decision: String },
 }
 
 /// Buffered output of [`execute_tool_calls`] — events in chronological order,
@@ -89,10 +77,7 @@ pub async fn execute_tool_calls(
     messages: Arc<Vec<crate::message::Message>>,
     read_file_state: crate::tool::FileReadState,
 ) -> ToolExecutionOutput {
-    let mut output = ToolExecutionOutput {
-        events: Vec::new(),
-        results: Vec::new(),
-    };
+    let mut output = ToolExecutionOutput { events: Vec::new(), results: Vec::new() };
 
     // Partition the call list into contiguous batches of like-flavoured calls.
     // Switching from concurrency-safe to non-safe (or vice versa) starts a new batch.
@@ -106,7 +91,10 @@ pub async fn execute_tool_calls(
             messages: Arc::clone(&messages),
             progress: None,
             read_file_state: read_file_state.clone(),
-            timeout: config.tool_timeout_ms.filter(|&ms| ms > 0).map(std::time::Duration::from_millis),
+            timeout: config
+                .tool_timeout_ms
+                .filter(|&ms| ms > 0)
+                .map(std::time::Duration::from_millis),
             max_file_read_bytes: config.max_file_read_bytes,
         };
         let concurrency_safe = tools
@@ -118,19 +106,11 @@ pub async fn execute_tool_calls(
             && batch.concurrency_safe
             && concurrency_safe
         {
-            batch.calls.push(PreparedCall {
-                index,
-                call,
-                context,
-            });
+            batch.calls.push(PreparedCall { index, call, context });
         } else {
             batches.push(Batch {
                 concurrency_safe,
-                calls: vec![PreparedCall {
-                    index,
-                    call,
-                    context,
-                }],
+                calls: vec![PreparedCall { index, call, context }],
             });
         }
     }
@@ -330,9 +310,7 @@ async fn run_concurrent_batch(
         }
     }
     completed.sort_by_key(|(index, _)| *index);
-    output
-        .results
-        .extend(completed.into_iter().map(|(_, result)| result));
+    output.results.extend(completed.into_iter().map(|(_, result)| result));
 }
 
 /// Run a single tool to completion, isolated in its own task so a panic
@@ -349,9 +327,7 @@ async fn run_one_tool(
     let config = config.clone();
 
     let handle = tokio::spawn(async move {
-        AssertUnwindSafe(run_one_tool_inner(prepared, &tools, &config))
-            .catch_unwind()
-            .await
+        AssertUnwindSafe(run_one_tool_inner(prepared, &tools, &config)).catch_unwind().await
     });
 
     match handle.await {
@@ -375,7 +351,10 @@ async fn run_one_tool(
                 ToolResult {
                     tool_call_id,
                     name,
-                    content: json_error_payload("execution_panic", "tool invocation panicked".to_string()),
+                    content: json_error_payload(
+                        "execution_panic",
+                        "tool invocation panicked".to_string(),
+                    ),
                     is_error: true,
                 },
             )
@@ -399,9 +378,7 @@ async fn run_one_tool_inner(
     context.progress = Some(progress_tx);
 
     let (mut approval_events, result) = match tools.get(&prepared.call.name) {
-        Ok(tool) => {
-            invoke_existing_tool(prepared.call.clone(), tool, context, config, tools).await
-        }
+        Ok(tool) => invoke_existing_tool(prepared.call.clone(), tool, context, config, tools).await,
         Err(err) => (
             Vec::new(),
             ToolResult {
@@ -634,9 +611,9 @@ async fn invoke_existing_tool(
             });
             let permission = match engine_decision {
                 Some(RuleDecision::Allow) => Ok(PermissionDecision::Allow),
-                Some(RuleDecision::Deny) => Ok(PermissionDecision::Deny {
-                    reason: "denied by permission rule".into(),
-                }),
+                Some(RuleDecision::Deny) => {
+                    Ok(PermissionDecision::Deny { reason: "denied by permission rule".into() })
+                }
                 Some(RuleDecision::Ask) => Ok(PermissionDecision::Ask {
                     reason: "approval required by permission rule".into(),
                 }),
@@ -670,7 +647,9 @@ async fn invoke_existing_tool(
                             decision: format!("{decision:?}"),
                         });
                         match decision {
-                            crate::approval::ApprovalDecision::Allow => Ok(PermissionDecision::Allow),
+                            crate::approval::ApprovalDecision::Allow => {
+                                Ok(PermissionDecision::Allow)
+                            }
                             crate::approval::ApprovalDecision::Deny { reason } => {
                                 Ok(PermissionDecision::Deny { reason })
                             }
@@ -831,7 +810,11 @@ mod tests {
             true
         }
 
-        async fn invoke(&self, _arguments: Value, _context: ToolContext) -> Result<ToolOutput, AgentError> {
+        async fn invoke(
+            &self,
+            _arguments: Value,
+            _context: ToolContext,
+        ) -> Result<ToolOutput, AgentError> {
             let prev = self.current.fetch_add(1, Ordering::SeqCst);
             self.max.fetch_max(prev + 1, Ordering::SeqCst);
             tokio::time::sleep(self.delay).await;
@@ -858,24 +841,21 @@ mod tests {
             true
         }
 
-        async fn invoke(&self, _arguments: Value, _context: ToolContext) -> Result<ToolOutput, AgentError> {
+        async fn invoke(
+            &self,
+            _arguments: Value,
+            _context: ToolContext,
+        ) -> Result<ToolOutput, AgentError> {
             panic!("intentional tool panic");
         }
     }
 
     fn test_config(limit: usize) -> AgentConfig {
-        AgentConfig {
-            tool_concurrency_limit: limit,
-            ..Default::default()
-        }
+        AgentConfig { tool_concurrency_limit: limit, ..Default::default() }
     }
 
     fn make_call(id: &str, name: &str) -> ToolCall {
-        ToolCall {
-            id: id.into(),
-            name: name.into(),
-            arguments: serde_json::json!({}),
-        }
+        ToolCall { id: id.into(), name: name.into(), arguments: serde_json::json!({}) }
     }
 
     #[tokio::test]
@@ -890,9 +870,7 @@ mod tests {
         });
 
         let config = test_config(3);
-        let calls = (0..5)
-            .map(|i| make_call(&format!("call-{i}"), "probe"))
-            .collect();
+        let calls = (0..5).map(|i| make_call(&format!("call-{i}"), "probe")).collect();
 
         let output = execute_tool_calls(
             calls,
@@ -929,11 +907,8 @@ mod tests {
         });
 
         let config = test_config(3);
-        let calls = vec![
-            make_call("c1", "panic"),
-            make_call("c2", "probe"),
-            make_call("c3", "probe"),
-        ];
+        let calls =
+            vec![make_call("c1", "panic"), make_call("c2", "probe"), make_call("c3", "probe")];
 
         let output = execute_tool_calls(
             calls,
@@ -948,10 +923,7 @@ mod tests {
 
         assert_eq!(output.results.len(), 3);
         assert!(output.results[0].is_error);
-        assert!(output.results[0]
-            .content
-            .to_string()
-            .contains("panicked"));
+        assert!(output.results[0].content.to_string().contains("panicked"));
         assert!(!output.results[1].is_error);
         assert!(!output.results[2].is_error);
     }

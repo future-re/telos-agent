@@ -40,10 +40,7 @@ pub fn validate_arguments(schema: &Value, arguments: &Value) -> ValidationResult
                     path: err.instance_path.to_string(),
                 });
             }
-            ValidationResult {
-                valid: errors.is_empty(),
-                errors,
-            }
+            ValidationResult { valid: errors.is_empty(), errors }
         }
         Err(err) => ValidationResult {
             valid: false,
@@ -65,11 +62,8 @@ pub fn validate_arguments_or_error(
     if result.valid {
         Ok(())
     } else {
-        let details: Vec<String> = result
-            .errors
-            .iter()
-            .map(|e| format!("{}: {}", e.path, e.message))
-            .collect();
+        let details: Vec<String> =
+            result.errors.iter().map(|e| format!("{}: {}", e.path, e.message)).collect();
         Err(AgentError::Validation(format!(
             "tool `{tool_name}` arguments failed schema validation: {}",
             details.join("; ")

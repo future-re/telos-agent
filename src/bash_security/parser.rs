@@ -64,9 +64,7 @@ impl Node {
 /// when the grammar is unavailable.
 pub fn parse(source: &str) -> Option<Node> {
     let mut parser = tree_sitter::Parser::new();
-    parser
-        .set_language(&tree_sitter_bash::LANGUAGE.into())
-        .ok()?;
+    parser.set_language(&tree_sitter_bash::LANGUAGE.into()).ok()?;
     let tree = parser.parse(source, None)?;
     Some(convert_node(tree.root_node(), source.as_bytes()))
 }
@@ -82,13 +80,7 @@ fn convert_node(ts_node: tree_sitter::Node, source: &[u8]) -> Node {
         })
         .collect();
 
-    Node {
-        kind: ts_node.kind().to_string(),
-        text,
-        start_byte,
-        end_byte,
-        children,
-    }
+    Node { kind: ts_node.kind().to_string(), text, start_byte, end_byte, children }
 }
 
 /// Named node kinds that represent compound / dynamic shell constructs.
@@ -182,12 +174,8 @@ pub fn parse_variable_assignment(node: &Node) -> Option<(String, String)> {
         return None;
     }
     let name = node.child("variable_name")?;
-    let value = node
-        .children
-        .iter()
-        .find(|c| c.kind == "word")
-        .map(|v| v.text.clone())
-        .unwrap_or_default();
+    let value =
+        node.children.iter().find(|c| c.kind == "word").map(|v| v.text.clone()).unwrap_or_default();
     Some((name.text.clone(), value))
 }
 
@@ -249,12 +237,7 @@ fn extract_simple_command(
     if node.kind == "declaration_command" {
         let first = node.children.first()?;
         argv.push(first.text.clone());
-        return Some(SimpleCommand {
-            argv,
-            env_vars,
-            redirects: outer_redirects,
-            text,
-        });
+        return Some(SimpleCommand { argv, env_vars, redirects: outer_redirects, text });
     }
 
     let mut found_command_name = false;
@@ -286,12 +269,7 @@ fn extract_simple_command(
         return None;
     }
 
-    Some(SimpleCommand {
-        argv,
-        env_vars,
-        redirects: outer_redirects,
-        text,
-    })
+    Some(SimpleCommand { argv, env_vars, redirects: outer_redirects, text })
 }
 
 pub(crate) fn strip_quotes(text: &str) -> String {

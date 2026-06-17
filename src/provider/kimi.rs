@@ -3,8 +3,8 @@
 //! Kimi's API is OpenAI-compatible, so this provider uses [`async_openai`] with
 //! Kimi's base URL and API-key convention.
 
-use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
 use async_openai::Client;
+use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
 use async_trait::async_trait;
 use futures_core::stream::Stream;
 
@@ -41,11 +41,7 @@ impl KimiConfig {
         let api_key = std::env::var("MOONSHOT_API_KEY")
             .map_err(|_| AgentError::Config("missing MOONSHOT_API_KEY".into()))?;
 
-        Ok(Self {
-            api_key,
-            model: model.into(),
-            base_url: "https://api.moonshot.cn".into(),
-        })
+        Ok(Self { api_key, model: model.into(), base_url: "https://api.moonshot.cn".into() })
     }
 }
 
@@ -81,7 +77,11 @@ impl ModelProvider for KimiProvider {
         &'a self,
         request: CompletionRequest,
     ) -> std::pin::Pin<Box<dyn Stream<Item = Result<ProviderEvent, AgentError>> + Send + 'a>> {
-        crate::provider::openai_compat::stream_complete(self.client.clone(), self.model.clone(), request)
+        crate::provider::openai_compat::stream_complete(
+            self.client.clone(),
+            self.model.clone(),
+            request,
+        )
     }
 
     fn estimate_tokens(&self, text: &str) -> usize {
@@ -101,11 +101,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_config(base_url: String) -> KimiConfig {
-        KimiConfig {
-            api_key: "test-moonshot-key".into(),
-            model: "kimi-k2.7-code".into(),
-            base_url,
-        }
+        KimiConfig { api_key: "test-moonshot-key".into(), model: "kimi-k2.7-code".into(), base_url }
     }
 
     #[test]
@@ -151,13 +147,7 @@ mod tests {
         let response = provider.complete(request).await.unwrap();
         assert_eq!(response.message.text_content(), "Hello from Kimi!");
         assert_eq!(response.stop_reason, StopReason::EndTurn);
-        assert_eq!(
-            response.usage,
-            Some(TokenUsage {
-                input_tokens: 8,
-                output_tokens: 4,
-            })
-        );
+        assert_eq!(response.usage, Some(TokenUsage { input_tokens: 8, output_tokens: 4 }));
     }
 
     #[tokio::test]

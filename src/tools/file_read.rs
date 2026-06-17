@@ -22,7 +22,8 @@ impl Tool for FileReadTool {
             name: "Read".into(),
             description: "Read a UTF-8 text file. Use this before editing an existing file. \
 The returned `content` prefixes each line with its 1-indexed line number for display; \
-provide the original file text (without line-number prefixes) to `Edit` when editing.".into(),
+provide the original file text (without line-number prefixes) to `Edit` when editing."
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -55,9 +56,8 @@ provide the original file text (without line-number prefixes) to `Edit` when edi
         let input_path = required_string_any(&arguments, &["file_path", "path"])?;
         let path = resolve_workspace_path(&context.cwd, input_path)?;
         let path = canonicalize_within_cwd(&context.cwd, &path).await?;
-        let metadata = tokio::fs::metadata(&path)
-            .await
-            .map_err(|err| AgentError::ToolExecution {
+        let metadata =
+            tokio::fs::metadata(&path).await.map_err(|err| AgentError::ToolExecution {
                 tool: "Read".into(),
                 message: friendly_file_error(&context.cwd, &path, err),
             })?;
@@ -71,12 +71,10 @@ provide the original file text (without line-number prefixes) to `Edit` when edi
                 ),
             });
         }
-        let bytes = tokio::fs::read(&path)
-            .await
-            .map_err(|err| AgentError::ToolExecution {
-                tool: "Read".into(),
-                message: friendly_file_error(&context.cwd, &path, err),
-            })?;
+        let bytes = tokio::fs::read(&path).await.map_err(|err| AgentError::ToolExecution {
+            tool: "Read".into(),
+            message: friendly_file_error(&context.cwd, &path, err),
+        })?;
         if bytes.contains(&0) {
             return Err(AgentError::ToolExecution {
                 tool: "Read".into(),
@@ -91,9 +89,8 @@ provide the original file text (without line-number prefixes) to `Edit` when edi
         })?;
         let timestamp_ms = modified_timestamp_ms(&path).await?;
         // `offset` is 1-indexed for human readability; clamp to >= 1.
-        let start_line = optional_usize_any(&arguments, &["offset", "start_line"])
-            .unwrap_or(1)
-            .max(1);
+        let start_line =
+            optional_usize_any(&arguments, &["offset", "start_line"]).unwrap_or(1).max(1);
         let max_lines = optional_usize_any(&arguments, &["limit", "max_lines"]);
         // Prefix every emitted line with its 1-indexed line number — gives the
         // model an unambiguous anchor for follow-up edits.
@@ -181,9 +178,7 @@ mod tests {
         std::fs::write(dir.join("big.txt"), "x".repeat(100)).unwrap();
 
         let tool = FileReadTool;
-        let result = tool
-            .invoke(json!({ "file_path": "big.txt" }), ctx(dir.clone(), 50))
-            .await;
+        let result = tool.invoke(json!({ "file_path": "big.txt" }), ctx(dir.clone(), 50)).await;
         assert!(matches!(result, Err(AgentError::ToolExecution { .. })));
         assert!(
             result.unwrap_err().to_string().contains("maximum read size"),

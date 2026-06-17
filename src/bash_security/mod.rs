@@ -23,8 +23,8 @@ mod substitution;
 pub mod zsh;
 
 pub use analyzer::{
-    CommandSafety, SecurityAnalysis, analyze, analyze_security,
-    classify_simple_command, extract_command_prefix,
+    CommandSafety, SecurityAnalysis, analyze, analyze_security, classify_simple_command,
+    extract_command_prefix,
 };
 pub use parser::{RedirectOp, SimpleCommand};
 pub use prefix::PrefixResult;

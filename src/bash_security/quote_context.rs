@@ -55,11 +55,7 @@ impl QuoteContext {
         let fully_unquoted = remove_spans(source, &spans);
         let unquoted_keep_quote_chars = replace_spans_keep_quotes(source, &spans);
 
-        Self {
-            with_double_quotes,
-            fully_unquoted,
-            unquoted_keep_quote_chars,
-        }
+        Self { with_double_quotes, fully_unquoted, unquoted_keep_quote_chars }
     }
 }
 
@@ -87,19 +83,11 @@ fn collect_quote_spans(node: &Node) -> Vec<Span> {
 fn collect_quote_spans_inner(node: &Node, out: &mut Vec<Span>, in_double: bool) {
     match node.kind.as_str() {
         "raw_string" => {
-            out.push(Span {
-                start: node.start_byte,
-                end: node.end_byte,
-                kind: SpanKind::Single,
-            });
+            out.push(Span { start: node.start_byte, end: node.end_byte, kind: SpanKind::Single });
             return;
         }
         "ansi_c_string" => {
-            out.push(Span {
-                start: node.start_byte,
-                end: node.end_byte,
-                kind: SpanKind::AnsiC,
-            });
+            out.push(Span { start: node.start_byte, end: node.end_byte, kind: SpanKind::AnsiC });
             return;
         }
         "string" => {
@@ -116,11 +104,7 @@ fn collect_quote_spans_inner(node: &Node, out: &mut Vec<Span>, in_double: bool) 
             return;
         }
         "heredoc_redirect" if is_quoted_heredoc(node) => {
-            out.push(Span {
-                start: node.start_byte,
-                end: node.end_byte,
-                kind: SpanKind::Heredoc,
-            });
+            out.push(Span { start: node.start_byte, end: node.end_byte, kind: SpanKind::Heredoc });
             return;
         }
         _ => {}
@@ -150,7 +134,10 @@ fn drop_contained_spans(spans: &mut Vec<Span>) {
             if i == j {
                 continue;
             }
-            if other.start <= s.start && other.end >= s.end && (other.start < s.start || other.end > s.end) {
+            if other.start <= s.start
+                && other.end >= s.end
+                && (other.start < s.start || other.end > s.end)
+            {
                 keep[i] = false;
                 break;
             }

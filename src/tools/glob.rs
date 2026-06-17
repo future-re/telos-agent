@@ -56,10 +56,8 @@ impl Tool for GlobTool {
             )));
         }
         // Cap results so a pathological `**/*` doesn't dump millions of paths into the context.
-        let max_results = arguments
-            .get("max_results")
-            .and_then(|value| value.as_u64())
-            .unwrap_or(200) as usize;
+        let max_results =
+            arguments.get("max_results").and_then(|value| value.as_u64()).unwrap_or(200) as usize;
         // Anchor the pattern at cwd so the model can write relative globs.
         let full_pattern = context.cwd.join(pattern).to_string_lossy().to_string();
         let mut matches = Vec::new();
@@ -122,10 +120,8 @@ mod tests {
         std::fs::write(dir.join("outside.txt"), "x").unwrap();
 
         let tool = GlobTool;
-        let output = tool
-            .invoke(json!({ "pattern": "../**/*" }), ctx(dir.join("sub")))
-            .await
-            .unwrap();
+        let output =
+            tool.invoke(json!({ "pattern": "../**/*" }), ctx(dir.join("sub"))).await.unwrap();
         let matches = output.content["matches"].as_array().unwrap();
         // Should not include ../outside.txt even though the glob matches it.
         assert!(matches.iter().all(|m| !m.as_str().unwrap().contains("outside")));
@@ -145,10 +141,7 @@ mod tests {
         std::os::unix::fs::symlink(outside.join("secret.txt"), dir.join("link.txt")).unwrap();
 
         let tool = GlobTool;
-        let output = tool
-            .invoke(json!({ "pattern": "**/*" }), ctx(dir.clone()))
-            .await
-            .unwrap();
+        let output = tool.invoke(json!({ "pattern": "**/*" }), ctx(dir.clone())).await.unwrap();
         let matches = output.content["matches"].as_array().unwrap();
         assert!(matches.is_empty(), "symlink escape should produce no matches");
 

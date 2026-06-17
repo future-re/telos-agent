@@ -35,10 +35,7 @@ pub struct SummaryCompaction {
 
 impl Default for SummaryCompaction {
     fn default() -> Self {
-        Self {
-            max_tokens: 20_000,
-            keep_recent: 6,
-        }
+        Self { max_tokens: 20_000, keep_recent: 6 }
     }
 }
 
@@ -77,11 +74,8 @@ impl CompactionStrategy for SummaryCompaction {
         }
 
         // Preserve any leading system prompt — we splice the summary in *after* it.
-        let system_idx = messages
-            .iter()
-            .position(|m| m.role == Role::System)
-            .map(|i| i + 1)
-            .unwrap_or(0);
+        let system_idx =
+            messages.iter().position(|m| m.role == Role::System).map(|i| i + 1).unwrap_or(0);
 
         // Split point: everything before this is summarised; everything after is kept.
         // Clamp so we never summarise into (or past) the system prompt.
@@ -158,15 +152,9 @@ mod tests {
 
     #[tokio::test]
     async fn preserves_leading_system_prompt() {
-        let compaction = SummaryCompaction {
-            max_tokens: 10,
-            keep_recent: 1,
-        };
-        let mut messages = vec![
-            Message::system("persona"),
-            Message::user("first"),
-            Message::user("second"),
-        ];
+        let compaction = SummaryCompaction { max_tokens: 10, keep_recent: 1 };
+        let mut messages =
+            vec![Message::system("persona"), Message::user("first"), Message::user("second")];
         let changed = compaction.compact(&mut messages, &FakeProvider).await.unwrap();
         assert!(changed);
         assert_eq!(messages[0].role, Role::System);
@@ -176,10 +164,7 @@ mod tests {
 
     #[tokio::test]
     async fn skips_compaction_when_only_system_prompt_is_old() {
-        let compaction = SummaryCompaction {
-            max_tokens: 5,
-            keep_recent: 1,
-        };
+        let compaction = SummaryCompaction { max_tokens: 5, keep_recent: 1 };
         let mut messages = vec![Message::system("long system prompt text"), Message::user("hi")];
         let changed = compaction.compact(&mut messages, &FakeProvider).await.unwrap();
         assert!(!changed);

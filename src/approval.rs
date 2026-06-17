@@ -56,9 +56,7 @@ pub struct AutoDenyHandler;
 #[async_trait]
 impl ApprovalHandler for AutoDenyHandler {
     async fn ask(&self, _request: ApprovalRequest) -> ApprovalDecision {
-        ApprovalDecision::Deny {
-            reason: "no approval handler configured".into(),
-        }
+        ApprovalDecision::Deny { reason: "no approval handler configured".into() }
     }
 }
 
@@ -98,9 +96,7 @@ mod tests {
 
     #[tokio::test]
     async fn fixed_handler_returns_configured_decision() {
-        let handler = FixedDecisionHandler {
-            decision: ApprovalDecision::Allow,
-        };
+        let handler = FixedDecisionHandler { decision: ApprovalDecision::Allow };
         let decision = handler
             .ask(ApprovalRequest {
                 tool_name: "Read".into(),

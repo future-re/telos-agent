@@ -3,8 +3,8 @@
 //! DeepSeek's API is OpenAI-compatible, so this provider uses [`async_openai`]
 //! with DeepSeek's base URL and API-key convention.
 
-use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
 use async_openai::Client;
+use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
 use async_trait::async_trait;
 use futures_core::stream::Stream;
 
@@ -41,11 +41,7 @@ impl DeepSeekConfig {
         let api_key = std::env::var("DEEPSEEK_API_KEY")
             .map_err(|_| AgentError::Config("missing DEEPSEEK_API_KEY".into()))?;
 
-        Ok(Self {
-            api_key,
-            model: model.into(),
-            base_url: "https://api.deepseek.com".into(),
-        })
+        Ok(Self { api_key, model: model.into(), base_url: "https://api.deepseek.com".into() })
     }
 }
 
@@ -154,13 +150,7 @@ mod tests {
         let response = provider.complete(request).await.unwrap();
         assert_eq!(response.message.text_content(), "Hello from DeepSeek!");
         assert_eq!(response.stop_reason, StopReason::EndTurn);
-        assert_eq!(
-            response.usage,
-            Some(TokenUsage {
-                input_tokens: 10,
-                output_tokens: 3,
-            })
-        );
+        assert_eq!(response.usage, Some(TokenUsage { input_tokens: 10, output_tokens: 3 }));
     }
 
     #[tokio::test]

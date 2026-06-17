@@ -3,6 +3,7 @@
 //! Both Kimi and DeepSeek expose the same `/v1/chat/completions` shape, so the
 //! request building and response parsing logic lives here to avoid duplication.
 
+use async_openai::Client;
 use async_openai::config::OpenAIConfig as AsyncOpenAIConfig;
 use async_openai::types::chat::{
     ChatCompletionMessageToolCall, ChatCompletionMessageToolCalls,
@@ -12,10 +13,9 @@ use async_openai::types::chat::{
     ChatCompletionRequestToolMessageContent, ChatCompletionRequestUserMessage,
     ChatCompletionRequestUserMessageContent, ChatCompletionResponseMessage,
     ChatCompletionStreamOptions, ChatCompletionTool, ChatCompletionTools,
-    CreateChatCompletionRequest, CreateChatCompletionResponse,
-    CreateChatCompletionStreamResponse, FinishReason, FunctionCall, FunctionObject,
+    CreateChatCompletionRequest, CreateChatCompletionResponse, CreateChatCompletionStreamResponse,
+    FinishReason, FunctionCall, FunctionObject,
 };
-use async_openai::Client;
 use async_stream::try_stream;
 use futures_core::stream::Stream;
 use futures_util::StreamExt;
@@ -23,7 +23,9 @@ use serde_json::Value;
 
 use crate::error::{AgentError, ProviderError};
 use crate::message::{ContentBlock, Message, Role, TextBlock, ThinkingBlock, ToolCall, ToolResult};
-use crate::provider::{CompletionRequest, CompletionResponse, ProviderEvent, StopReason, TokenUsage};
+use crate::provider::{
+    CompletionRequest, CompletionResponse, ProviderEvent, StopReason, TokenUsage,
+};
 use crate::tool::ToolDefinition;
 
 /// Classify an [`async_openai::error::OpenAIError`] into a structured
@@ -48,15 +50,11 @@ pub(crate) fn classify_openai_error(err: async_openai::error::OpenAIError) -> Ag
             status: resp.status_code.as_u16(),
             message: resp.api_error.to_string(),
         }),
-        OpenAIError::JSONDeserialize(e, content) => AgentError::Provider(
-            ProviderError::InvalidResponse(format!("{e}: {content}")),
-        ),
-        OpenAIError::StreamError(e) => {
-            AgentError::Provider(ProviderError::Other(e.to_string()))
+        OpenAIError::JSONDeserialize(e, content) => {
+            AgentError::Provider(ProviderError::InvalidResponse(format!("{e}: {content}")))
         }
-        OpenAIError::InvalidArgument(msg) => {
-            AgentError::Provider(ProviderError::Other(msg))
-        }
+        OpenAIError::StreamError(e) => AgentError::Provider(ProviderError::Other(e.to_string())),
+        OpenAIError::InvalidArgument(msg) => AgentError::Provider(ProviderError::Other(msg)),
         other => AgentError::Provider(ProviderError::Other(other.to_string())),
     }
 }
@@ -77,11 +75,7 @@ pub(crate) fn build_client(api_key: &str, base_url: &str) -> Client<AsyncOpenAIC
 
 fn normalize_api_base(base_url: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
-    if trimmed.ends_with("/v1") {
-        trimmed.to_string()
-    } else {
-        format!("{}/v1", trimmed)
-    }
+    if trimmed.ends_with("/v1") { trimmed.to_string() } else { format!("{}/v1", trimmed) }
 }
 
 /// Build a [`CreateChatCompletionRequest`] from the provider-agnostic request.
@@ -89,20 +83,15 @@ pub(crate) fn build_request(
     model: &str,
     request: CompletionRequest,
 ) -> CreateChatCompletionRequest {
-    let mut messages: Vec<ChatCompletionRequestMessage> = request
-        .messages
-        .iter()
-        .flat_map(message_to_openai)
-        .collect();
+    let mut messages: Vec<ChatCompletionRequestMessage> =
+        request.messages.iter().flat_map(message_to_openai).collect();
 
     // Prepend the configured system prompt only when the conversation does not
     // already start with a system message. This preserves system messages that
     // were added by hooks or loaded from storage while keeping config authoritative.
     if let Some(system_prompt) = &request.system_prompt {
-        let already_has_system = matches!(
-            messages.first(),
-            Some(ChatCompletionRequestMessage::System(_))
-        );
+        let already_has_system =
+            matches!(messages.first(), Some(ChatCompletionRequestMessage::System(_)));
         if !already_has_system {
             messages.insert(
                 0,
@@ -115,20 +104,10 @@ pub(crate) fn build_request(
     }
 
     let tools = (!request.tools.is_empty()).then(|| {
-        request
-            .tools
-            .iter()
-            .map(tool_to_openai)
-            .map(ChatCompletionTools::Function)
-            .collect()
+        request.tools.iter().map(tool_to_openai).map(ChatCompletionTools::Function).collect()
     });
 
-    CreateChatCompletionRequest {
-        model: model.to_string(),
-        messages,
-        tools,
-        ..Default::default()
-    }
+    CreateChatCompletionRequest { model: model.to_string(), messages, tools, ..Default::default() }
 }
 
 fn tool_to_openai(tool: &ToolDefinition) -> ChatCompletionTool {
@@ -144,18 +123,16 @@ fn tool_to_openai(tool: &ToolDefinition) -> ChatCompletionTool {
 
 fn message_to_openai(message: &Message) -> Vec<ChatCompletionRequestMessage> {
     match message.role {
-        Role::System => vec![ChatCompletionRequestMessage::System(
-            ChatCompletionRequestSystemMessage {
+        Role::System => {
+            vec![ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage {
                 content: ChatCompletionRequestSystemMessageContent::Text(message.text_content()),
                 name: None,
-            },
-        )],
-        Role::User => vec![ChatCompletionRequestMessage::User(
-            ChatCompletionRequestUserMessage {
-                content: ChatCompletionRequestUserMessageContent::Text(message.text_content()),
-                name: None,
-            },
-        )],
+            })]
+        }
+        Role::User => vec![ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
+            content: ChatCompletionRequestUserMessageContent::Text(message.text_content()),
+            name: None,
+        })],
         Role::Assistant => {
             let text = message.text_content();
             let content = if text.is_empty() {
@@ -164,27 +141,16 @@ fn message_to_openai(message: &Message) -> Vec<ChatCompletionRequestMessage> {
                 Some(ChatCompletionRequestAssistantMessageContent::Text(text))
             };
 
-            let tool_calls: Vec<ChatCompletionMessageToolCalls> = message
-                .tool_calls()
-                .map(tool_call_to_openai)
-                .collect();
+            let tool_calls: Vec<ChatCompletionMessageToolCalls> =
+                message.tool_calls().map(tool_call_to_openai).collect();
 
-            vec![ChatCompletionRequestMessage::Assistant(
-                ChatCompletionRequestAssistantMessage {
-                    content,
-                    tool_calls: if tool_calls.is_empty() {
-                        None
-                    } else {
-                        Some(tool_calls)
-                    },
-                    ..Default::default()
-                },
-            )]
+            vec![ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+                content,
+                tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+                ..Default::default()
+            })]
         }
-        Role::Tool => message
-            .tool_results_iter()
-            .map(tool_result_to_openai)
-            .collect(),
+        Role::Tool => message.tool_results_iter().map(tool_result_to_openai).collect(),
     }
 }
 
@@ -210,11 +176,11 @@ fn tool_result_to_openai(result: &ToolResult) -> ChatCompletionRequestMessage {
 pub(crate) fn parse_response(
     response: CreateChatCompletionResponse,
 ) -> Result<CompletionResponse, AgentError> {
-    let choice = response
-        .choices
-        .into_iter()
-        .next()
-        .ok_or_else(|| AgentError::Provider(ProviderError::InvalidResponse("provider response missing choice".into())))?;
+    let choice = response.choices.into_iter().next().ok_or_else(|| {
+        AgentError::Provider(ProviderError::InvalidResponse(
+            "provider response missing choice".into(),
+        ))
+    })?;
 
     let message = parse_response_message(choice.message)?;
     let stop_reason = match choice.finish_reason {
@@ -226,16 +192,10 @@ pub(crate) fn parse_response(
         output_tokens: u.completion_tokens as usize,
     });
 
-    Ok(CompletionResponse {
-        message,
-        stop_reason,
-        usage,
-    })
+    Ok(CompletionResponse { message, stop_reason, usage })
 }
 
-fn parse_response_message(
-    message: ChatCompletionResponseMessage,
-) -> Result<Message, AgentError> {
+fn parse_response_message(message: ChatCompletionResponseMessage) -> Result<Message, AgentError> {
     let mut blocks = Vec::new();
 
     // Some providers (e.g. DeepSeek-R1) return reasoning content in a separate
@@ -264,9 +224,11 @@ fn parse_response_message(
         for call in tool_calls {
             match call {
                 ChatCompletionMessageToolCalls::Function(func) => {
-                    let arguments: Value = serde_json::from_str(&func.function.arguments)
-                        .map_err(|err| {
-                            AgentError::Provider(ProviderError::InvalidResponse(format!("invalid tool arguments: {err}")))
+                    let arguments: Value =
+                        serde_json::from_str(&func.function.arguments).map_err(|err| {
+                            AgentError::Provider(ProviderError::InvalidResponse(format!(
+                                "invalid tool arguments: {err}"
+                            )))
                         })?;
                     blocks.push(ContentBlock::ToolCall(ToolCall {
                         id: func.id,
@@ -281,10 +243,7 @@ fn parse_response_message(
         }
     }
 
-    Ok(Message {
-        role: Role::Assistant,
-        blocks,
-    })
+    Ok(Message { role: Role::Assistant, blocks })
 }
 
 /// Stream a completion using [`async_openai`]'s SSE endpoint.

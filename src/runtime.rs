@@ -26,9 +26,7 @@ use crate::executor::{ToolExecutionEvent, ToolExecutionStreamItem, execute_tool_
 use crate::hooks::{HookContext, HookPhase};
 use crate::message::{ContentBlock, Message, Role, TextBlock, ThinkingBlock};
 use crate::metrics::SessionMetrics;
-use crate::provider::{
-    CompletionRequest, ModelProvider, ProviderEvent, StopReason, TokenUsage,
-};
+use crate::provider::{CompletionRequest, ModelProvider, ProviderEvent, StopReason, TokenUsage};
 use crate::storage::{SessionMetadata, Storage};
 use crate::tool::FileReadState;
 use crate::tool::ToolRegistry;
@@ -45,27 +43,13 @@ static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Debug, Clone, Serialize)]
 pub enum TurnEvent {
     /// Fired exactly once at the start of a turn with the user's input.
-    TurnStarted {
-        session_id: String,
-        turn_id: u64,
-        user_input: String,
-    },
+    TurnStarted { session_id: String, turn_id: u64, user_input: String },
     /// Fired at the top of each model ⇄ tool iteration within the turn.
-    IterationStarted {
-        iteration: usize,
-        message_count: usize,
-    },
+    IterationStarted { iteration: usize, message_count: usize },
     /// About to issue a completion request to the provider.
-    ProviderRequest {
-        iteration: usize,
-        message_count: usize,
-        tool_count: usize,
-    },
+    ProviderRequest { iteration: usize, message_count: usize, tool_count: usize },
     /// Provider reported token usage for the just-finished iteration.
-    ProviderUsage {
-        input_tokens: usize,
-        output_tokens: usize,
-    },
+    ProviderUsage { input_tokens: usize, output_tokens: usize },
     /// Incremental text fragment streamed from the assistant.
     AssistantDelta { text: String },
     /// Incremental reasoning fragment streamed from a thinking-capable model.
@@ -84,11 +68,7 @@ pub enum TurnEvent {
         data: Option<serde_json::Value>,
     },
     /// A tool call finished (successfully or with an error).
-    ToolCompleted {
-        tool_call_id: String,
-        name: String,
-        is_error: bool,
-    },
+    ToolCompleted { tool_call_id: String, name: String, is_error: bool },
     /// The aggregated tool-result message appended to the conversation.
     ToolResult(Message),
     /// A compaction pass is starting; `reason` identifies which threshold tripped.
@@ -97,41 +77,19 @@ pub enum TurnEvent {
     CompactionCompleted { reason: String },
     /// Estimated request size exceeded [`TokenBudget::max_tokens`](crate::TokenBudget::max_tokens);
     /// the turn ends without calling the model.
-    TokenBudgetExceeded {
-        used_tokens: usize,
-        max_tokens: usize,
-    },
+    TokenBudgetExceeded { used_tokens: usize, max_tokens: usize },
     /// A registered hook is starting.
     HookStarted { phase: &'static str, name: String },
     /// A registered hook finished; `emitted_message` is `true` if it appended a follow-up.
-    HookCompleted {
-        phase: &'static str,
-        name: String,
-        emitted_message: bool,
-    },
+    HookCompleted { phase: &'static str, name: String, emitted_message: bool },
     /// A tool call has been suspended pending human approval.
-    ApprovalRequested {
-        tool_call_id: String,
-        name: String,
-        reason: String,
-    },
+    ApprovalRequested { tool_call_id: String, name: String, reason: String },
     /// Human approval has been resolved for a suspended tool call.
-    ApprovalResolved {
-        tool_call_id: String,
-        name: String,
-        decision: String,
-    },
+    ApprovalResolved { tool_call_id: String, name: String, decision: String },
     /// A provider call failed with a retryable error and is being retried.
-    ProviderRetry {
-        attempt: usize,
-        max_retries: usize,
-        delay_ms: u64,
-    },
+    ProviderRetry { attempt: usize, max_retries: usize, delay_ms: u64 },
     /// Final event of a turn — the assistant produced an end-of-turn message.
-    TurnFinished {
-        stop_reason: StopReason,
-        final_text: String,
-    },
+    TurnFinished { stop_reason: StopReason, final_text: String },
 }
 
 /// Collected result of a turn, returned by [`AgentSession::run_turn`].
@@ -167,14 +125,9 @@ pub struct AgentSession {
 /// Outcome of the compaction phase at the top of an iteration.
 enum CompactionResult {
     /// Compaction completed (or was skipped); caller should continue the turn.
-    Continue {
-        events: Vec<TurnEvent>,
-        compactions: usize,
-    },
+    Continue { events: Vec<TurnEvent>, compactions: usize },
     /// Token budget was already exceeded; caller should finish the turn early.
-    AbortTurn {
-        events: Vec<TurnEvent>,
-    },
+    AbortTurn { events: Vec<TurnEvent> },
 }
 
 impl AgentSession {
@@ -189,10 +142,7 @@ impl AgentSession {
 
         Ok(Self {
             config,
-            session_id: format!(
-                "session-{}",
-                NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed)
-            ),
+            session_id: format!("session-{}", NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed)),
             next_turn_id: 1,
             messages,
             read_file_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -217,8 +167,7 @@ impl AgentSession {
 
     /// Drop all non-system messages and reset the turn counter.
     pub fn reset(&mut self) {
-        self.messages
-            .retain(|message| message.role == crate::message::Role::System);
+        self.messages.retain(|message| message.role == crate::message::Role::System);
         self.next_turn_id = 1;
         self.read_file_state = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     }
@@ -226,9 +175,7 @@ impl AgentSession {
     /// Persist the conversation and session metadata if a [`Storage`] backend is configured.
     pub async fn save(&self) -> Result<(), AgentError> {
         if let Some(storage) = &self.config.storage {
-            storage
-                .save_snapshot(&self.session_id, &self.messages)
-                .await?;
+            storage.save_snapshot(&self.session_id, &self.messages).await?;
             let read_file_state = self.read_file_state.lock().await.clone();
             let metadata = SessionMetadata {
                 next_turn_id: self.next_turn_id,
@@ -299,11 +246,7 @@ impl AgentSession {
                 m.read_file_state,
             )
         } else {
-            (
-                1,
-                SessionMetrics::new(),
-                HashMap::new(),
-            )
+            (1, SessionMetrics::new(), HashMap::new())
         };
 
         config.storage = Some(storage);
@@ -346,13 +289,9 @@ impl AgentSession {
             if estimated_tokens >= budget.compact_at_tokens
                 && let Some(compaction) = self.config.compaction.clone()
             {
-                events.push(TurnEvent::CompactionStarted {
-                    reason: "token_budget".into(),
-                });
+                events.push(TurnEvent::CompactionStarted { reason: "token_budget".into() });
                 let did_compact = compaction.compact(&mut self.messages, provider).await?;
-                events.push(TurnEvent::CompactionCompleted {
-                    reason: "token_budget".into(),
-                });
+                events.push(TurnEvent::CompactionCompleted { reason: "token_budget".into() });
                 if did_compact {
                     compactions += 1;
                     info!(iteration, "token-budget compaction applied");
@@ -361,13 +300,9 @@ impl AgentSession {
         }
 
         if let Some(compaction) = self.config.compaction.clone() {
-            events.push(TurnEvent::CompactionStarted {
-                reason: "char_budget".into(),
-            });
+            events.push(TurnEvent::CompactionStarted { reason: "char_budget".into() });
             let did_compact = compaction.compact(&mut self.messages, provider).await?;
-            events.push(TurnEvent::CompactionCompleted {
-                reason: "char_budget".into(),
-            });
+            events.push(TurnEvent::CompactionCompleted { reason: "char_budget".into() });
             if did_compact {
                 compactions += 1;
                 info!(iteration, "char-budget compaction applied");
@@ -437,10 +372,7 @@ impl AgentSession {
                         }
                         blocks.push(ContentBlock::ToolCall(call));
                     }
-                    Ok(ProviderEvent::MessageStop {
-                        stop_reason: reason,
-                        usage: event_usage,
-                    }) => {
+                    Ok(ProviderEvent::MessageStop { stop_reason: reason, usage: event_usage }) => {
                         stop_reason = reason;
                         usage = event_usage;
                     }
@@ -490,15 +422,7 @@ impl AgentSession {
                     is_redacted: false,
                 }));
             }
-            return Ok((
-                Message {
-                    role: Role::Assistant,
-                    blocks,
-                },
-                stop_reason,
-                usage,
-                events,
-            ));
+            return Ok((Message { role: Role::Assistant, blocks }, stop_reason, usage, events));
         }
     }
 
@@ -515,10 +439,8 @@ impl AgentSession {
             HookPhase::Stop => "stop",
         };
         for hook in self.config.hooks.hooks_for_phase(phase) {
-            events.push(TurnEvent::HookStarted {
-                phase: phase_name,
-                name: hook.name().to_string(),
-            });
+            events
+                .push(TurnEvent::HookStarted { phase: phase_name, name: hook.name().to_string() });
             let maybe_message = hook.run(hook_context, assistant_message).await?;
             let emitted = maybe_message.is_some();
             if let Some(message) = maybe_message {
@@ -561,44 +483,18 @@ impl AgentSession {
                         ToolExecutionEvent::ToolStarted { tool_call_id, name } => {
                             TurnEvent::ToolCall { tool_call_id, name }
                         }
-                        ToolExecutionEvent::ToolProgress {
-                            tool_call_id,
-                            name,
-                            message,
-                            data,
-                        } => TurnEvent::ToolProgress {
-                            tool_call_id,
-                            name,
-                            message,
-                            data,
-                        },
-                        ToolExecutionEvent::ToolCompleted {
-                            tool_call_id,
-                            name,
-                            is_error,
-                        } => TurnEvent::ToolCompleted {
-                            tool_call_id,
-                            name,
-                            is_error,
-                        },
-                        ToolExecutionEvent::ApprovalRequested {
-                            tool_call_id,
-                            name,
-                            reason,
-                        } => TurnEvent::ApprovalRequested {
-                            tool_call_id,
-                            name,
-                            reason,
-                        },
-                        ToolExecutionEvent::ApprovalResolved {
-                            tool_call_id,
-                            name,
-                            decision,
-                        } => TurnEvent::ApprovalResolved {
-                            tool_call_id,
-                            name,
-                            decision,
-                        },
+                        ToolExecutionEvent::ToolProgress { tool_call_id, name, message, data } => {
+                            TurnEvent::ToolProgress { tool_call_id, name, message, data }
+                        }
+                        ToolExecutionEvent::ToolCompleted { tool_call_id, name, is_error } => {
+                            TurnEvent::ToolCompleted { tool_call_id, name, is_error }
+                        }
+                        ToolExecutionEvent::ApprovalRequested { tool_call_id, name, reason } => {
+                            TurnEvent::ApprovalRequested { tool_call_id, name, reason }
+                        }
+                        ToolExecutionEvent::ApprovalResolved { tool_call_id, name, decision } => {
+                            TurnEvent::ApprovalResolved { tool_call_id, name, decision }
+                        }
                     };
                     events.push(turn_event);
                 }
@@ -616,17 +512,12 @@ impl AgentSession {
         }
 
         let tool_message = Message::tool_results(tool_results);
-        let compaction_config = CompactionConfig {
-            max_tool_result_chars: self.config.max_tool_result_chars,
-        };
+        let compaction_config =
+            CompactionConfig { max_tool_result_chars: self.config.max_tool_result_chars };
         let compaction = compact_tool_result_message(tool_message, &compaction_config);
         if compaction.compacted {
-            events.push(TurnEvent::CompactionStarted {
-                reason: "tool_result_budget".into(),
-            });
-            events.push(TurnEvent::CompactionCompleted {
-                reason: "tool_result_budget".into(),
-            });
+            events.push(TurnEvent::CompactionStarted { reason: "tool_result_budget".into() });
+            events.push(TurnEvent::CompactionCompleted { reason: "tool_result_budget".into() });
         }
 
         Ok((compaction.message, events))
@@ -818,11 +709,7 @@ impl AgentSession {
                     }
                     _ => {}
                 }
-                if let TurnEvent::TurnFinished {
-                    stop_reason: reason,
-                    ..
-                } = event.clone()
-                {
+                if let TurnEvent::TurnFinished { stop_reason: reason, .. } = event.clone() {
                     stop_reason = reason;
                 }
                 events.push(event);
@@ -878,90 +765,60 @@ impl TurnEvent {
     /// Human-readable one-line summary of the event — useful for trace logs / CLIs.
     pub fn text(&self) -> String {
         match self {
-            TurnEvent::TurnStarted {
-                session_id,
-                turn_id,
-                user_input,
-            } => format!("turn_started:{}#{}:{}", session_id, turn_id, user_input),
-            TurnEvent::IterationStarted {
-                iteration,
-                message_count,
-            } => format!("iteration_started:{} messages={}", iteration, message_count),
-            TurnEvent::ProviderRequest {
-                iteration,
-                message_count,
-                tool_count,
-            } => format!(
+            TurnEvent::TurnStarted { session_id, turn_id, user_input } => {
+                format!("turn_started:{}#{}:{}", session_id, turn_id, user_input)
+            }
+            TurnEvent::IterationStarted { iteration, message_count } => {
+                format!("iteration_started:{} messages={}", iteration, message_count)
+            }
+            TurnEvent::ProviderRequest { iteration, message_count, tool_count } => format!(
                 "provider_request:{} messages={} tools={}",
                 iteration, message_count, tool_count
             ),
-            TurnEvent::ProviderUsage {
-                input_tokens,
-                output_tokens,
-            } => format!("provider_usage:input={input_tokens} output={output_tokens}"),
+            TurnEvent::ProviderUsage { input_tokens, output_tokens } => {
+                format!("provider_usage:input={input_tokens} output={output_tokens}")
+            }
             TurnEvent::AssistantDelta { text } => format!("assistant_delta:{text}"),
             TurnEvent::ThinkingDelta { text } => format!("thinking_delta:{text}"),
             TurnEvent::ToolCall { tool_call_id, name } => {
                 format!("tool_call:{}#{}", name, tool_call_id)
             }
-            TurnEvent::ToolProgress {
-                tool_call_id,
-                name,
-                message,
-                ..
-            } => format!(
+            TurnEvent::ToolProgress { tool_call_id, name, message, .. } => format!(
                 "tool_progress:{}#{}:{}",
                 name,
                 tool_call_id.as_deref().unwrap_or("unknown"),
                 message
             ),
-            TurnEvent::ToolCompleted {
-                tool_call_id,
-                name,
-                is_error,
-            } => format!(
-                "tool_completed:{}#{} error={}",
-                name, tool_call_id, is_error
-            ),
+            TurnEvent::ToolCompleted { tool_call_id, name, is_error } => {
+                format!("tool_completed:{}#{} error={}", name, tool_call_id, is_error)
+            }
             TurnEvent::CompactionStarted { reason } => {
                 format!("compaction_started:{reason}")
             }
             TurnEvent::CompactionCompleted { reason } => {
                 format!("compaction_completed:{reason}")
             }
-            TurnEvent::TokenBudgetExceeded {
-                used_tokens,
-                max_tokens,
-            } => format!("token_budget_exceeded:{used_tokens}/{max_tokens}"),
+            TurnEvent::TokenBudgetExceeded { used_tokens, max_tokens } => {
+                format!("token_budget_exceeded:{used_tokens}/{max_tokens}")
+            }
             TurnEvent::HookStarted { phase, name } => {
                 format!("hook_started:{phase}:{name}")
             }
-            TurnEvent::HookCompleted {
-                phase,
-                name,
-                emitted_message,
-            } => format!("hook_completed:{phase}:{name}:{emitted_message}"),
-            TurnEvent::ApprovalRequested {
-                tool_call_id,
-                name,
-                reason,
-            } => format!("approval_requested:{name}#{tool_call_id}:{reason}"),
-            TurnEvent::ApprovalResolved {
-                tool_call_id,
-                name,
-                decision,
-            } => format!("approval_resolved:{name}#{tool_call_id}:{decision}"),
-            TurnEvent::ProviderRetry {
-                attempt,
-                max_retries,
-                delay_ms,
-            } => {
+            TurnEvent::HookCompleted { phase, name, emitted_message } => {
+                format!("hook_completed:{phase}:{name}:{emitted_message}")
+            }
+            TurnEvent::ApprovalRequested { tool_call_id, name, reason } => {
+                format!("approval_requested:{name}#{tool_call_id}:{reason}")
+            }
+            TurnEvent::ApprovalResolved { tool_call_id, name, decision } => {
+                format!("approval_resolved:{name}#{tool_call_id}:{decision}")
+            }
+            TurnEvent::ProviderRetry { attempt, max_retries, delay_ms } => {
                 format!("provider_retry:{attempt}/{max_retries} delay={delay_ms}ms")
             }
-            TurnEvent::TurnFinished {
-                stop_reason,
-                final_text,
-            } => format!("turn_finished:{stop_reason:?}:{final_text}"),
+            TurnEvent::TurnFinished { stop_reason, final_text } => {
+                format!("turn_finished:{stop_reason:?}:{final_text}")
+            }
             _ => self
                 .message()
                 .map(|message| {
@@ -1022,13 +879,11 @@ mod tests {
     fn turn_event_message_returns_some_for_message_variants() {
         let message = Message::user("hi");
         assert!(matches!(TurnEvent::User(message.clone()).message(), Some(m) if m == &message));
-        assert!(TurnEvent::TurnStarted {
-            session_id: "s".into(),
-            turn_id: 1,
-            user_input: "hi".into(),
-        }
-        .message()
-        .is_none());
+        assert!(
+            TurnEvent::TurnStarted { session_id: "s".into(), turn_id: 1, user_input: "hi".into() }
+                .message()
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -1037,10 +892,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let storage: Arc<dyn Storage> = Arc::new(JsonlStorage::new(&dir).unwrap());
 
-        let config = AgentConfig {
-            storage: Some(Arc::clone(&storage)),
-            ..Default::default()
-        };
+        let config = AgentConfig { storage: Some(Arc::clone(&storage)), ..Default::default() };
 
         let mut session = AgentSession::new(config.clone()).unwrap();
         let session_id = session.session_id().to_string();
@@ -1049,10 +901,7 @@ mod tests {
         let provider = MockProvider::new(vec![CompletionResponse {
             message: Message::assistant("hello"),
             stop_reason: StopReason::EndTurn,
-            usage: Some(TokenUsage {
-                input_tokens: 10,
-                output_tokens: 5,
-            }),
+            usage: Some(TokenUsage { input_tokens: 10, output_tokens: 5 }),
         }]);
         let tools = ToolRegistry::new();
         session.run_turn(&provider, &tools, "hi").await.unwrap();
@@ -1062,23 +911,20 @@ mod tests {
         assert_eq!(session.metrics.total_output_tokens(), 5);
 
         // Inject a read-file record so we can verify it round-trips.
-        session
-            .read_file_state
-            .lock()
-            .await
-            .insert(PathBuf::from("src/lib.rs"), crate::tool::FileReadRecord {
+        session.read_file_state.lock().await.insert(
+            PathBuf::from("src/lib.rs"),
+            crate::tool::FileReadRecord {
                 content: "fn main() {}".to_string(),
                 timestamp_ms: 1234,
                 is_partial_view: false,
                 offset: None,
                 limit: None,
-            });
+            },
+        );
 
         session.save().await.unwrap();
 
-        let resumed = AgentSession::resume(&session_id, config, storage)
-            .await
-            .unwrap();
+        let resumed = AgentSession::resume(&session_id, config, storage).await.unwrap();
         assert_eq!(resumed.session_id, session_id);
         assert_eq!(resumed.next_turn_id, 2);
         assert_eq!(resumed.metrics.turn_count(), 1);

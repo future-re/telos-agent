@@ -131,7 +131,9 @@ mod tests {
     #[test]
     fn api_invalid_response_stream_ended_are_not_retryable() {
         assert!(!AgentError::Provider(ProviderError::Api("invalid key".into())).is_retryable());
-        assert!(!AgentError::Provider(ProviderError::InvalidResponse("bad json".into())).is_retryable());
+        assert!(
+            !AgentError::Provider(ProviderError::InvalidResponse("bad json".into())).is_retryable()
+        );
         assert!(!AgentError::Provider(ProviderError::StreamEnded).is_retryable());
     }
 

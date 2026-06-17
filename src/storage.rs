@@ -52,7 +52,10 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
         Ok(())
     }
     /// Load session metadata. The default returns `None` for backwards compatibility.
-    async fn load_metadata(&self, _session_id: &str) -> Result<Option<SessionMetadata>, AgentError> {
+    async fn load_metadata(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<SessionMetadata>, AgentError> {
         Ok(None)
     }
 }
@@ -91,10 +94,7 @@ fn validate_session_id(session_id: &str) -> Result<(), AgentError> {
     if session_id.is_empty() {
         return Err(AgentError::Config("session_id cannot be empty".into()));
     }
-    if !session_id
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
+    if !session_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
         return Err(AgentError::Config(format!(
             "session_id contains invalid characters: {session_id}"
         )));
@@ -231,10 +231,7 @@ impl Storage for JsonlStorage {
         Ok(())
     }
 
-    async fn load_metadata(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<SessionMetadata>, AgentError> {
+    async fn load_metadata(&self, session_id: &str) -> Result<Option<SessionMetadata>, AgentError> {
         let path = self.metadata_path(session_id)?;
         if !path.exists() {
             return Ok(None);
@@ -281,7 +278,10 @@ impl Storage for NoopStorage {
         Ok(())
     }
 
-    async fn load_metadata(&self, _session_id: &str) -> Result<Option<SessionMetadata>, AgentError> {
+    async fn load_metadata(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<SessionMetadata>, AgentError> {
         Ok(None)
     }
 }
@@ -420,9 +420,10 @@ mod tests {
 
     #[tokio::test]
     async fn jsonl_metadata_load_unknown_returns_none() {
-        let storage =
-            JsonlStorage::new(std::env::temp_dir().join("tiny_agent_test_storage_metadata_unknown"))
-                .unwrap();
+        let storage = JsonlStorage::new(
+            std::env::temp_dir().join("tiny_agent_test_storage_metadata_unknown"),
+        )
+        .unwrap();
         let loaded = storage.load_metadata("nonexistent-session").await.unwrap();
         assert!(loaded.is_none());
     }

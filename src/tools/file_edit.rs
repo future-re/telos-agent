@@ -54,9 +54,7 @@ impl Tool for FileEditTool {
         _arguments: &Value,
         _context: &ToolContext,
     ) -> Result<PermissionDecision, AgentError> {
-        Ok(PermissionDecision::Ask {
-            reason: "file edit requires approval".into(),
-        })
+        Ok(PermissionDecision::Ask { reason: "file edit requires approval".into() })
     }
 
     async fn invoke(
@@ -111,11 +109,7 @@ impl Tool for FileEditTool {
 
         // Reject ambiguous (0 or >1) matches so the model is forced to widen
         // the snippet rather than silently editing the wrong location.
-        let count = if old.is_empty() {
-            1
-        } else {
-            content.matches(old).count()
-        };
+        let count = if old.is_empty() { 1 } else { content.matches(old).count() };
         if count == 0 {
             return Err(AgentError::ToolExecution {
                 tool: "Edit".into(),
@@ -138,35 +132,27 @@ impl Tool for FileEditTool {
             content.replacen(old, new, 1)
         };
         if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|err| AgentError::ToolExecution {
-                    tool: "Edit".into(),
-                    message: err.to_string(),
-                })?;
-        }
-        tokio::fs::write(&path, updated)
-            .await
-            .map_err(|err| AgentError::ToolExecution {
+            tokio::fs::create_dir_all(parent).await.map_err(|err| AgentError::ToolExecution {
                 tool: "Edit".into(),
                 message: err.to_string(),
             })?;
-        // Preserve the original mode bits when editing an existing file.
-        if let Some(metadata) = existing_metadata {
-            if let Err(err) = tokio::fs::set_permissions(&path, metadata.permissions()).await {
-                return Err(AgentError::ToolExecution {
-                    tool: "Edit".into(),
-                    message: format!("failed to restore file permissions: {err}"),
-                });
-            }
         }
-        let updated_content =
-            tokio::fs::read_to_string(&path)
-                .await
-                .map_err(|err| AgentError::ToolExecution {
-                    tool: "Edit".into(),
-                    message: err.to_string(),
-                })?;
+        tokio::fs::write(&path, updated).await.map_err(|err| AgentError::ToolExecution {
+            tool: "Edit".into(),
+            message: err.to_string(),
+        })?;
+        // Preserve the original mode bits when editing an existing file.
+        if let Some(metadata) = existing_metadata
+            && let Err(err) = tokio::fs::set_permissions(&path, metadata.permissions()).await
+        {
+            return Err(AgentError::ToolExecution {
+                tool: "Edit".into(),
+                message: format!("failed to restore file permissions: {err}"),
+            });
+        }
+        let updated_content = tokio::fs::read_to_string(&path).await.map_err(|err| {
+            AgentError::ToolExecution { tool: "Edit".into(), message: err.to_string() }
+        })?;
         let timestamp_ms = modified_timestamp_ms(&path).await?;
         context.read_file_state.lock().await.insert(
             path.clone(),
@@ -251,4 +237,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-

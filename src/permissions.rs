@@ -169,7 +169,9 @@ impl PermissionEngine {
             PrefixResult::NeedsReview => {
                 let mut result = None;
                 for rule in &self.rules {
-                    if tool_names.iter().any(|tool_name| Self::match_name(&rule.tool_name, tool_name))
+                    if tool_names
+                        .iter()
+                        .any(|tool_name| Self::match_name(&rule.tool_name, tool_name))
                         && rule.command_prefix.is_none()
                         && Self::match_cwd_prefix(rule, cwd)
                     {

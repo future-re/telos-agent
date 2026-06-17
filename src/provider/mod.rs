@@ -28,10 +28,7 @@ pub use types::{CompletionRequest, CompletionResponse, ProviderEvent, StopReason
 // `run_turn_stream` can accept `&dyn ModelProvider` through `ErasedProvider`.
 #[async_trait]
 impl ModelProvider for &(dyn ModelProvider + Send + Sync) {
-    async fn complete(
-        &self,
-        request: CompletionRequest,
-    ) -> Result<CompletionResponse, AgentError> {
+    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AgentError> {
         (**self).complete(request).await
     }
 
@@ -53,10 +50,7 @@ impl ModelProvider for &(dyn ModelProvider + Send + Sync) {
 /// directly via `&arc`.
 #[async_trait]
 impl ModelProvider for std::sync::Arc<dyn ModelProvider + Send + Sync> {
-    async fn complete(
-        &self,
-        request: CompletionRequest,
-    ) -> Result<CompletionResponse, AgentError> {
+    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AgentError> {
         (**self).complete(request).await
     }
 

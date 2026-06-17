@@ -49,9 +49,7 @@ impl Tool for FileWriteTool {
         _arguments: &Value,
         _context: &ToolContext,
     ) -> Result<PermissionDecision, AgentError> {
-        Ok(PermissionDecision::Ask {
-            reason: "file write requires approval".into(),
-        })
+        Ok(PermissionDecision::Ask { reason: "file write requires approval".into() })
     }
 
     async fn invoke(
@@ -68,19 +66,15 @@ impl Tool for FileWriteTool {
         }
         // Create any missing parent directories so the model can write nested paths in one call.
         if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|err| AgentError::ToolExecution {
-                    tool: "Write".into(),
-                    message: err.to_string(),
-                })?;
-        }
-        tokio::fs::write(&path, content)
-            .await
-            .map_err(|err| AgentError::ToolExecution {
+            tokio::fs::create_dir_all(parent).await.map_err(|err| AgentError::ToolExecution {
                 tool: "Write".into(),
                 message: err.to_string(),
             })?;
+        }
+        tokio::fs::write(&path, content).await.map_err(|err| AgentError::ToolExecution {
+            tool: "Write".into(),
+            message: err.to_string(),
+        })?;
         let timestamp_ms = modified_timestamp_ms(&path).await?;
         context.read_file_state.lock().await.insert(
             path.clone(),
@@ -99,4 +93,3 @@ impl Tool for FileWriteTool {
         })))
     }
 }
-

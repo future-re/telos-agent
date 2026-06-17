@@ -69,11 +69,11 @@ pub use storage::{JsonlStorage, NoopStorage, Storage};
 // Subagent — nested agent run exposed as a tool.
 pub use subagent::SubagentTool;
 // Tool abstraction — the trait every callable capability implements, plus its registry.
+pub use tool::validate::{ValidationError, ValidationResult, validate_arguments};
 pub use tool::{
     InterruptBehavior, PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput,
     ToolProgress, ToolRegistry,
 };
-pub use tool::validate::{ValidationError, ValidationResult, validate_arguments};
 // Built-in tools — filesystem, shell, search.
 pub use tools::{
     FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ShellTool, register_core_tools,

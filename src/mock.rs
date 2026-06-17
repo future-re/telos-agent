@@ -23,10 +23,7 @@ pub struct MockProvider {
 impl MockProvider {
     /// Build a mock that will reply with `responses` in FIFO order.
     pub fn new(responses: Vec<CompletionResponse>) -> Self {
-        Self {
-            responses: Mutex::new(responses.into()),
-            requests: Mutex::new(Vec::new()),
-        }
+        Self { responses: Mutex::new(responses.into()), requests: Mutex::new(Vec::new()) }
     }
 }
 
@@ -34,11 +31,11 @@ impl MockProvider {
 impl ModelProvider for MockProvider {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AgentError> {
         self.requests.lock().await.push(request);
-        self.responses
-            .lock()
-            .await
-            .pop_front()
-            .ok_or_else(|| AgentError::Provider(crate::error::ProviderError::Other("mock provider has no more responses".into())))
+        self.responses.lock().await.pop_front().ok_or_else(|| {
+            AgentError::Provider(crate::error::ProviderError::Other(
+                "mock provider has no more responses".into(),
+            ))
+        })
     }
 
     /// Rough 4-chars-per-token heuristic — good enough for budget-test setups.

@@ -35,9 +35,9 @@ pub fn has_backslash_whitespace(command: &str) -> bool {
     while let Some(c) = chars.next() {
         if c == '\\'
             && let Some(&next) = chars.peek()
-            && (next == ' ' || next == '\t'
-                || (next == '\n'
-                    && !matches!(prev, None | Some(' ') | Some('\t') | Some('\n'))))
+            && (next == ' '
+                || next == '\t'
+                || (next == '\n' && !matches!(prev, None | Some(' ') | Some('\t') | Some('\n'))))
         {
             return true;
         }

@@ -92,18 +92,16 @@ fn command_text_range(node: &Node, redirect_span: Option<(usize, usize)>) -> (us
 }
 
 fn include_token_in_prefix(prefix_tokens: &[&str], token: &str) -> bool {
-    let base = prefix_tokens
-        .iter()
-        .find(|t| !looks_like_env_assignment(t))
-        .copied()
-        .unwrap_or("");
+    let base = prefix_tokens.iter().find(|t| !looks_like_env_assignment(t)).copied().unwrap_or("");
 
     match base {
         "git" => GIT_PREFIX_SUBCOMMANDS.contains(&token),
         "npm" | "pnpm" | "yarn" => {
             // npm run <script> -- <args>: prefix up to and including the script.
             // npm test, npm start: no prefix beyond the base command.
-            if prefix_tokens.len() == 1 && matches!(token, "run" | "test" | "start" | "build" | "lint") {
+            if prefix_tokens.len() == 1
+                && matches!(token, "run" | "test" | "start" | "build" | "lint")
+            {
                 return true;
             }
             // After `npm run`, the next token is the script name (e.g. lint).
@@ -123,8 +121,24 @@ fn include_token_in_prefix(prefix_tokens: &[&str], token: &str) -> bool {
 }
 
 const GIT_PREFIX_SUBCOMMANDS: &[&str] = &[
-    "status", "log", "show", "diff", "ls-files", "grep", "rev-parse", "describe", "branch",
-    "remote", "commit", "push", "pull", "checkout", "rebase", "merge", "fetch", "clone",
+    "status",
+    "log",
+    "show",
+    "diff",
+    "ls-files",
+    "grep",
+    "rev-parse",
+    "describe",
+    "branch",
+    "remote",
+    "commit",
+    "push",
+    "pull",
+    "checkout",
+    "rebase",
+    "merge",
+    "fetch",
+    "clone",
 ];
 
 fn looks_like_env_assignment(token: &str) -> bool {
@@ -192,27 +206,15 @@ mod tests {
 
     #[test]
     fn git_prefixes() {
-        assert_eq!(
-            prefix("git status"),
-            PrefixResult::Prefix("git status".into())
-        );
-        assert_eq!(
-            prefix("git commit -m \"foo\""),
-            PrefixResult::Prefix("git commit".into())
-        );
-        assert_eq!(
-            prefix("git push origin master"),
-            PrefixResult::Prefix("git push".into())
-        );
+        assert_eq!(prefix("git status"), PrefixResult::Prefix("git status".into()));
+        assert_eq!(prefix("git commit -m \"foo\""), PrefixResult::Prefix("git commit".into()));
+        assert_eq!(prefix("git push origin master"), PrefixResult::Prefix("git push".into()));
     }
 
     #[test]
     fn npm_prefixes() {
         assert_eq!(prefix("npm start"), PrefixResult::Prefix("npm start".into()));
-        assert_eq!(
-            prefix("npm run lint -- \"foo\""),
-            PrefixResult::Prefix("npm run lint".into())
-        );
+        assert_eq!(prefix("npm run lint -- \"foo\""), PrefixResult::Prefix("npm run lint".into()));
     }
 
     #[test]

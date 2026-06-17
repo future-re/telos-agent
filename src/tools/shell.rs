@@ -68,9 +68,8 @@ impl Tool for ShellTool {
         context: ToolContext,
     ) -> Result<ToolOutput, AgentError> {
         let command = required_string(&arguments, "command")?;
-        let timeout_ms = optional_usize_any(&arguments, &["timeout_ms"])
-            .unwrap_or(120_000)
-            .max(1) as u64;
+        let timeout_ms =
+            optional_usize_any(&arguments, &["timeout_ms"]).unwrap_or(120_000).max(1) as u64;
         if let Some(tx) = &context.progress {
             let _ = tx.send(crate::tool::ToolProgress {
                 tool_call_id: None,
@@ -161,10 +160,7 @@ mod tests {
         let mut env = HashMap::new();
         env.insert("PATH".into(), "/usr/local/bin:/usr/bin:/bin".into());
         let output = tool
-            .invoke(
-                json!({ "command": "echo $TINY_AGENT_SECRET" }),
-                ctx(std::env::temp_dir(), env),
-            )
+            .invoke(json!({ "command": "echo $TINY_AGENT_SECRET" }), ctx(std::env::temp_dir(), env))
             .await
             .unwrap();
         let stdout = output.content["stdout"].as_str().unwrap();
@@ -179,10 +175,7 @@ mod tests {
         env.insert("PATH".into(), "/usr/local/bin:/usr/bin:/bin".into());
         env.insert("MY_VAR".into(), "present".into());
         let output = tool
-            .invoke(
-                json!({ "command": "echo $MY_VAR" }),
-                ctx(std::env::temp_dir(), env),
-            )
+            .invoke(json!({ "command": "echo $MY_VAR" }), ctx(std::env::temp_dir(), env))
             .await
             .unwrap();
         let stdout = output.content["stdout"].as_str().unwrap();

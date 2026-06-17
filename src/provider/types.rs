@@ -59,8 +59,5 @@ pub enum ProviderEvent {
     /// Fully-assembled tool call from the assistant (providers buffer streamed JSON internally).
     ToolCall(ToolCall),
     /// Final marker carrying the stop reason and (optional) usage.
-    MessageStop {
-        stop_reason: StopReason,
-        usage: Option<TokenUsage>,
-    },
+    MessageStop { stop_reason: StopReason, usage: Option<TokenUsage> },
 }

@@ -55,10 +55,7 @@ impl Message {
 
     /// Build a tool message wrapping a single [`ToolResult`].
     pub fn tool(result: ToolResult) -> Self {
-        Self {
-            role: Role::Tool,
-            blocks: vec![ContentBlock::ToolResult(result)],
-        }
+        Self { role: Role::Tool, blocks: vec![ContentBlock::ToolResult(result)] }
     }
 
     /// Build a tool message wrapping multiple [`ToolResult`]s.
@@ -75,10 +72,7 @@ impl Message {
 
     /// Build a message with `role` and a single [`TextBlock`] payload.
     pub fn text(role: Role, text: impl Into<String>) -> Self {
-        Self {
-            role,
-            blocks: vec![ContentBlock::Text(TextBlock { text: text.into() })],
-        }
+        Self { role, blocks: vec![ContentBlock::Text(TextBlock { text: text.into() })] }
     }
 
     /// Concatenate all [`TextBlock`] contents in this message, separated by newlines.

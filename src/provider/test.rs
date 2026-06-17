@@ -6,10 +6,10 @@
 //! Run with: `cargo test -- provider::test`
 
 use crate::message::Message;
+use crate::provider::StopReason;
 use crate::provider::deepseek::{DeepSeekConfig, DeepSeekProvider};
 use crate::provider::kimi::{KimiConfig, KimiProvider};
 use crate::provider::{CompletionRequest, ModelProvider, ProviderEvent};
-use crate::provider::{StopReason};
 
 use futures_util::StreamExt;
 

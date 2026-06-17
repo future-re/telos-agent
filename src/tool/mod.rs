@@ -220,10 +220,7 @@ impl ToolRegistry {
                 self.validators.insert(name.clone(), Arc::new(validator));
             }
             Err(err) => {
-                panic!(
-                    "tool `{}` has an invalid input schema: {err}",
-                    name
-                );
+                panic!("tool `{}` has an invalid input schema: {err}", name);
             }
         }
         for alias in aliases {

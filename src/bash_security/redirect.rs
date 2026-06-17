@@ -29,9 +29,7 @@ impl Redirect {
             return Ok(());
         }
         if !self.is_static {
-            return Err(AgentError::PermissionDenied(
-                "dynamic redirect target".into(),
-            ));
+            return Err(AgentError::PermissionDenied("dynamic redirect target".into()));
         }
         resolve_workspace_path(cwd, &self.target)?;
         Ok(())
@@ -74,7 +72,9 @@ fn extract_single_redirect(node: &Node) -> Option<Redirect> {
                 }
             }
             "file_descriptor" => {
-                if op_kind.is_none() && let Ok(n) = child.text.parse::<u32>() {
+                if op_kind.is_none()
+                    && let Ok(n) = child.text.parse::<u32>()
+                {
                     fd = Some(n);
                 }
             }
@@ -95,12 +95,7 @@ fn extract_single_redirect(node: &Node) -> Option<Redirect> {
     let target = target.unwrap_or_default();
     let is_static = is_static_target(&target);
 
-    Some(Redirect {
-        op,
-        target,
-        fd,
-        is_static,
-    })
+    Some(Redirect { op, target, fd, is_static })
 }
 
 /// A static redirect target in bash is a single shell word with no expansion.

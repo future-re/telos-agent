@@ -52,8 +52,8 @@ pub use config::{AgentConfig, TokenBudget};
 pub use error::{AgentError, ProviderError};
 // Tool executor — direct entry points for callers that bypass the turn loop.
 pub use executor::{ToolExecutionEvent, ToolExecutionOutput, execute_tool_calls};
-// Hooks — registry + per-phase hook trait.
-pub use hooks::{Hook, HookContext, HookPhase, HookRegistry};
+// Hooks — registry + per-phase hook trait + metadata types.
+pub use hooks::{Hook, HookCondition, HookContext, HookEntry, HookPhase, HookRegistry};
 // Message model — the lingua franca between session, provider, and tools.
 pub use message::{ContentBlock, Message, Role, TextBlock, ThinkingBlock, ToolCall, ToolResult};
 // Memory — persistent cross-session agent memory.

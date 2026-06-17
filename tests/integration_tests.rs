@@ -1970,3 +1970,79 @@ async fn ask_user_question_rejects_empty_questions() {
     let result = tool.invoke(serde_json::json!({"questions": []}), ctx).await;
     assert!(result.is_err());
 }
+
+#[test]
+fn subagent_fork_mode_runs_multiple_lenses() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let outer_provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "subagent".into(),
+                        arguments: json!({
+                            "prompt": "analyze",
+                            "mode": "fork",
+                            "forks": [
+                                {
+                                    "lens": "security",
+                                    "system_prompt": "You are a security expert",
+                                    "task": "Find security issues"
+                                },
+                                {
+                                    "lens": "performance",
+                                    "system_prompt": "You are a performance expert",
+                                    "task": "Find perf issues"
+                                }
+                            ]
+                        }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("outer done"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+        let inner_provider = Arc::new(MockProvider::new(vec![
+            CompletionResponse {
+                message: Message::assistant("Security: found XSS"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("Performance: slow query"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]));
+        let mut tools = ToolRegistry::new();
+        tools.register(SubagentTool::new(
+            inner_provider,
+            ToolRegistry::new(),
+            AgentConfig::default(),
+        ));
+        let mut session = AgentSession::new(AgentConfig {
+            approval_handler: Some(Arc::new(FixedDecisionHandler {
+                decision: ApprovalDecision::Allow,
+            })),
+            ..AgentConfig::default()
+        })
+        .unwrap();
+
+        let result = session.run_turn(&outer_provider, &tools, "analyze code").await.unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
+        let text = tool_result.text();
+        assert!(text.contains("Security: found XSS"), "expected security result, got: {text}");
+        assert!(
+            text.contains("Performance: slow query"),
+            "expected performance result, got: {text}"
+        );
+    });
+}

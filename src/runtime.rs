@@ -79,9 +79,9 @@ pub enum TurnEvent {
     /// the turn ends without calling the model.
     TokenBudgetExceeded { used_tokens: usize, max_tokens: usize },
     /// A registered hook is starting.
-    HookStarted { phase: &'static str, name: String },
+    HookStarted { phase: String, name: String },
     /// A registered hook finished; `emitted_message` is `true` if it appended a follow-up.
-    HookCompleted { phase: &'static str, name: String, emitted_message: bool },
+    HookCompleted { phase: String, name: String, emitted_message: bool },
     /// A tool call has been suspended pending human approval.
     ApprovalRequested { tool_call_id: String, name: String, reason: String },
     /// Human approval has been resolved for a suspended tool call.
@@ -449,13 +449,13 @@ impl AgentSession {
         assistant_message: &Message,
     ) -> Result<Vec<TurnEvent>, AgentError> {
         let mut events = Vec::new();
-        let phase_name: &'static str = match phase {
-            HookPhase::PostSampling => "post_sampling",
-            HookPhase::Stop => "stop",
-        };
-        for hook in self.config.hooks.hooks_for_phase(phase) {
-            events
-                .push(TurnEvent::HookStarted { phase: phase_name, name: hook.name().to_string() });
+        let phase_name = phase.name().to_string();
+        let hooks = self.config.hooks.hooks_for_phase(&phase);
+        for hook in hooks {
+            events.push(TurnEvent::HookStarted {
+                phase: phase_name.clone(),
+                name: hook.name().to_string(),
+            });
             let maybe_message = hook.run(hook_context, assistant_message).await?;
             let emitted = maybe_message.is_some();
             if let Some(message) = maybe_message {
@@ -463,11 +463,13 @@ impl AgentSession {
                 events.push(TurnEvent::Assistant(message));
             }
             events.push(TurnEvent::HookCompleted {
-                phase: phase_name,
+                phase: phase_name.clone(),
                 name: hook.name().to_string(),
                 emitted_message: emitted,
             });
         }
+        // Clean up one-shot hooks after each phase execution.
+        Arc::make_mut(&mut self.config.hooks).remove_once_hooks();
         Ok(events)
     }
 

@@ -1420,6 +1420,52 @@ fn approval_handler_modifies_asked_tool_call() {
 }
 
 #[tokio::test]
+async fn skill_tool_invokes_and_returns_prompt() {
+    use std::sync::Arc;
+    use tiny_agent_core::skills::{Skill, SkillArg, SkillRegistry, SkillSource};
+    use tiny_agent_core::tool::{Tool, ToolContext};
+    use tiny_agent_core::tools::SkillTool;
+
+    let mut reg = SkillRegistry::new();
+    reg.register(Skill {
+        name: "greet".into(),
+        description: "Greets the user".into(),
+        when_to_use: None,
+        prompt: "Say hello to {{args}}!".into(),
+        arguments: vec![SkillArg {
+            name: "name".into(),
+            description: "Who to greet".into(),
+            required: true,
+        }],
+        body: String::new(),
+        source: SkillSource::Bundled,
+    });
+
+    let tool = SkillTool::new(Arc::new(reg));
+    let def = tool.definition();
+    assert_eq!(def.name, "Skill");
+
+    let ctx = ToolContext {
+        session_id: "test".into(),
+        turn_id: 1,
+        cwd: std::env::current_dir().unwrap(),
+        env: Default::default(),
+        messages: Arc::new(vec![]),
+        progress: None,
+        read_file_state: Arc::new(tokio::sync::Mutex::new(Default::default())),
+        timeout: None,
+        max_file_read_bytes: 50 * 1024 * 1024,
+    };
+
+    let result =
+        tool.invoke(serde_json::json!({"skill": "greet", "args": "World"}), ctx).await.unwrap();
+
+    let content = result.content;
+    assert!(content["text"].as_str().unwrap().contains("Say hello to World"));
+    assert_eq!(content["skill_name"].as_str().unwrap(), "greet");
+}
+
+#[tokio::test]
 async fn skill_loader_parses_valid_markdown() {
     use tiny_agent_core::skills::{SkillLoader, SkillSource};
 

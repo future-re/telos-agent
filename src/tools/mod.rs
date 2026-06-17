@@ -13,6 +13,7 @@ mod glob;
 mod grep;
 mod shared;
 mod shell;
+mod skill;
 
 pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
@@ -20,6 +21,7 @@ pub use file_write::FileWriteTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
 pub use shell::ShellTool;
+pub use skill::SkillTool;
 
 /// Register every built-in tool with the supplied registry.
 pub fn register_core_tools(registry: &mut ToolRegistry) {

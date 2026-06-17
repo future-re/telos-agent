@@ -79,5 +79,6 @@ pub use tool::{
 };
 // Built-in tools — filesystem, shell, search.
 pub use tools::{
-    FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ShellTool, register_core_tools,
+    FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ShellTool, SkillTool,
+    register_core_tools,
 };

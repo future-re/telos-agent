@@ -1450,3 +1450,33 @@ This is the body text.
     assert_eq!(s.arguments[0].name, "args");
     assert_eq!(s.source, SkillSource::Project);
 }
+
+#[test]
+fn skill_loader_empty_directory_returns_empty() {
+    use tiny_agent_core::skills::SkillLoader;
+
+    let dir = tempfile::tempdir().unwrap();
+    let skills = SkillLoader::load_from_dir(dir.path()).unwrap();
+    assert!(skills.is_empty());
+}
+
+#[test]
+fn skill_loader_skips_non_md_files() {
+    use tiny_agent_core::skills::SkillLoader;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("notes.txt"), "not a skill").unwrap();
+    let skills = SkillLoader::load_from_dir(dir.path()).unwrap();
+    assert!(skills.is_empty());
+}
+
+#[test]
+fn skill_loader_skips_malformed_yaml() {
+    use tiny_agent_core::skills::SkillLoader;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("bad.md"), "---\nname: bad\nnot: valid:\n---\nbody").unwrap();
+    let skills = SkillLoader::load_from_dir(dir.path()).unwrap();
+    // Malformed YAML should be gracefully skipped
+    assert!(skills.is_empty());
+}

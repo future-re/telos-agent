@@ -19,10 +19,12 @@ impl SkillLoader {
             if path.extension().is_none_or(|ext| ext != "md") {
                 continue;
             }
-            if let Ok(content) = std::fs::read_to_string(&path)
-                && let Some(skill) = Self::parse_skill(&content, SkillSource::Project)
-            {
-                skills.push(skill);
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Some(skill) = Self::parse_skill(&content, SkillSource::Project) {
+                    skills.push(skill);
+                } else {
+                    tracing::warn!("failed to parse skill file: {}", path.display());
+                }
             }
         }
         Ok(skills)

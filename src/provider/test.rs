@@ -28,8 +28,8 @@ fn get_kimi_config() -> Option<KimiConfig> {
     }
     Some(KimiConfig {
         api_key,
-        model: "kimi-2.7".into(),
-        base_url: "https://api.kimi.com/coding/v1".into(),
+        model: "kimi-k2-0711-preview".into(),
+        base_url: "https://api.moonshot.cn".into(),
     })
 }
 

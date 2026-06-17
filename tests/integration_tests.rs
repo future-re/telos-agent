@@ -14,7 +14,7 @@ use tiny_agent_core::{JsonlStorage, PermissionEngine, PermissionRule, Storage, S
 use tiny_agent_core::{
     PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
 };
-use tiny_agent_core::{SubagentTool, TokenBudget};
+use tiny_agent_core::{ApprovalDecision, FixedDecisionHandler, SubagentTool, TokenBudget};
 
 struct AddTool;
 
@@ -336,6 +336,32 @@ fn run_turn_stream_emits_deltas_and_hooks() {
             session.messages().last().unwrap().text_content(),
             "hook-ran"
         );
+    });
+}
+
+#[test]
+fn stop_hook_does_not_hijack_final_message() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let mut hooks = HookRegistry::new();
+        hooks.register(EchoStopHook);
+
+        let provider = MockProvider::new(vec![CompletionResponse {
+            message: Message::assistant("model answer"),
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+        }]);
+        let tools = ToolRegistry::new();
+        let mut session = AgentSession::new(AgentConfig {
+            hooks: Arc::new(hooks),
+            ..AgentConfig::default()
+        });
+
+        let result = session.run_turn(&provider, &tools, "hi").await.unwrap();
+        // The last session message is the hook output, but the turn result
+        // should still expose the model's own final answer.
+        assert_eq!(session.messages().last().unwrap().text_content(), "hook-ran");
+        assert_eq!(result.final_message.text_content(), "model answer");
     });
 }
 
@@ -785,6 +811,64 @@ fn builtin_file_read_tool_returns_file_contents() {
 }
 
 #[test]
+fn file_read_rejects_symlink_escape() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let dir =
+            std::env::temp_dir().join(format!("tiny-agent-symlink-test-{}", std::process::id()));
+        let outside = std::env::temp_dir().join(format!("tiny-agent-symlink-outside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), "super-secret").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.txt"), dir.join("link.txt")).unwrap();
+
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "Read".into(),
+                        arguments: json!({ "file_path": "link.txt" }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("done"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+        let mut tools = ToolRegistry::new();
+        register_core_tools(&mut tools);
+        let mut session = AgentSession::new(AgentConfig {
+            cwd: dir.clone(),
+            ..AgentConfig::default()
+        });
+
+        let result = session.run_turn(&provider, &tools, "read symlink").await.unwrap();
+        let tool_result = result
+            .events
+            .iter()
+            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
+            .unwrap();
+        assert!(
+            tool_result.text().contains("permission_denied")
+                || tool_result.text().contains("escapes cwd"),
+            "{}",
+            tool_result.text()
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+    });
+}
+
+#[test]
 fn core_tools_expose_claude_names_and_accept_legacy_aliases() {
     let mut tools = ToolRegistry::new();
     register_core_tools(&mut tools);
@@ -1004,6 +1088,47 @@ fn permission_engine_allows_shell_by_command_prefix() {
 }
 
 #[test]
+fn shell_requires_approval_by_default() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "shell".into(),
+                        arguments: json!({ "command": "echo hello" }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("done"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+        let mut tools = ToolRegistry::new();
+        register_core_tools(&mut tools);
+        let mut session = AgentSession::new(AgentConfig::default());
+
+        let result = session.run_turn(&provider, &tools, "shell").await.unwrap();
+        let tool_result = result
+            .events
+            .iter()
+            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
+            .unwrap();
+        assert!(
+            tool_result.text().contains("permission_required"),
+            "{}",
+            tool_result.text()
+        );
+    });
+}
+
+#[test]
 fn tool_progress_streams_before_tool_result() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
@@ -1135,7 +1260,12 @@ fn subagent_tool_runs_in_process_agent() {
             ToolRegistry::new(),
             AgentConfig::default(),
         ));
-        let mut session = AgentSession::new(AgentConfig::default());
+        let mut session = AgentSession::new(AgentConfig {
+            approval_handler: Some(Arc::new(FixedDecisionHandler {
+                decision: ApprovalDecision::Allow,
+            })),
+            ..AgentConfig::default()
+        });
 
         let result = session
             .run_turn(&outer_provider, &tools, "delegate")

@@ -6,12 +6,30 @@
 //! - [`NoopStorage`] — black-hole; useful for tests and ephemeral sessions.
 
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 
 use crate::error::AgentError;
 use crate::message::Message;
+use crate::tool::FileReadRecord;
+
+/// Session metadata persisted alongside messages so a resumed session can
+/// restore turn IDs, metrics, and file-read state.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SessionMetadata {
+    pub next_turn_id: u64,
+    pub total_input_tokens: usize,
+    pub total_output_tokens: usize,
+    pub total_tool_calls: usize,
+    pub total_tool_errors: usize,
+    pub total_iterations: usize,
+    pub compaction_count: usize,
+    pub turn_count: usize,
+    pub retry_count: usize,
+    pub read_file_state: HashMap<PathBuf, FileReadRecord>,
+}
 
 /// Storage backend for persisting agent sessions.
 ///
@@ -25,6 +43,18 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     async fn append(&self, session_id: &str, messages: &[Message]) -> Result<(), AgentError>;
     /// Load all messages for a session. Returns an empty vec when the session is unknown.
     async fn load(&self, session_id: &str) -> Result<Vec<Message>, AgentError>;
+    /// Persist session metadata. The default is a no-op for backwards compatibility.
+    async fn save_metadata(
+        &self,
+        _session_id: &str,
+        _metadata: &SessionMetadata,
+    ) -> Result<(), AgentError> {
+        Ok(())
+    }
+    /// Load session metadata. The default returns `None` for backwards compatibility.
+    async fn load_metadata(&self, _session_id: &str) -> Result<Option<SessionMetadata>, AgentError> {
+        Ok(None)
+    }
 }
 
 /// On-disk JSONL backend. Each message is serialised to one line; the file is
@@ -47,6 +77,12 @@ impl JsonlStorage {
     fn path(&self, session_id: &str) -> Result<PathBuf, AgentError> {
         validate_session_id(session_id)?;
         Ok(self.dir.join(format!("{session_id}.jsonl")))
+    }
+
+    /// Path on disk for the session metadata file.
+    fn metadata_path(&self, session_id: &str) -> Result<PathBuf, AgentError> {
+        validate_session_id(session_id)?;
+        Ok(self.dir.join(format!("{session_id}.metadata.json")))
     }
 }
 
@@ -173,6 +209,46 @@ impl Storage for JsonlStorage {
 
         Ok(messages)
     }
+
+    async fn save_metadata(
+        &self,
+        session_id: &str,
+        metadata: &SessionMetadata,
+    ) -> Result<(), AgentError> {
+        tokio::fs::create_dir_all(&self.dir)
+            .await
+            .map_err(|e| AgentError::Config(format!("failed to create storage directory: {e}")))?;
+        let path = self.metadata_path(session_id)?;
+        let tmp_path = path.with_extension("metadata.json.tmp");
+        let bytes = serde_json::to_vec_pretty(metadata)
+            .map_err(|e| AgentError::Config(format!("serialize metadata failed: {e}")))?;
+        tokio::fs::write(&tmp_path, bytes)
+            .await
+            .map_err(|e| AgentError::Config(format!("storage metadata write failed: {e}")))?;
+        tokio::fs::rename(&tmp_path, &path)
+            .await
+            .map_err(|e| AgentError::Config(format!("storage metadata rename failed: {e}")))?;
+        Ok(())
+    }
+
+    async fn load_metadata(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionMetadata>, AgentError> {
+        let path = self.metadata_path(session_id)?;
+        if !path.exists() {
+            return Ok(None);
+        }
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|e| AgentError::Config(format!("storage metadata read failed: {e}")))?;
+        if bytes.is_empty() {
+            return Ok(None);
+        }
+        let metadata = serde_json::from_slice(&bytes)
+            .map_err(|e| AgentError::Config(format!("deserialize metadata failed: {e}")))?;
+        Ok(Some(metadata))
+    }
 }
 
 /// Storage backend that discards everything — useful for tests / ephemeral sessions.
@@ -195,6 +271,18 @@ impl Storage for NoopStorage {
 
     async fn load(&self, _session_id: &str) -> Result<Vec<Message>, AgentError> {
         Ok(Vec::new())
+    }
+
+    async fn save_metadata(
+        &self,
+        _session_id: &str,
+        _metadata: &SessionMetadata,
+    ) -> Result<(), AgentError> {
+        Ok(())
+    }
+
+    async fn load_metadata(&self, _session_id: &str) -> Result<Option<SessionMetadata>, AgentError> {
+        Ok(None)
     }
 }
 
@@ -285,5 +373,57 @@ mod tests {
         assert!(matches!(result, Err(AgentError::Config(_))));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn jsonl_metadata_roundtrip() {
+        let dir = std::env::temp_dir().join("tiny_agent_test_storage_metadata");
+        let _ = std::fs::remove_dir_all(&dir);
+        let storage = JsonlStorage::new(&dir).unwrap();
+
+        let mut read_file_state = HashMap::new();
+        read_file_state.insert(
+            PathBuf::from("src/lib.rs"),
+            FileReadRecord {
+                content: "fn main() {}".to_string(),
+                timestamp_ms: 1234,
+                is_partial_view: true,
+                offset: Some(0),
+                limit: Some(10),
+            },
+        );
+
+        let metadata = SessionMetadata {
+            next_turn_id: 42,
+            total_input_tokens: 100,
+            total_output_tokens: 50,
+            total_tool_calls: 5,
+            total_tool_errors: 1,
+            total_iterations: 20,
+            compaction_count: 2,
+            turn_count: 10,
+            retry_count: 3,
+            read_file_state,
+        };
+
+        storage.save_metadata("s", &metadata).await.unwrap();
+        let loaded = storage.load_metadata("s").await.unwrap().unwrap();
+        assert_eq!(loaded.next_turn_id, 42);
+        assert_eq!(loaded.total_input_tokens, 100);
+        assert_eq!(loaded.total_tool_calls, 5);
+        let key = PathBuf::from("src/lib.rs");
+        assert!(loaded.read_file_state.contains_key(&key));
+        assert_eq!(loaded.read_file_state[&key].content, "fn main() {}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn jsonl_metadata_load_unknown_returns_none() {
+        let storage =
+            JsonlStorage::new(std::env::temp_dir().join("tiny_agent_test_storage_metadata_unknown"))
+                .unwrap();
+        let loaded = storage.load_metadata("nonexistent-session").await.unwrap();
+        assert!(loaded.is_none());
     }
 }

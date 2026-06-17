@@ -12,13 +12,23 @@ use crate::error::AgentError;
 use crate::provider::{CompletionRequest, CompletionResponse, ModelProvider, ProviderEvent};
 
 /// Configuration for [`KimiProvider`].
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct KimiConfig {
     pub api_key: String,
     pub model: String,
     /// Base URL — override to talk to a Kimi-compatible service.
     /// The provider automatically appends `/v1` if it is not present.
     pub base_url: String,
+}
+
+impl std::fmt::Debug for KimiConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KimiConfig")
+            .field("api_key", &"[REDACTED]")
+            .field("model", &self.model)
+            .field("base_url", &self.base_url)
+            .finish()
+    }
 }
 
 impl KimiConfig {

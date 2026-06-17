@@ -8,7 +8,8 @@ use crate::tool::FileReadRecord;
 use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
 
 use super::{
-    modified_timestamp_ms, optional_usize_any, required_string_any, resolve_workspace_path,
+    canonicalize_within_cwd, modified_timestamp_ms, optional_usize_any, required_string_any,
+    resolve_workspace_path,
 };
 
 /// Built-in file-read tool. Read-only; safe to run concurrently.
@@ -51,6 +52,7 @@ impl Tool for FileReadTool {
     ) -> Result<ToolOutput, AgentError> {
         let input_path = required_string_any(&arguments, &["file_path", "path"])?;
         let path = resolve_workspace_path(&context.cwd, input_path)?;
+        let path = canonicalize_within_cwd(&context.cwd, &path).await?;
         let metadata = tokio::fs::metadata(&path)
             .await
             .map_err(|err| AgentError::ToolExecution {
@@ -161,7 +163,7 @@ mod tests {
             turn_id: 1,
             cwd,
             env: HashMap::new(),
-            messages: vec![],
+            messages: std::sync::Arc::new(vec![]),
             progress: None,
             read_file_state: std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             timeout: None,

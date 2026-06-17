@@ -125,7 +125,7 @@ mod tests {
             turn_id: 1,
             cwd,
             env: HashMap::new(),
-            messages: vec![],
+            messages: std::sync::Arc::new(vec![]),
             progress: None,
             read_file_state: std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             timeout: None,

@@ -32,16 +32,30 @@ struct MetricsInner {
 impl SessionMetrics {
     /// Create a fresh metrics accumulator.
     pub(crate) fn new() -> Self {
+        Self::with_values(0, 0, 0, 0, 0, 0, 0, 0)
+    }
+
+    /// Restore metrics from persisted counter values.
+    pub(crate) fn with_values(
+        total_input_tokens: usize,
+        total_output_tokens: usize,
+        total_tool_calls: usize,
+        total_tool_errors: usize,
+        total_iterations: usize,
+        compaction_count: usize,
+        turn_count: usize,
+        retry_count: usize,
+    ) -> Self {
         Self {
             inner: Arc::new(MetricsInner {
-                total_input_tokens: AtomicUsize::new(0),
-                total_output_tokens: AtomicUsize::new(0),
-                total_tool_calls: AtomicUsize::new(0),
-                total_tool_errors: AtomicUsize::new(0),
-                total_iterations: AtomicUsize::new(0),
-                compaction_count: AtomicUsize::new(0),
-                turn_count: AtomicUsize::new(0),
-                retry_count: AtomicUsize::new(0),
+                total_input_tokens: AtomicUsize::new(total_input_tokens),
+                total_output_tokens: AtomicUsize::new(total_output_tokens),
+                total_tool_calls: AtomicUsize::new(total_tool_calls),
+                total_tool_errors: AtomicUsize::new(total_tool_errors),
+                total_iterations: AtomicUsize::new(total_iterations),
+                compaction_count: AtomicUsize::new(compaction_count),
+                turn_count: AtomicUsize::new(turn_count),
+                retry_count: AtomicUsize::new(retry_count),
             }),
         }
     }

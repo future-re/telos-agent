@@ -9,7 +9,10 @@ use serde_json::{Value, json};
 use crate::error::AgentError;
 use crate::tool::{PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput};
 
-use super::{ensure_file_was_read_and_unchanged, modified_timestamp_ms, required_string, required_string_any, resolve_workspace_path};
+use super::{
+    canonicalize_within_cwd, ensure_file_was_read_and_unchanged, modified_timestamp_ms,
+    required_string, required_string_any, resolve_workspace_path,
+};
 
 /// Built-in file-write tool. Writes (and creates) text files inside the workspace.
 pub struct FileWriteTool;
@@ -58,6 +61,7 @@ impl Tool for FileWriteTool {
     ) -> Result<ToolOutput, AgentError> {
         let input_path = required_string_any(&arguments, &["file_path", "path"])?;
         let path = resolve_workspace_path(&context.cwd, input_path)?;
+        let path = canonicalize_within_cwd(&context.cwd, &path).await?;
         let content = required_string(&arguments, "content")?;
         if let Ok(existing_content) = tokio::fs::read_to_string(&path).await {
             ensure_file_was_read_and_unchanged("Write", &context, &path, &existing_content).await?;

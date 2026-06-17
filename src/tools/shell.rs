@@ -50,8 +50,14 @@ impl Tool for ShellTool {
         _context: &ToolContext,
     ) -> Result<PermissionDecision, AgentError> {
         let command = required_string(arguments, "command")?;
+        // Shell commands are extremely powerful and can read arbitrary files or
+        // exfiltrate data even when they use a "read-only" looking basename.
+        // Require explicit approval by default; callers can opt into auto-approval
+        // via the global permission engine.
         match analyze_command_safety(command) {
-            CommandSafety::Safe => Ok(PermissionDecision::Allow),
+            CommandSafety::Safe => Ok(PermissionDecision::Ask {
+                reason: format!("shell command requires approval: {command}"),
+            }),
             CommandSafety::NeedsReview { reason } => Ok(PermissionDecision::Ask {
                 reason: format!("shell command needs review: {reason}"),
             }),

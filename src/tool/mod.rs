@@ -6,6 +6,7 @@
 //! override them to enforce input shape or per-call gating.
 
 use async_trait::async_trait;
+use jsonschema::Validator;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -64,7 +65,7 @@ pub struct ToolProgress {
 ///
 /// Mutating file tools use this to reject stale writes: if the file changed
 /// after the model read it, the model must read it again before editing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FileReadRecord {
     pub content: String,
     pub timestamp_ms: u128,
@@ -104,8 +105,8 @@ pub enum PermissionDecision {
 
 /// Per-invocation context handed to a tool.
 ///
-/// Cloning this struct is cheap-ish but `messages` is the full conversation —
-/// avoid retaining the whole context inside long-lived state.
+/// Cloning this struct is cheap because the conversation snapshot is shared
+/// via [`Arc`]. Avoid retaining the whole context inside long-lived state.
 #[derive(Debug, Clone)]
 pub struct ToolContext {
     pub session_id: String,
@@ -113,7 +114,7 @@ pub struct ToolContext {
     pub cwd: PathBuf,
     pub env: HashMap<String, String>,
     /// Snapshot of the conversation up to (but not including) this tool call.
-    pub messages: Vec<Message>,
+    pub messages: Arc<Vec<Message>>,
     /// Channel for emitting [`ToolProgress`] events while the tool runs.
     pub progress: Option<mpsc::UnboundedSender<ToolProgress>>,
     /// Per-session file-read cache used by filesystem tools to prevent stale writes.
@@ -191,6 +192,8 @@ pub trait Tool: Send + Sync {
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
     canonical_names: Vec<String>,
+    /// Pre-compiled JSON Schema validators keyed by canonical tool name.
+    validators: HashMap<String, Arc<Validator>>,
 }
 
 impl ToolRegistry {
@@ -208,7 +211,21 @@ impl ToolRegistry {
         let aliases = tool.aliases();
         let tool = Arc::new(tool);
         self.tools.insert(name.clone(), tool.clone());
-        self.canonical_names.push(name);
+        self.canonical_names.push(name.clone());
+        // Pre-compile the JSON Schema validator so every invocation does not
+        // pay the compilation cost again. Invalid schemas are treated as a
+        // programming error and fail fast.
+        match Validator::new(&definition.input_schema) {
+            Ok(validator) => {
+                self.validators.insert(name.clone(), Arc::new(validator));
+            }
+            Err(err) => {
+                panic!(
+                    "tool `{}` has an invalid input schema: {err}",
+                    name
+                );
+            }
+        }
         for alias in aliases {
             // Aliases must not shadow an existing canonical name, otherwise the
             // model would see one tool's schema but invoke another's implementation.
@@ -230,6 +247,43 @@ impl ToolRegistry {
     /// Look up a tool by name. Returns [`AgentError::ToolNotFound`] if absent.
     pub fn get(&self, name: &str) -> Result<Arc<dyn Tool>, AgentError> {
         self.tools.get(name).cloned().ok_or_else(|| AgentError::ToolNotFound(name.to_string()))
+    }
+
+    /// Validate `arguments` against the cached JSON Schema validator for the
+    /// tool named `name`. Returns [`AgentError::ToolNotFound`] if the tool is
+    /// not registered, or [`AgentError::Validation`] if the arguments fail.
+    pub fn validate_arguments(&self, name: &str, arguments: &Value) -> Result<(), AgentError> {
+        let canonical_name = self
+            .canonical_names
+            .iter()
+            .find(|canonical| {
+                canonical == &name
+                    || self
+                        .tools
+                        .get(*canonical)
+                        .is_some_and(|tool| tool.aliases().iter().any(|alias| alias == &name))
+            })
+            .cloned()
+            .ok_or_else(|| AgentError::ToolNotFound(name.to_string()))?;
+
+        let validator = self
+            .validators
+            .get(&canonical_name)
+            .cloned()
+            .expect("validator missing for registered tool");
+
+        let mut errors = Vec::new();
+        for err in validator.iter_errors(arguments) {
+            errors.push(format!("{}: {}", err.instance_path, err));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(AgentError::Validation(format!(
+                "tool `{name}` arguments failed schema validation: {}",
+                errors.join("; ")
+            )))
+        }
     }
 }
 

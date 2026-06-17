@@ -11,6 +11,7 @@ use std::sync::atomic::AtomicBool;
 
 use crate::approval::ApprovalHandler;
 use crate::compaction::CompactionStrategy;
+use crate::error::AgentError;
 use crate::hooks::HookRegistry;
 use crate::storage::Storage;
 
@@ -18,7 +19,7 @@ use crate::storage::Storage;
 ///
 /// Build with [`Default::default`] and override fields as needed. All fields
 /// are public so callers don't need a builder for simple cases.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AgentConfig {
     /// Optional system prompt prepended to every conversation.
     pub system_prompt: Option<String>,
@@ -62,6 +63,33 @@ pub struct AgentConfig {
     /// Maximum number of bytes the built-in file tools will read from a single
     /// file. Files larger than this are rejected to avoid OOMing the agent.
     pub max_file_read_bytes: usize,
+}
+
+impl std::fmt::Debug for AgentConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Redact `env` values because they may contain secrets; keys are kept
+        // for debugging. Other fields are considered non-sensitive.
+        let env_keys: Vec<&String> = self.env.keys().collect();
+        f.debug_struct("AgentConfig")
+            .field("system_prompt", &self.system_prompt)
+            .field("max_iterations", &self.max_iterations)
+            .field("cwd", &self.cwd)
+            .field("env", &format!("{} keys: [REDACTED]", env_keys.len()))
+            .field("max_tool_result_chars", &self.max_tool_result_chars)
+            .field("hooks", &self.hooks)
+            .field("storage", &self.storage)
+            .field("compaction", &self.compaction)
+            .field("permission_engine", &self.permission_engine)
+            .field("approval_handler", &self.approval_handler)
+            .field("tool_concurrency_limit", &self.tool_concurrency_limit)
+            .field("token_budget", &self.token_budget)
+            .field("retry", &self.retry)
+            .field("auto_validate_schema", &self.auto_validate_schema)
+            .field("cancelled", &self.cancelled)
+            .field("tool_timeout_ms", &self.tool_timeout_ms)
+            .field("max_file_read_bytes", &self.max_file_read_bytes)
+            .finish()
+    }
 }
 
 impl Default for AgentConfig {
@@ -154,9 +182,57 @@ impl RetryConfig {
 
     /// Exponential backoff delay for the given attempt (1-indexed).
     pub fn delay_for(&self, attempt: usize) -> std::time::Duration {
-        let delay = self.base_delay_ms.saturating_mul(1u64 << (attempt.saturating_sub(1)));
+        // Cap the shift to avoid undefined behaviour / overflow when attempt is
+        // very large (shifting a u64 by >= 64 bits is UB in Rust).
+        let shift = attempt.saturating_sub(1).min(63);
+        let delay = self.base_delay_ms.saturating_mul(1u64 << shift);
         let capped = delay.min(self.max_delay_ms);
         std::time::Duration::from_millis(capped)
+    }
+}
+
+impl AgentConfig {
+    /// Validate configuration values and return a structured error for any
+    /// dangerous or nonsensical combination.
+    pub fn validate(&self) -> Result<(), AgentError> {
+        if self.max_iterations == 0 {
+            return Err(AgentError::Config(
+                "max_iterations must be greater than 0".into(),
+            ));
+        }
+        if self.tool_concurrency_limit == 0 {
+            return Err(AgentError::Config(
+                "tool_concurrency_limit must be greater than 0".into(),
+            ));
+        }
+        if self.max_file_read_bytes == 0 {
+            return Err(AgentError::Config(
+                "max_file_read_bytes must be greater than 0".into(),
+            ));
+        }
+        if self.max_tool_result_chars == 0 {
+            return Err(AgentError::Config(
+                "max_tool_result_chars must be greater than 0".into(),
+            ));
+        }
+        if let Some(budget) = self.token_budget {
+            if budget.max_tokens == 0 {
+                return Err(AgentError::Config(
+                    "token_budget.max_tokens must be greater than 0".into(),
+                ));
+            }
+            if budget.compact_at_tokens == 0 {
+                return Err(AgentError::Config(
+                    "token_budget.compact_at_tokens must be greater than 0".into(),
+                ));
+            }
+            if budget.compact_at_tokens > budget.max_tokens {
+                return Err(AgentError::Config(
+                    "token_budget.compact_at_tokens cannot exceed max_tokens".into(),
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -185,5 +261,32 @@ mod tests {
     fn default_env_is_empty() {
         let config = AgentConfig::default();
         assert!(config.env.is_empty());
+    }
+
+    #[test]
+    fn default_config_validates() {
+        let config = AgentConfig::default();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn zero_max_iterations_invalid() {
+        let config = AgentConfig {
+            max_iterations: 0,
+            ..AgentConfig::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn token_budget_compact_exceeding_max_invalid() {
+        let config = AgentConfig {
+            token_budget: Some(TokenBudget {
+                max_tokens: 100,
+                compact_at_tokens: 200,
+            }),
+            ..AgentConfig::default()
+        };
+        assert!(config.validate().is_err());
     }
 }

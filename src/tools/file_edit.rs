@@ -11,7 +11,10 @@ use serde_json::{Value, json};
 use crate::error::AgentError;
 use crate::tool::{PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput};
 
-use super::{ensure_file_was_read_and_unchanged, modified_timestamp_ms, optional_bool, required_string_any, resolve_workspace_path};
+use super::{
+    canonicalize_within_cwd, ensure_file_was_read_and_unchanged, modified_timestamp_ms,
+    optional_bool, required_string_any, resolve_workspace_path,
+};
 
 /// Built-in file-edit tool. Performs a single, unambiguous string replacement.
 pub struct FileEditTool;
@@ -63,6 +66,7 @@ impl Tool for FileEditTool {
     ) -> Result<ToolOutput, AgentError> {
         let input_path = required_string_any(&arguments, &["file_path", "path"])?;
         let path = resolve_workspace_path(&context.cwd, input_path)?;
+        let path = canonicalize_within_cwd(&context.cwd, &path).await?;
         if path.extension().and_then(|ext| ext.to_str()) == Some("ipynb") {
             return Err(AgentError::ToolExecution {
                 tool: "Edit".into(),

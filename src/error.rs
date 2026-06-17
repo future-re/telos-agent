@@ -85,3 +85,60 @@ impl AgentError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn http_429_is_retryable() {
+        let err = AgentError::Provider(ProviderError::Http {
+            status: 429,
+            message: "rate limited".into(),
+        });
+        assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn http_5xx_is_retryable() {
+        for status in [500, 502, 503, 504] {
+            let err = AgentError::Provider(ProviderError::Http {
+                status,
+                message: "server error".into(),
+            });
+            assert!(err.is_retryable(), "status {status} should be retryable");
+        }
+    }
+
+    #[test]
+    fn http_4xx_other_than_429_is_not_retryable() {
+        for status in [400, 401, 403, 404, 422] {
+            let err = AgentError::Provider(ProviderError::Http {
+                status,
+                message: "client error".into(),
+            });
+            assert!(!err.is_retryable(), "status {status} should not be retryable");
+        }
+    }
+
+    #[test]
+    fn network_and_timeout_errors_are_retryable() {
+        assert!(AgentError::Provider(ProviderError::Network("reset".into())).is_retryable());
+        assert!(AgentError::Provider(ProviderError::Timeout).is_retryable());
+    }
+
+    #[test]
+    fn api_invalid_response_stream_ended_are_not_retryable() {
+        assert!(!AgentError::Provider(ProviderError::Api("invalid key".into())).is_retryable());
+        assert!(!AgentError::Provider(ProviderError::InvalidResponse("bad json".into())).is_retryable());
+        assert!(!AgentError::Provider(ProviderError::StreamEnded).is_retryable());
+    }
+
+    #[test]
+    fn non_provider_errors_are_not_retryable() {
+        assert!(!AgentError::Config("bad".into()).is_retryable());
+        assert!(!AgentError::Validation("bad".into()).is_retryable());
+        assert!(!AgentError::PermissionDenied("no".into()).is_retryable());
+        assert!(!AgentError::ToolNotFound("x".into()).is_retryable());
+    }
+}

@@ -162,8 +162,10 @@ impl PermissionEngine {
             PrefixResult::Prefix(p) => Some(p),
             PrefixResult::None => None,
             // When the command cannot be safely analyzed (contains injections,
-            // parse errors, etc.), command_prefix rules must not auto-allow it.
-            // General tool-level rules without a command_prefix still apply.
+            // parse errors, etc.), prefix rules must not auto-allow it. Only
+            // general tool-level rules without a command_prefix are considered,
+            // and the engine defaults to Deny if nothing matches so injection-like
+            // commands fail closed.
             PrefixResult::NeedsReview => {
                 let mut result = None;
                 for rule in &self.rules {
@@ -174,7 +176,7 @@ impl PermissionEngine {
                         result = Some(rule.decision.clone());
                     }
                 }
-                return result;
+                return result.or(Some(RuleDecision::Deny));
             }
         };
 
@@ -447,7 +449,8 @@ mod tests {
         let mut engine = PermissionEngine::new();
         engine.add_rule(PermissionRule::allow_tool("Bash").command_prefix("git status"));
         // A command with a compound operator cannot be safely prefixed; the
-        // allow-prefix rule must not match.
+        // allow-prefix rule must not auto-allow it. With no other rule present,
+        // the engine defaults to Deny for unanalyzable commands.
         assert_eq!(
             engine.evaluate_shell_call(
                 &["Bash"],
@@ -455,7 +458,7 @@ mod tests {
                 &json!({"command": "git status; rm -rf /"}),
                 std::path::Path::new(".")
             ),
-            None
+            Some(RuleDecision::Deny)
         );
     }
 

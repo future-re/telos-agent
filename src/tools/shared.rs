@@ -110,6 +110,55 @@ pub(crate) fn is_within_cwd(cwd: &Path, path: &Path) -> bool {
     normalize_path(path).starts_with(normalize_path(cwd))
 }
 
+/// Resolve a path against `cwd` and follow symlinks, verifying the final
+/// canonical location still lies inside `cwd`.
+///
+/// This is the second line of defence against path traversal via symlinks:
+/// `resolve_workspace_path` only normalises `.`/`..` lexically, so a symlink
+/// inside `cwd` that points outside will slip through unless we canonicalise.
+pub(crate) async fn canonicalize_within_cwd(
+    cwd: &Path,
+    path: &Path,
+) -> Result<PathBuf, AgentError> {
+    let canonical_cwd = tokio::fs::canonicalize(cwd)
+        .await
+        .map_err(|err| AgentError::ToolExecution {
+            tool: "filesystem".into(),
+            message: format!("failed to canonicalize cwd: {err}"),
+        })?;
+
+    // Try to canonicalise the target itself; if it does not exist yet (e.g. a
+    // write to a new file), canonicalise its parent directory instead.
+    let canonical_path = match tokio::fs::canonicalize(path).await {
+        Ok(p) => p,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(cwd);
+            let canonical_parent = tokio::fs::canonicalize(parent)
+                .await
+                .map_err(|err| AgentError::ToolExecution {
+                    tool: "filesystem".into(),
+                    message: format!("failed to canonicalize parent directory: {err}"),
+                })?;
+            canonical_parent.join(path.file_name().unwrap_or_default())
+        }
+        Err(err) => {
+            return Err(AgentError::ToolExecution {
+                tool: "filesystem".into(),
+                message: format!("failed to canonicalize path: {err}"),
+            })
+        }
+    };
+
+    if !canonical_path.starts_with(&canonical_cwd) {
+        return Err(AgentError::PermissionDenied(format!(
+            "path escapes cwd after following symlinks: {}",
+            path.display()
+        )));
+    }
+
+    Ok(canonical_path)
+}
+
 /// Return a comparable millisecond timestamp for a file's last modification time.
 pub(crate) async fn modified_timestamp_ms(path: &Path) -> Result<u128, AgentError> {
     let metadata = tokio::fs::metadata(path)

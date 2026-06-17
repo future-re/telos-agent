@@ -29,7 +29,7 @@ use crate::metrics::SessionMetrics;
 use crate::provider::{
     CompletionRequest, ModelProvider, ProviderEvent, StopReason, TokenUsage,
 };
-use crate::storage::Storage;
+use crate::storage::{SessionMetadata, Storage};
 use crate::tool::FileReadState;
 use crate::tool::ToolRegistry;
 
@@ -161,10 +161,28 @@ pub struct AgentSession {
     metrics: SessionMetrics,
 }
 
+/// Outcome of the compaction phase at the top of an iteration.
+enum CompactionResult {
+    /// Compaction completed (or was skipped); caller should continue the turn.
+    Continue {
+        events: Vec<TurnEvent>,
+        compactions: usize,
+    },
+    /// Token budget was already exceeded; caller should finish the turn early.
+    AbortTurn {
+        events: Vec<TurnEvent>,
+    },
+}
+
 impl AgentSession {
     /// Start a fresh session. If `config.system_prompt` is set, it is appended
     /// as the first message.
     pub fn new(config: AgentConfig) -> Self {
+        if let Err(err) = config.validate() {
+            // Panic mirrors the fail-fast behaviour of other invalid configurations
+            // (e.g. missing env vars) while keeping the constructor synchronous.
+            panic!("invalid AgentConfig: {err}");
+        }
         let mut messages = Vec::new();
         if let Some(system_prompt) = config.system_prompt.as_ref() {
             messages.push(Message::system(system_prompt.clone()));
@@ -206,12 +224,26 @@ impl AgentSession {
         self.read_file_state = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     }
 
-    /// Persist the conversation if a [`Storage`] backend is configured.
+    /// Persist the conversation and session metadata if a [`Storage`] backend is configured.
     pub async fn save(&self) -> Result<(), AgentError> {
         if let Some(storage) = &self.config.storage {
             storage
                 .save_snapshot(&self.session_id, &self.messages)
                 .await?;
+            let read_file_state = self.read_file_state.lock().await.clone();
+            let metadata = SessionMetadata {
+                next_turn_id: self.next_turn_id,
+                total_input_tokens: self.metrics.total_input_tokens(),
+                total_output_tokens: self.metrics.total_output_tokens(),
+                total_tool_calls: self.metrics.total_tool_calls(),
+                total_tool_errors: self.metrics.total_tool_errors(),
+                total_iterations: self.metrics.total_iterations(),
+                compaction_count: self.metrics.compaction_count(),
+                turn_count: self.metrics.turn_count(),
+                retry_count: self.metrics.retry_count(),
+                read_file_state,
+            };
+            storage.save_metadata(&self.session_id, &metadata).await?;
         }
         Ok(())
     }
@@ -226,6 +258,7 @@ impl AgentSession {
         mut config: AgentConfig,
         storage: Arc<dyn Storage>,
     ) -> Result<Self, AgentError> {
+        config.validate()?;
         let session_id = session_id.into();
         let mut messages = storage.load(&session_id).await?;
         if messages.is_empty() {
@@ -249,15 +282,355 @@ impl AgentSession {
                 }
             }
         }
+
+        let metadata = storage.load_metadata(&session_id).await?;
+        let (next_turn_id, metrics, read_file_state) = if let Some(m) = metadata {
+            (
+                m.next_turn_id,
+                SessionMetrics::with_values(
+                    m.total_input_tokens,
+                    m.total_output_tokens,
+                    m.total_tool_calls,
+                    m.total_tool_errors,
+                    m.total_iterations,
+                    m.compaction_count,
+                    m.turn_count,
+                    m.retry_count,
+                ),
+                m.read_file_state,
+            )
+        } else {
+            (
+                1,
+                SessionMetrics::new(),
+                HashMap::new(),
+            )
+        };
+
         config.storage = Some(storage);
         Ok(Self {
             config,
             session_id,
-            next_turn_id: 1,
+            next_turn_id,
             messages,
-            read_file_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-            metrics: SessionMetrics::new(),
+            read_file_state: Arc::new(tokio::sync::Mutex::new(read_file_state)),
+            metrics,
         })
+    }
+
+    /// Run token-budget and general compaction passes for the current iteration.
+    ///
+    /// Returns the events that should be yielded and the number of compactions
+    /// that actually modified the conversation.
+    async fn run_compaction_phase<P: ModelProvider>(
+        &mut self,
+        provider: &P,
+        iteration: usize,
+    ) -> Result<CompactionResult, AgentError> {
+        let mut events = Vec::new();
+        let mut compactions = 0;
+
+        if let Some(budget) = self.config.token_budget {
+            let estimated_tokens = estimate_message_tokens(&self.messages, provider);
+            if estimated_tokens > budget.max_tokens {
+                warn!(
+                    used_tokens = estimated_tokens,
+                    max_tokens = budget.max_tokens,
+                    "token budget exceeded"
+                );
+                events.push(TurnEvent::TokenBudgetExceeded {
+                    used_tokens: estimated_tokens,
+                    max_tokens: budget.max_tokens,
+                });
+                return Ok(CompactionResult::AbortTurn { events });
+            }
+            if estimated_tokens >= budget.compact_at_tokens
+                && let Some(compaction) = self.config.compaction.clone()
+            {
+                events.push(TurnEvent::CompactionStarted {
+                    reason: "token_budget".into(),
+                });
+                let did_compact = compaction.compact(&mut self.messages, provider).await?;
+                events.push(TurnEvent::CompactionCompleted {
+                    reason: "token_budget".into(),
+                });
+                if did_compact {
+                    compactions += 1;
+                    info!(iteration, "token-budget compaction applied");
+                }
+            }
+        }
+
+        if let Some(compaction) = self.config.compaction.clone() {
+            events.push(TurnEvent::CompactionStarted {
+                reason: "char_budget".into(),
+            });
+            let did_compact = compaction.compact(&mut self.messages, provider).await?;
+            events.push(TurnEvent::CompactionCompleted {
+                reason: "char_budget".into(),
+            });
+            if did_compact {
+                compactions += 1;
+                info!(iteration, "char-budget compaction applied");
+            }
+        }
+
+        Ok(CompactionResult::Continue { events, compactions })
+    }
+
+    /// Stream a single provider completion, handling retries.
+    ///
+    /// Returns the assistant message, stop reason, optional token usage, and all
+    /// events that should be yielded during the call (deltas, thinking deltas,
+    /// retry notifications).
+    async fn call_provider<P: ModelProvider>(
+        &mut self,
+        provider: &P,
+        tool_definitions: &[crate::tool::ToolDefinition],
+    ) -> Result<(Message, StopReason, Option<TokenUsage>, Vec<TurnEvent>), AgentError> {
+        let mut events = Vec::new();
+        let mut attempts = 0;
+
+        loop {
+            attempts += 1;
+            if self.config.cancelled.load(Ordering::Relaxed) {
+                return Err(AgentError::Cancelled);
+            }
+
+            let request = CompletionRequest {
+                system_prompt: self.config.system_prompt.clone(),
+                messages: self.messages.clone(),
+                tools: tool_definitions.to_vec(),
+            };
+
+            let mut stream = Box::pin(provider.stream_complete(request));
+            let mut blocks = Vec::new();
+            let mut stop_reason = StopReason::EndTurn;
+            let mut usage = None;
+            let mut text_buf: Option<String> = None;
+            let mut thinking_buf: Option<String> = None;
+            let mut stream_error: Option<AgentError> = None;
+
+            while let Some(event) = stream.next().await {
+                if self.config.cancelled.load(Ordering::Relaxed) {
+                    return Err(AgentError::Cancelled);
+                }
+                match event {
+                    Ok(ProviderEvent::MessageStart) => {}
+                    Ok(ProviderEvent::TextDelta(text)) => {
+                        events.push(TurnEvent::AssistantDelta { text: text.clone() });
+                        text_buf.get_or_insert_with(String::new).push_str(&text);
+                    }
+                    Ok(ProviderEvent::ThinkingDelta(text)) => {
+                        events.push(TurnEvent::ThinkingDelta { text: text.clone() });
+                        thinking_buf.get_or_insert_with(String::new).push_str(&text);
+                    }
+                    Ok(ProviderEvent::ToolCall(call)) => {
+                        if let Some(t) = text_buf.take() {
+                            blocks.push(ContentBlock::Text(TextBlock { text: t }));
+                        }
+                        if let Some(t) = thinking_buf.take() {
+                            blocks.push(ContentBlock::Thinking(ThinkingBlock {
+                                text: t,
+                                signature: None,
+                                is_redacted: false,
+                            }));
+                        }
+                        blocks.push(ContentBlock::ToolCall(call));
+                    }
+                    Ok(ProviderEvent::MessageStop {
+                        stop_reason: reason,
+                        usage: event_usage,
+                    }) => {
+                        stop_reason = reason;
+                        usage = event_usage;
+                    }
+                    Err(e) => {
+                        stream_error = Some(e);
+                        break;
+                    }
+                }
+            }
+
+            if let Some(e) = stream_error {
+                if self.config.retry.should_retry(&e, attempts) {
+                    let delay = self.config.retry.delay_for(attempts);
+                    warn!(
+                        attempt = attempts,
+                        delay_ms = delay.as_millis() as u64,
+                        error = %e,
+                        "provider call failed, retrying"
+                    );
+                    self.metrics.add_retry();
+                    events.push(TurnEvent::ProviderRetry {
+                        attempt: attempts,
+                        max_retries: self.config.retry.max_retries,
+                        delay_ms: delay.as_millis() as u64,
+                    });
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+                if e.is_retryable() {
+                    error!(attempts, error = %e, "provider retries exhausted");
+                    return Err(AgentError::ProviderRetriesExhausted {
+                        attempts,
+                        last_error: e.to_string(),
+                    });
+                } else {
+                    return Err(e);
+                }
+            }
+
+            if let Some(t) = text_buf.take() {
+                blocks.push(ContentBlock::Text(TextBlock { text: t }));
+            }
+            if let Some(t) = thinking_buf.take() {
+                blocks.push(ContentBlock::Thinking(ThinkingBlock {
+                    text: t,
+                    signature: None,
+                    is_redacted: false,
+                }));
+            }
+            return Ok((
+                Message {
+                    role: Role::Assistant,
+                    blocks,
+                },
+                stop_reason,
+                usage,
+                events,
+            ));
+        }
+    }
+
+    /// Run all hooks registered for a given phase and append any emitted messages.
+    async fn run_hook_phase(
+        &mut self,
+        phase: HookPhase,
+        hook_context: &HookContext,
+        assistant_message: &Message,
+    ) -> Result<Vec<TurnEvent>, AgentError> {
+        let mut events = Vec::new();
+        let phase_name: &'static str = match phase {
+            HookPhase::PostSampling => "post_sampling",
+            HookPhase::Stop => "stop",
+        };
+        for hook in self.config.hooks.hooks_for_phase(phase) {
+            events.push(TurnEvent::HookStarted {
+                phase: phase_name,
+                name: hook.name().to_string(),
+            });
+            let maybe_message = hook.run(hook_context, assistant_message).await?;
+            let emitted = maybe_message.is_some();
+            if let Some(message) = maybe_message {
+                self.messages.push(message.clone());
+                events.push(TurnEvent::Assistant(message));
+            }
+            events.push(TurnEvent::HookCompleted {
+                phase: phase_name,
+                name: hook.name().to_string(),
+                emitted_message: emitted,
+            });
+        }
+        Ok(events)
+    }
+
+    /// Execute a batch of tool calls and build the compacted tool-result message.
+    async fn execute_tool_calls_phase(
+        &mut self,
+        tools: &ToolRegistry,
+        tool_calls: Vec<crate::message::ToolCall>,
+        turn_id: u64,
+    ) -> Result<(Message, Vec<TurnEvent>), AgentError> {
+        let mut events = Vec::new();
+        let messages = Arc::new(self.messages.clone());
+        let mut execution = Box::pin(execute_tool_calls_stream(
+            tool_calls,
+            tools,
+            &self.config,
+            &self.session_id,
+            turn_id,
+            messages,
+            self.read_file_state.clone(),
+        ));
+
+        let mut tool_results = Vec::new();
+        while let Some(item) = execution.next().await {
+            match item {
+                ToolExecutionStreamItem::Event(event) => {
+                    let turn_event = match event {
+                        ToolExecutionEvent::ToolStarted { tool_call_id, name } => {
+                            TurnEvent::ToolCall { tool_call_id, name }
+                        }
+                        ToolExecutionEvent::ToolProgress {
+                            tool_call_id,
+                            name,
+                            message,
+                            data,
+                        } => TurnEvent::ToolProgress {
+                            tool_call_id,
+                            name,
+                            message,
+                            data,
+                        },
+                        ToolExecutionEvent::ToolCompleted {
+                            tool_call_id,
+                            name,
+                            is_error,
+                        } => TurnEvent::ToolCompleted {
+                            tool_call_id,
+                            name,
+                            is_error,
+                        },
+                        ToolExecutionEvent::ApprovalRequested {
+                            tool_call_id,
+                            name,
+                            reason,
+                        } => TurnEvent::ApprovalRequested {
+                            tool_call_id,
+                            name,
+                            reason,
+                        },
+                        ToolExecutionEvent::ApprovalResolved {
+                            tool_call_id,
+                            name,
+                            decision,
+                        } => TurnEvent::ApprovalResolved {
+                            tool_call_id,
+                            name,
+                            decision,
+                        },
+                    };
+                    events.push(turn_event);
+                }
+                ToolExecutionStreamItem::Result(result) => {
+                    tool_results.push(result);
+                }
+            }
+        }
+
+        for result in &tool_results {
+            self.metrics.add_tool_call();
+            if result.is_error {
+                self.metrics.add_tool_error();
+            }
+        }
+
+        let tool_message = Message::tool_results(tool_results);
+        let compaction_config = CompactionConfig {
+            max_tool_result_chars: self.config.max_tool_result_chars,
+        };
+        let compaction = compact_tool_result_message(tool_message, &compaction_config);
+        if compaction.compacted {
+            events.push(TurnEvent::CompactionStarted {
+                reason: "tool_result_budget".into(),
+            });
+            events.push(TurnEvent::CompactionCompleted {
+                reason: "tool_result_budget".into(),
+            });
+        }
+
+        Ok((compaction.message, events))
     }
 
     /// Run one turn, yielding [`TurnEvent`]s as the turn progresses.
@@ -294,15 +667,12 @@ impl AgentSession {
 
             let mut iterations = 0;
             loop {
-                // Bail out if the model keeps calling tools forever. The cap
-                // also protects against pathological tool-result loops.
                 if iterations >= self.config.max_iterations {
                     Err(AgentError::MaxIterations(self.config.max_iterations))?;
                 }
                 iterations += 1;
                 self.metrics.add_iteration();
 
-                // Check for cancellation before each iteration.
                 if self.config.cancelled.load(Ordering::Relaxed) {
                     warn!("turn cancelled during iteration {}", iterations);
                     Err(AgentError::Cancelled)?;
@@ -324,204 +694,43 @@ impl AgentSession {
                     tool_count: tool_definitions.len(),
                 };
 
-                // Two compaction passes:
-                // 1. Token-budget compaction — fires early (at compact_at_tokens) so the
-                //    model never sees a request that exceeds the hard limit.
-                // 2. General compaction — an optional second strategy (e.g. char-based).
-                if let Some(budget) = self.config.token_budget {
-                    let estimated_tokens = estimate_message_tokens(&self.messages, provider);
-                    if estimated_tokens > budget.max_tokens {
-                        warn!(
-                            used_tokens = estimated_tokens,
-                            max_tokens = budget.max_tokens,
-                            "token budget exceeded"
-                        );
-                        yield TurnEvent::TokenBudgetExceeded {
-                            used_tokens: estimated_tokens,
-                            max_tokens: budget.max_tokens,
-                        };
+                match self.run_compaction_phase(provider, iterations).await? {
+                    CompactionResult::Continue { events, compactions } => {
+                        for event in events {
+                            yield event;
+                        }
+                        for _ in 0..compactions {
+                            self.metrics.add_compaction();
+                        }
+                    }
+                    CompactionResult::AbortTurn { events } => {
+                        for event in events {
+                            yield event;
+                        }
                         yield TurnEvent::TurnFinished {
                             stop_reason: StopReason::EndTurn,
                             final_text: String::new(),
                         };
                         break;
                     }
-                    if estimated_tokens >= budget.compact_at_tokens
-                        && let Some(compaction) = self.config.compaction.clone()
-                    {
-                        yield TurnEvent::CompactionStarted {
-                            reason: "token_budget".into(),
-                        };
-                        if compaction.compact(&mut self.messages, provider).await? {
-                            self.metrics.add_compaction();
-                            info!("token-budget compaction applied");
-                            yield TurnEvent::CompactionCompleted {
-                                reason: "token_budget".into(),
-                            };
-                        }
-                    }
                 }
 
-                if let Some(compaction) = self.config.compaction.clone() {
-                    yield TurnEvent::CompactionStarted {
-                        reason: "char_budget".into(),
-                    };
-                    if compaction.compact(&mut self.messages, provider).await? {
-                        self.metrics.add_compaction();
-                        info!("char-budget compaction applied");
-                        yield TurnEvent::CompactionCompleted {
-                            reason: "char_budget".into(),
-                        };
-                    }
+                let (assistant_message, stop_reason, usage, provider_events) =
+                    self.call_provider(provider, &tool_definitions).await?;
+                for event in provider_events {
+                    yield event;
                 }
 
-                let (assistant_message, stop_reason, usage) = {
-                    let mut attempts = 0;
-                    loop {
-                        attempts += 1;
-                        // Honour cancellation between retries (and before the first attempt).
-                        if self.config.cancelled.load(Ordering::Relaxed) {
-                            Err(AgentError::Cancelled)?;
-                        }
-                        let request = CompletionRequest {
-                            system_prompt: self.config.system_prompt.clone(),
-                            messages: self.messages.clone(),
-                            tools: tool_definitions.clone(),
-                        };
-                        // Drive the provider stream to completion, accumulating
-                        // text and tool-call blocks into a single assistant
-                        // message. Consecutive TextDelta events are merged into a
-                        // single TextBlock so text_content() doesn't inject
-                        // spurious newlines.
-                        let mut stream = Box::pin(provider.stream_complete(request));
-                        let mut blocks = Vec::new();
-                        let mut stop_reason = StopReason::EndTurn;
-                        let mut usage = None;
-                        let mut text_buf: Option<String> = None;
-                        let mut thinking_buf: Option<String> = None;
-                        let mut stream_error: Option<AgentError> = None;
-                        while let Some(event) = stream.next().await {
-                            // Check the cancellation flag between chunks so a
-                            // long-running stream can still be interrupted.
-                            if self.config.cancelled.load(Ordering::Relaxed) {
-                                Err(AgentError::Cancelled)?;
-                            }
-                            match event {
-                                Ok(ProviderEvent::MessageStart) => {}
-                                Ok(ProviderEvent::TextDelta(text)) => {
-                                    yield TurnEvent::AssistantDelta {
-                                        text: text.clone(),
-                                    };
-                                    text_buf
-                                        .get_or_insert_with(String::new)
-                                        .push_str(&text);
-                                }
-                                Ok(ProviderEvent::ThinkingDelta(text)) => {
-                                    yield TurnEvent::ThinkingDelta {
-                                        text: text.clone(),
-                                    };
-                                    thinking_buf
-                                        .get_or_insert_with(String::new)
-                                        .push_str(&text);
-                                }
-                                Ok(ProviderEvent::ToolCall(call)) => {
-                                    // Flush buffered text and thinking before the tool call.
-                                    if let Some(t) = text_buf.take() {
-                                        blocks.push(ContentBlock::Text(TextBlock {
-                                            text: t,
-                                        }));
-                                    }
-                                    if let Some(t) = thinking_buf.take() {
-                                        blocks.push(ContentBlock::Thinking(ThinkingBlock {
-                                            text: t,
-                                            signature: None,
-                                            is_redacted: false,
-                                        }));
-                                    }
-                                    blocks.push(ContentBlock::ToolCall(call));
-                                }
-                                Ok(ProviderEvent::MessageStop {
-                                    stop_reason: reason,
-                                    usage: event_usage,
-                                }) => {
-                                    stop_reason = reason;
-                                    usage = event_usage;
-                                }
-                                Err(e) => {
-                                    stream_error = Some(e);
-                                    break;
-                                }
-                            }
-                        }
-                        if let Some(e) = stream_error {
-                            if self.config.retry.should_retry(&e, attempts) {
-                                let delay = self.config.retry.delay_for(attempts);
-                                warn!(
-                                    attempt = attempts,
-                                    delay_ms = delay.as_millis() as u64,
-                                    error = %e,
-                                    "provider call failed, retrying"
-                                );
-                                self.metrics.add_retry();
-                                yield TurnEvent::ProviderRetry {
-                                    attempt: attempts,
-                                    max_retries: self.config.retry.max_retries,
-                                    delay_ms: delay.as_millis() as u64,
-                                };
-                                tokio::time::sleep(delay).await;
-                                continue;
-                            }
-                            // Distinguish retries-exhausted from non-retryable errors.
-                            // Non-retryable errors (validation, auth, etc.) propagate
-                            // directly so callers see the real root cause.
-                            if e.is_retryable() {
-                                error!(
-                                    attempts,
-                                    error = %e,
-                                    "provider retries exhausted"
-                                );
-                                Err(AgentError::ProviderRetriesExhausted {
-                                    attempts,
-                                    last_error: e.to_string(),
-                                })?;
-                            } else {
-                                Err(e)?;
-                            }
-                        }
-                        // Flush any remaining buffered text and thinking after the stream ends.
-                        if let Some(t) = text_buf.take() {
-                            blocks.push(ContentBlock::Text(TextBlock { text: t }));
-                        }
-                        if let Some(t) = thinking_buf.take() {
-                            blocks.push(ContentBlock::Thinking(ThinkingBlock {
-                                text: t,
-                                signature: None,
-                                is_redacted: false,
-                            }));
-                        }
-                        break (
-                            Message {
-                                role: Role::Assistant,
-                                blocks,
-                            },
-                            stop_reason,
-                            usage,
-                        );
-                    }
-                };
                 if let Some(TokenUsage { input_tokens, output_tokens }) = usage {
                     self.metrics.add_input_tokens(input_tokens);
                     self.metrics.add_output_tokens(output_tokens);
-                    debug!(
-                        input_tokens,
-                        output_tokens,
-                        "provider usage"
-                    );
+                    debug!(input_tokens, output_tokens, "provider usage");
                     yield TurnEvent::ProviderUsage {
                         input_tokens,
                         output_tokens,
                     };
                 }
+
                 self.messages.push(assistant_message.clone());
                 yield TurnEvent::Assistant(assistant_message.clone());
 
@@ -531,46 +740,20 @@ impl AgentSession {
                     message_count: self.messages.len(),
                 };
 
-                // Run PostSampling hooks every iteration — including iterations
-                // that end with a tool call. Each hook may emit an extra
-                // message that gets appended to the conversation.
-                for hook in self.config.hooks.hooks_for_phase(HookPhase::PostSampling) {
-                    yield TurnEvent::HookStarted {
-                        phase: "post_sampling",
-                        name: hook.name().to_string(),
-                    };
-                    let maybe_message = hook.run(&hook_context, &assistant_message).await?;
-                    let emitted = maybe_message.is_some();
-                    if let Some(message) = maybe_message {
-                        self.messages.push(message.clone());
-                        yield TurnEvent::Assistant(message);
-                    }
-                    yield TurnEvent::HookCompleted {
-                        phase: "post_sampling",
-                        name: hook.name().to_string(),
-                        emitted_message: emitted,
-                    };
+                let post_events = self
+                    .run_hook_phase(HookPhase::PostSampling, &hook_context, &assistant_message)
+                    .await?;
+                for event in post_events {
+                    yield event;
                 }
 
                 let tool_calls = assistant_message.tool_calls().cloned().collect::<Vec<_>>();
                 if tool_calls.is_empty() {
-                    // No tool calls pending — run Stop hooks and end the turn.
-                    for hook in self.config.hooks.hooks_for_phase(HookPhase::Stop) {
-                        yield TurnEvent::HookStarted {
-                            phase: "stop",
-                            name: hook.name().to_string(),
-                        };
-                        let maybe_message = hook.run(&hook_context, &assistant_message).await?;
-                        let emitted = maybe_message.is_some();
-                        if let Some(message) = maybe_message {
-                            self.messages.push(message.clone());
-                            yield TurnEvent::Assistant(message);
-                        }
-                        yield TurnEvent::HookCompleted {
-                            phase: "stop",
-                            name: hook.name().to_string(),
-                            emitted_message: emitted,
-                        };
+                    let stop_events = self
+                        .run_hook_phase(HookPhase::Stop, &hook_context, &assistant_message)
+                        .await?;
+                    for event in stop_events {
+                        yield event;
                     }
 
                     yield TurnEvent::TurnFinished {
@@ -581,111 +764,18 @@ impl AgentSession {
                     break;
                 }
 
-                // Check for cancellation before executing tools.
                 if self.config.cancelled.load(Ordering::Relaxed) {
                     Err(AgentError::Cancelled)?;
                 }
 
-                // Execute the requested tool calls. The executor batches
-                // concurrency-safe tools and interleaves progress events with
-                // result events.
-                let mut execution = Box::pin(execute_tool_calls_stream(
-                    tool_calls,
-                    tools,
-                    &self.config,
-                    &self.session_id,
-                    turn_id,
-                    self.messages.clone(),
-                    self.read_file_state.clone(),
-                ));
-                let mut tool_results = Vec::new();
-                while let Some(item) = execution.next().await {
-                    match item {
-                        ToolExecutionStreamItem::Event(event) => {
-                            match event {
-                                ToolExecutionEvent::ToolStarted { tool_call_id, name } => {
-                                    yield TurnEvent::ToolCall { tool_call_id, name };
-                                }
-                                ToolExecutionEvent::ToolProgress {
-                                    tool_call_id,
-                                    name,
-                                    message,
-                                    data,
-                                } => {
-                                    yield TurnEvent::ToolProgress {
-                                        tool_call_id,
-                                        name,
-                                        message,
-                                        data,
-                                    };
-                                }
-                                ToolExecutionEvent::ToolCompleted {
-                                    tool_call_id,
-                                    name,
-                                    is_error,
-                                } => {
-                                    yield TurnEvent::ToolCompleted {
-                                        tool_call_id,
-                                        name,
-                                        is_error,
-                                    };
-                                }
-                                ToolExecutionEvent::ApprovalRequested {
-                                    tool_call_id,
-                                    name,
-                                    reason,
-                                } => {
-                                    yield TurnEvent::ApprovalRequested {
-                                        tool_call_id,
-                                        name,
-                                        reason,
-                                    };
-                                }
-                                ToolExecutionEvent::ApprovalResolved {
-                                    tool_call_id,
-                                    name,
-                                    decision,
-                                } => {
-                                    yield TurnEvent::ApprovalResolved {
-                                        tool_call_id,
-                                        name,
-                                        decision,
-                                    };
-                                }
-                            }
-                        }
-                        ToolExecutionStreamItem::Result(result) => {
-                            tool_results.push(result);
-                        }
-                    }
+                let (tool_message, tool_events) =
+                    self.execute_tool_calls_phase(tools, tool_calls, turn_id).await?;
+                for event in tool_events {
+                    yield event;
                 }
 
-                // Count tool calls and errors for metrics.
-                for result in &tool_results {
-                    self.metrics.add_tool_call();
-                    if result.is_error {
-                        self.metrics.add_tool_error();
-                    }
-                }
-
-                // Bundle every tool result into a single tool-role message so
-                // the next iteration sees them all at once. Truncate any
-                // oversized payloads first so the model isn't drowned.
-                let tool_message = Message::tool_results(tool_results);
-                let compaction_config = CompactionConfig {
-                    max_tool_result_chars: self.config.max_tool_result_chars,
-                };
-                let compaction = compact_tool_result_message(tool_message, &compaction_config);
-                if compaction.compacted {
-                    yield TurnEvent::CompactionStarted {
-                        reason: "tool_result_budget".into(),
-                    };
-                    yield TurnEvent::CompactionCompleted {
-                        reason: "tool_result_budget".into(),
-                    };
-                }
-                self.messages.push(compaction.message.clone());
-                yield TurnEvent::ToolResult(compaction.message);
+                self.messages.push(tool_message.clone());
+                yield TurnEvent::ToolResult(tool_message);
             }
         }
     }
@@ -705,16 +795,29 @@ impl AgentSession {
         // next_turn_id is incremented inside run_turn_stream — capture it before.
         let turn_id_before = self.next_turn_id;
         let metrics_checkpoint = self.metrics.checkpoint();
+        // File-read state is mutated by filesystem tools; restore it on failure
+        // so stale-write protection remains consistent with the pre-turn snapshot.
+        let read_file_state_before = self.read_file_state.lock().await.clone();
         let turn_result: Result<(Vec<TurnEvent>, Option<Message>, StopReason), AgentError> = {
             let mut stream = Box::pin(self.run_turn_stream(provider, tools, user_input));
             let mut events = Vec::new();
             let mut final_message = None;
             let mut stop_reason = StopReason::EndTurn;
+            // Assistant messages emitted while a hook is running belong to the
+            // hook, not the model. We only want the model's own final answer
+            // in `TurnResult.final_message`.
+            let mut in_hook_phase = false;
 
             while let Some(event) = stream.next().await {
                 let event = event?;
-                if let TurnEvent::Assistant(message) = &event {
-                    final_message = Some(message.clone());
+                match &event {
+                    TurnEvent::HookStarted { .. } => in_hook_phase = true,
+                    TurnEvent::HookCompleted { .. } => in_hook_phase = false,
+                    TurnEvent::IterationStarted { .. } => in_hook_phase = false,
+                    TurnEvent::Assistant(message) if !in_hook_phase => {
+                        final_message = Some(message.clone());
+                    }
+                    _ => {}
                 }
                 if let TurnEvent::TurnFinished {
                     stop_reason: reason,
@@ -734,6 +837,7 @@ impl AgentSession {
                 self.messages = messages_before;
                 self.next_turn_id = turn_id_before;
                 self.metrics.restore(&metrics_checkpoint);
+                *self.read_file_state.lock().await = read_file_state_before;
                 return Err(err);
             }
         };
@@ -904,6 +1008,10 @@ fn estimate_message_tokens(messages: &[Message], provider: &dyn ModelProvider) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mock::MockProvider;
+    use crate::provider::{CompletionResponse, StopReason, TokenUsage};
+    use crate::storage::JsonlStorage;
+    use std::path::PathBuf;
 
     #[test]
     fn turn_event_message_returns_some_for_message_variants() {
@@ -916,5 +1024,73 @@ mod tests {
         }
         .message()
         .is_none());
+    }
+
+    #[tokio::test]
+    async fn save_and_resume_restores_metadata_and_read_file_state() {
+        let dir = std::env::temp_dir().join("tiny_agent_test_resume_metadata");
+        let _ = std::fs::remove_dir_all(&dir);
+        let storage: Arc<dyn Storage> = Arc::new(JsonlStorage::new(&dir).unwrap());
+
+        let config = AgentConfig {
+            storage: Some(Arc::clone(&storage)),
+            ..Default::default()
+        };
+
+        let mut session = AgentSession::new(config.clone());
+        let session_id = session.session_id().to_string();
+
+        // Run one turn so counters advance and next_turn_id becomes 2.
+        let provider = MockProvider::new(vec![CompletionResponse {
+            message: Message::assistant("hello"),
+            stop_reason: StopReason::EndTurn,
+            usage: Some(TokenUsage {
+                input_tokens: 10,
+                output_tokens: 5,
+            }),
+        }]);
+        let tools = ToolRegistry::new();
+        session.run_turn(&provider, &tools, "hi").await.unwrap();
+        assert_eq!(session.next_turn_id, 2);
+        assert_eq!(session.metrics.turn_count(), 1);
+        assert_eq!(session.metrics.total_input_tokens(), 10);
+        assert_eq!(session.metrics.total_output_tokens(), 5);
+
+        // Inject a read-file record so we can verify it round-trips.
+        session
+            .read_file_state
+            .lock()
+            .await
+            .insert(PathBuf::from("src/lib.rs"), crate::tool::FileReadRecord {
+                content: "fn main() {}".to_string(),
+                timestamp_ms: 1234,
+                is_partial_view: false,
+                offset: None,
+                limit: None,
+            });
+
+        session.save().await.unwrap();
+
+        let resumed = AgentSession::resume(&session_id, config, storage)
+            .await
+            .unwrap();
+        assert_eq!(resumed.session_id, session_id);
+        assert_eq!(resumed.next_turn_id, 2);
+        assert_eq!(resumed.metrics.turn_count(), 1);
+        assert_eq!(resumed.metrics.total_input_tokens(), 10);
+        assert_eq!(resumed.metrics.total_output_tokens(), 5);
+        assert_eq!(
+            resumed
+                .read_file_state
+                .lock()
+                .await
+                .get(&PathBuf::from("src/lib.rs"))
+                .map(|r| r.content.as_str()),
+            Some("fn main() {}")
+        );
+        // Messages should be restored too.
+        assert_eq!(resumed.messages.len(), 2); // user + assistant (no system prompt)
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

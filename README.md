@@ -16,7 +16,7 @@
 - 工具注册、参数校验、权限判断和执行结果回注
 - `TurnEvent` 事件流
 - `HookRegistry`，支持 `post_sampling` 和 `stop` 两个 hook phase
-- tool result 压缩
+- tool result 截断与压缩（按字符预算）
 - provider streaming 事件抽象，非流式 provider 可通过默认实现兼容
 - 基于 async-openai 的 SSE streaming
 - 基础工具执行编排，支持并发安全工具分批执行和实时 tool progress

@@ -5,6 +5,7 @@
 //! whether to allow, deny, or modify the call.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -23,7 +24,7 @@ pub struct ApprovalRequest {
     /// Working directory the tool will run in.
     pub cwd: PathBuf,
     /// Snapshot of the conversation up to (but not including) this tool call.
-    pub messages: Vec<Message>,
+    pub messages: Arc<Vec<Message>>,
     /// Human-readable reason why approval is required.
     pub reason: String,
 }
@@ -88,7 +89,7 @@ mod tests {
                 invocation_names: vec!["Bash".into()],
                 arguments: json!({"command": "rm -rf /"}),
                 cwd: PathBuf::from("/tmp"),
-                messages: vec![],
+                messages: Arc::new(vec![]),
                 reason: "destructive command".into(),
             })
             .await;
@@ -106,7 +107,7 @@ mod tests {
                 invocation_names: vec!["Read".into()],
                 arguments: json!({"file_path": "/etc/passwd"}),
                 cwd: PathBuf::from("/tmp"),
-                messages: vec![],
+                messages: Arc::new(vec![]),
                 reason: "test".into(),
             })
             .await;

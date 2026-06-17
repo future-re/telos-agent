@@ -17,6 +17,8 @@
 //! stream.
 
 // Module declarations — public so downstream crates can name internal types directly.
+pub mod approval;
+pub mod bash_security;
 pub mod compaction;
 pub mod config;
 pub mod error;
@@ -33,18 +35,22 @@ pub mod subagent;
 pub mod tool;
 pub mod tools;
 
+// Approval — asynchronous human-in-the-loop gating for tool calls.
+pub use approval::{
+    ApprovalDecision, ApprovalHandler, ApprovalRequest, AutoDenyHandler, FixedDecisionHandler,
+};
 // Compaction — history- and message-level shrinking strategies.
 pub use compaction::{CompactionStrategy, SummaryCompaction};
 // Configuration — the session config aggregate and the token-budget knob.
 pub use config::{AgentConfig, TokenBudget};
 // Errors — the single failure type used across the crate.
-pub use error::AgentError;
+pub use error::{AgentError, ProviderError};
 // Tool executor — direct entry points for callers that bypass the turn loop.
 pub use executor::{ToolExecutionEvent, ToolExecutionOutput, execute_tool_calls};
 // Hooks — registry + per-phase hook trait.
 pub use hooks::{Hook, HookContext, HookPhase, HookRegistry};
 // Message model — the lingua franca between session, provider, and tools.
-pub use message::{ContentBlock, Message, Role, TextBlock, ToolCall, ToolResult};
+pub use message::{ContentBlock, Message, Role, TextBlock, ThinkingBlock, ToolCall, ToolResult};
 // Metrics — session-level counters accumulated by the runtime.
 pub use metrics::SessionMetrics;
 // Test helper — pre-canned [`ModelProvider`] for unit tests.
@@ -67,6 +73,7 @@ pub use tool::{
     InterruptBehavior, PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput,
     ToolProgress, ToolRegistry,
 };
+pub use tool::validate::{ValidationError, ValidationResult, validate_arguments};
 // Built-in tools — filesystem, shell, search.
 pub use tools::{
     FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ShellTool, register_core_tools,

@@ -63,7 +63,7 @@ impl ModelProvider for DeepSeekProvider {
             .chat()
             .create(openai_request)
             .await
-            .map_err(|err| AgentError::Provider(err.to_string()))?;
+            .map_err(crate::provider::openai_compat::classify_openai_error)?;
         crate::provider::openai_compat::parse_response(response)
     }
 
@@ -120,12 +120,16 @@ mod tests {
             .and(path("/v1/chat/completions"))
             .and(header("authorization", "Bearer test-deepseek-key"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "chatcmpl-test",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "deepseek-chat",
                 "choices": [{
                     "index": 0,
                     "message": { "role": "assistant", "content": "Hello from DeepSeek!" },
                     "finish_reason": "stop"
                 }],
-                "usage": { "prompt_tokens": 10, "completion_tokens": 3 }
+                "usage": { "prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13 }
             })))
             .mount(&server)
             .await;
@@ -152,9 +156,9 @@ mod tests {
     #[tokio::test]
     async fn streams_chat_response() {
         let server = MockServer::start().await;
-        let body = "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\n\n\
-            data: {\"choices\":[{\"delta\":{\"content\":\"!\"},\"finish_reason\":null}]}\n\n\
-            data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n\
+        let body = "data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\n\n\
+            data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"!\"},\"finish_reason\":null}]}\n\n\
+            data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n\
             data: [DONE]\n\n";
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))

@@ -24,7 +24,7 @@ use crate::config::AgentConfig;
 use crate::error::AgentError;
 use crate::executor::{ToolExecutionEvent, ToolExecutionStreamItem, execute_tool_calls_stream};
 use crate::hooks::{HookContext, HookPhase};
-use crate::message::{ContentBlock, Message, Role, TextBlock};
+use crate::message::{ContentBlock, Message, Role, TextBlock, ThinkingBlock};
 use crate::metrics::SessionMetrics;
 use crate::provider::{
     CompletionRequest, ModelProvider, ProviderEvent, StopReason, TokenUsage,
@@ -68,6 +68,8 @@ pub enum TurnEvent {
     },
     /// Incremental text fragment streamed from the assistant.
     AssistantDelta { text: String },
+    /// Incremental reasoning fragment streamed from a thinking-capable model.
+    ThinkingDelta { text: String },
     /// The full user message that was just appended to the conversation.
     User(Message),
     /// A completed assistant message (either model output or hook-emitted).
@@ -106,6 +108,18 @@ pub enum TurnEvent {
         phase: &'static str,
         name: String,
         emitted_message: bool,
+    },
+    /// A tool call has been suspended pending human approval.
+    ApprovalRequested {
+        tool_call_id: String,
+        name: String,
+        reason: String,
+    },
+    /// Human approval has been resolved for a suspended tool call.
+    ApprovalResolved {
+        tool_call_id: String,
+        name: String,
+        decision: String,
     },
     /// A provider call failed with a retryable error and is being retried.
     ProviderRetry {
@@ -224,14 +238,14 @@ impl AgentSession {
                 .first()
                 .filter(|m| m.role == crate::message::Role::System)
                 .map(|m| m.text_content());
-            if let Some(config_system) = &config.system_prompt {
-                if loaded_system.as_deref() != Some(config_system.as_str()) {
-                    // Replace system prompt if config differs
-                    if messages.first().map(|m| m.role) == Some(crate::message::Role::System) {
-                        messages[0] = Message::system(config_system.clone());
-                    } else {
-                        messages.insert(0, Message::system(config_system.clone()));
-                    }
+            if let Some(config_system) = &config.system_prompt
+                && loaded_system.as_deref() != Some(config_system.as_str())
+            {
+                // Replace system prompt if config differs
+                if messages.first().map(|m| m.role) == Some(crate::message::Role::System) {
+                    messages[0] = Message::system(config_system.clone());
+                } else {
+                    messages.insert(0, Message::system(config_system.clone()));
                 }
             }
         }
@@ -332,29 +346,29 @@ impl AgentSession {
                         };
                         break;
                     }
-                    if estimated_tokens >= budget.compact_at_tokens {
-                        if let Some(compaction) = self.config.compaction.clone() {
-                            if compaction.compact(&mut self.messages, provider).await? {
-                                self.metrics.add_compaction();
-                                info!("token-budget compaction applied");
-                                yield TurnEvent::CompactionStarted {
-                                    reason: "token_budget".into(),
-                                };
-                                yield TurnEvent::CompactionCompleted {
-                                    reason: "token_budget".into(),
-                                };
-                            }
+                    if estimated_tokens >= budget.compact_at_tokens
+                        && let Some(compaction) = self.config.compaction.clone()
+                    {
+                        yield TurnEvent::CompactionStarted {
+                            reason: "token_budget".into(),
+                        };
+                        if compaction.compact(&mut self.messages, provider).await? {
+                            self.metrics.add_compaction();
+                            info!("token-budget compaction applied");
+                            yield TurnEvent::CompactionCompleted {
+                                reason: "token_budget".into(),
+                            };
                         }
                     }
                 }
 
                 if let Some(compaction) = self.config.compaction.clone() {
+                    yield TurnEvent::CompactionStarted {
+                        reason: "char_budget".into(),
+                    };
                     if compaction.compact(&mut self.messages, provider).await? {
                         self.metrics.add_compaction();
                         info!("char-budget compaction applied");
-                        yield TurnEvent::CompactionStarted {
-                            reason: "char_budget".into(),
-                        };
                         yield TurnEvent::CompactionCompleted {
                             reason: "char_budget".into(),
                         };
@@ -384,8 +398,14 @@ impl AgentSession {
                         let mut stop_reason = StopReason::EndTurn;
                         let mut usage = None;
                         let mut text_buf: Option<String> = None;
+                        let mut thinking_buf: Option<String> = None;
                         let mut stream_error: Option<AgentError> = None;
                         while let Some(event) = stream.next().await {
+                            // Check the cancellation flag between chunks so a
+                            // long-running stream can still be interrupted.
+                            if self.config.cancelled.load(Ordering::Relaxed) {
+                                Err(AgentError::Cancelled)?;
+                            }
                             match event {
                                 Ok(ProviderEvent::MessageStart) => {}
                                 Ok(ProviderEvent::TextDelta(text)) => {
@@ -396,11 +416,26 @@ impl AgentSession {
                                         .get_or_insert_with(String::new)
                                         .push_str(&text);
                                 }
+                                Ok(ProviderEvent::ThinkingDelta(text)) => {
+                                    yield TurnEvent::ThinkingDelta {
+                                        text: text.clone(),
+                                    };
+                                    thinking_buf
+                                        .get_or_insert_with(String::new)
+                                        .push_str(&text);
+                                }
                                 Ok(ProviderEvent::ToolCall(call)) => {
-                                    // Flush buffered text before the tool call.
+                                    // Flush buffered text and thinking before the tool call.
                                     if let Some(t) = text_buf.take() {
                                         blocks.push(ContentBlock::Text(TextBlock {
                                             text: t,
+                                        }));
+                                    }
+                                    if let Some(t) = thinking_buf.take() {
+                                        blocks.push(ContentBlock::Thinking(ThinkingBlock {
+                                            text: t,
+                                            signature: None,
+                                            is_redacted: false,
                                         }));
                                     }
                                     blocks.push(ContentBlock::ToolCall(call));
@@ -436,19 +471,33 @@ impl AgentSession {
                                 tokio::time::sleep(delay).await;
                                 continue;
                             }
-                            error!(
-                                attempts,
-                                error = %e,
-                                "provider retries exhausted"
-                            );
-                            Err(AgentError::ProviderRetriesExhausted {
-                                attempts,
-                                last_error: e.to_string(),
-                            })?;
+                            // Distinguish retries-exhausted from non-retryable errors.
+                            // Non-retryable errors (validation, auth, etc.) propagate
+                            // directly so callers see the real root cause.
+                            if e.is_retryable() {
+                                error!(
+                                    attempts,
+                                    error = %e,
+                                    "provider retries exhausted"
+                                );
+                                Err(AgentError::ProviderRetriesExhausted {
+                                    attempts,
+                                    last_error: e.to_string(),
+                                })?;
+                            } else {
+                                Err(e)?;
+                            }
                         }
-                        // Flush any remaining buffered text after the stream ends.
+                        // Flush any remaining buffered text and thinking after the stream ends.
                         if let Some(t) = text_buf.take() {
                             blocks.push(ContentBlock::Text(TextBlock { text: t }));
+                        }
+                        if let Some(t) = thinking_buf.take() {
+                            blocks.push(ContentBlock::Thinking(ThinkingBlock {
+                                text: t,
+                                signature: None,
+                                is_redacted: false,
+                            }));
                         }
                         break (
                             Message {
@@ -581,6 +630,28 @@ impl AgentSession {
                                         is_error,
                                     };
                                 }
+                                ToolExecutionEvent::ApprovalRequested {
+                                    tool_call_id,
+                                    name,
+                                    reason,
+                                } => {
+                                    yield TurnEvent::ApprovalRequested {
+                                        tool_call_id,
+                                        name,
+                                        reason,
+                                    };
+                                }
+                                ToolExecutionEvent::ApprovalResolved {
+                                    tool_call_id,
+                                    name,
+                                    decision,
+                                } => {
+                                    yield TurnEvent::ApprovalResolved {
+                                        tool_call_id,
+                                        name,
+                                        decision,
+                                    };
+                                }
                             }
                         }
                         ToolExecutionStreamItem::Result(result) => {
@@ -628,7 +699,13 @@ impl AgentSession {
         tools: &ToolRegistry,
         user_input: impl Into<String>,
     ) -> Result<TurnResult, AgentError> {
-        let (events, final_message, stop_reason) = {
+        // Snapshot session state so we can roll it back if the turn errors
+        // out part-way through.
+        let messages_before = self.messages.clone();
+        // next_turn_id is incremented inside run_turn_stream — capture it before.
+        let turn_id_before = self.next_turn_id;
+        let metrics_checkpoint = self.metrics.checkpoint();
+        let turn_result: Result<(Vec<TurnEvent>, Option<Message>, StopReason), AgentError> = {
             let mut stream = Box::pin(self.run_turn_stream(provider, tools, user_input));
             let mut events = Vec::new();
             let mut final_message = None;
@@ -648,10 +725,24 @@ impl AgentSession {
                 }
                 events.push(event);
             }
-            (events, final_message, stop_reason)
+            Ok((events, final_message, stop_reason))
         };
 
-        self.save().await?;
+        let (events, final_message, stop_reason) = match turn_result {
+            Ok(result) => result,
+            Err(err) => {
+                self.messages = messages_before;
+                self.next_turn_id = turn_id_before;
+                self.metrics.restore(&metrics_checkpoint);
+                return Err(err);
+            }
+        };
+
+        // Persist the session if a backend is configured. A save failure should
+        // not hide a successfully completed turn, so we log it and continue.
+        if let Err(err) = self.save().await {
+            error!(error = %err, "failed to persist session after turn");
+        }
 
         Ok(TurnResult {
             final_message: final_message.unwrap_or_else(|| Message::assistant("")),
@@ -662,16 +753,16 @@ impl AgentSession {
 }
 
 impl TurnEvent {
-    /// Return the [`Message`] carried by this event, or panic.
+    /// Return the [`Message`] carried by this event, if any.
     ///
-    /// Only call on variants known to carry a message — i.e. [`User`](TurnEvent::User),
-    /// [`Assistant`](TurnEvent::Assistant), [`ToolResult`](TurnEvent::ToolResult).
-    pub fn message(&self) -> &Message {
+    /// Only [`User`](TurnEvent::User), [`Assistant`](TurnEvent::Assistant), and
+    /// [`ToolResult`](TurnEvent::ToolResult) carry messages.
+    pub fn message(&self) -> Option<&Message> {
         match self {
             TurnEvent::User(message)
             | TurnEvent::Assistant(message)
-            | TurnEvent::ToolResult(message) => message,
-            _ => panic!("event has no message"),
+            | TurnEvent::ToolResult(message) => Some(message),
+            _ => None,
         }
     }
 
@@ -700,6 +791,7 @@ impl TurnEvent {
                 output_tokens,
             } => format!("provider_usage:input={input_tokens} output={output_tokens}"),
             TurnEvent::AssistantDelta { text } => format!("assistant_delta:{text}"),
+            TurnEvent::ThinkingDelta { text } => format!("thinking_delta:{text}"),
             TurnEvent::ToolCall { tool_call_id, name } => {
                 format!("tool_call:{}#{}", name, tool_call_id)
             }
@@ -740,6 +832,16 @@ impl TurnEvent {
                 name,
                 emitted_message,
             } => format!("hook_completed:{phase}:{name}:{emitted_message}"),
+            TurnEvent::ApprovalRequested {
+                tool_call_id,
+                name,
+                reason,
+            } => format!("approval_requested:{name}#{tool_call_id}:{reason}"),
+            TurnEvent::ApprovalResolved {
+                tool_call_id,
+                name,
+                decision,
+            } => format!("approval_resolved:{name}#{tool_call_id}:{decision}"),
             TurnEvent::ProviderRetry {
                 attempt,
                 max_retries,
@@ -753,19 +855,26 @@ impl TurnEvent {
             } => format!("turn_finished:{stop_reason:?}:{final_text}"),
             _ => self
                 .message()
-                .blocks
-                .iter()
-                .map(|block| match block {
-                    ContentBlock::Text(text) => text.text.clone(),
-                    ContentBlock::ToolCall(call) => {
-                        format!("tool_call:{}({})", call.name, call.arguments)
-                    }
-                    ContentBlock::ToolResult(result) => {
-                        format!("tool_result:{}={}", result.name, result.content)
-                    }
+                .map(|message| {
+                    message
+                        .blocks
+                        .iter()
+                        .map(|block| match block {
+                            ContentBlock::Text(text) => text.text.clone(),
+                            ContentBlock::Thinking(thinking) => {
+                                format!("thinking:{}", thinking.text)
+                            }
+                            ContentBlock::ToolCall(call) => {
+                                format!("tool_call:{}({})", call.name, call.arguments)
+                            }
+                            ContentBlock::ToolResult(result) => {
+                                format!("tool_result:{}={}", result.name, result.content)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 })
-                .collect::<Vec<_>>()
-                .join("\n"),
+                .unwrap_or_default(),
         }
     }
 }
@@ -780,6 +889,7 @@ fn estimate_message_tokens(messages: &[Message], provider: &dyn ModelProvider) -
         .flat_map(|message| message.blocks.iter())
         .map(|block| match block {
             ContentBlock::Text(text) => provider.estimate_tokens(&text.text),
+            ContentBlock::Thinking(thinking) => provider.estimate_tokens(&thinking.text),
             ContentBlock::ToolCall(call) => {
                 provider.estimate_tokens(&call.name)
                     + provider.estimate_tokens(&call.arguments.to_string())
@@ -789,4 +899,22 @@ fn estimate_message_tokens(messages: &[Message], provider: &dyn ModelProvider) -
             }
         })
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn turn_event_message_returns_some_for_message_variants() {
+        let message = Message::user("hi");
+        assert!(matches!(TurnEvent::User(message.clone()).message(), Some(m) if m == &message));
+        assert!(TurnEvent::TurnStarted {
+            session_id: "s".into(),
+            turn_id: 1,
+            user_input: "hi".into(),
+        }
+        .message()
+        .is_none());
+    }
 }

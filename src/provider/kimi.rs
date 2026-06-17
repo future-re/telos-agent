@@ -63,7 +63,7 @@ impl ModelProvider for KimiProvider {
             .chat()
             .create(openai_request)
             .await
-            .map_err(|err| AgentError::Provider(err.to_string()))?;
+            .map_err(crate::provider::openai_compat::classify_openai_error)?;
         crate::provider::openai_compat::parse_response(response)
     }
 
@@ -93,7 +93,7 @@ mod tests {
     fn test_config(base_url: String) -> KimiConfig {
         KimiConfig {
             api_key: "test-moonshot-key".into(),
-            model: "kimi-k2-0711-preview".into(),
+            model: "kimi-k2.7-code".into(),
             base_url,
         }
     }
@@ -102,12 +102,12 @@ mod tests {
     fn default_base_url() {
         let config = KimiConfig {
             api_key: "x".into(),
-            model: "kimi-k2-0711-preview".into(),
+            model: "kimi-k2.7-code".into(),
             base_url: "https://api.moonshot.cn".into(),
         };
         let provider = KimiProvider::new(config);
         // Provider stores the model and builds a client internally.
-        assert_eq!(provider.model, "kimi-k2-0711-preview");
+        assert_eq!(provider.model, "kimi-k2.7-code");
     }
 
     #[tokio::test]
@@ -120,7 +120,7 @@ mod tests {
                 "id": "chatcmpl-test",
                 "object": "chat.completion",
                 "created": 1,
-                "model": "kimi-k2-0711-preview",
+                "model": "kimi-k2.7-code",
                 "choices": [{
                     "index": 0,
                     "message": { "role": "assistant", "content": "Hello from Kimi!" },
@@ -153,9 +153,9 @@ mod tests {
     #[tokio::test]
     async fn streams_chat_response() {
         let server = MockServer::start().await;
-        let body = "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"},\"finish_reason\":null}]}\n\n\
-            data: {\"choices\":[{\"delta\":{\"content\":\" there\"},\"finish_reason\":null}]}\n\n\
-            data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n\
+        let body = "data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"kimi-k2.7-code\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hi\"},\"finish_reason\":null}]}\n\n\
+            data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"kimi-k2.7-code\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" there\"},\"finish_reason\":null}]}\n\n\
+            data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"kimi-k2.7-code\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n\
             data: [DONE]\n\n";
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))

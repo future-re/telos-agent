@@ -57,6 +57,9 @@ impl CompactionStrategy for SummaryCompaction {
                     .iter()
                     .map(|b| match b {
                         ContentBlock::Text(t) => provider.estimate_tokens(&t.text),
+                        ContentBlock::Thinking(thinking) => {
+                            provider.estimate_tokens(&thinking.text)
+                        }
                         ContentBlock::ToolCall(c) => {
                             provider.estimate_tokens(&c.name)
                                 + provider.estimate_tokens(&c.arguments.to_string())
@@ -90,6 +93,13 @@ impl CompactionStrategy for SummaryCompaction {
             return Ok(false);
         }
 
+        // If the only messages before the split point are the leading system
+        // prompt(s), summarising them would not reduce tokens (we keep them and
+        // add a summary). Skip compaction in that case to avoid pointless loops.
+        if split_point == system_idx {
+            return Ok(false);
+        }
+
         let to_summarize = messages[..split_point].to_vec();
 
         let summary_request = CompletionRequest {
@@ -110,10 +120,68 @@ impl CompactionStrategy for SummaryCompaction {
             summary_text
         ));
 
-        let mut new_messages = vec![summary_msg];
+        // Preserve any leading system prompt(s) before the summary, then keep
+        // the recent messages that were not summarised.
+        let mut new_messages = messages[..system_idx].to_vec();
+        new_messages.push(summary_msg);
         new_messages.extend(messages[split_point..].iter().cloned());
         *messages = new_messages;
 
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::provider::{CompletionResponse, StopReason};
+
+    struct FakeProvider;
+
+    #[async_trait::async_trait]
+    impl ModelProvider for FakeProvider {
+        async fn complete(
+            &self,
+            _request: CompletionRequest,
+        ) -> Result<CompletionResponse, AgentError> {
+            Ok(CompletionResponse {
+                message: Message::assistant("summary text"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            })
+        }
+
+        fn estimate_tokens(&self, text: &str) -> usize {
+            text.len()
+        }
+    }
+
+    #[tokio::test]
+    async fn preserves_leading_system_prompt() {
+        let compaction = SummaryCompaction {
+            max_tokens: 10,
+            keep_recent: 1,
+        };
+        let mut messages = vec![
+            Message::system("persona"),
+            Message::user("first"),
+            Message::user("second"),
+        ];
+        let changed = compaction.compact(&mut messages, &FakeProvider).await.unwrap();
+        assert!(changed);
+        assert_eq!(messages[0].role, Role::System);
+        assert_eq!(messages[0].text_content(), "persona");
+        assert!(messages[1].text_content().contains("summary text"));
+    }
+
+    #[tokio::test]
+    async fn skips_compaction_when_only_system_prompt_is_old() {
+        let compaction = SummaryCompaction {
+            max_tokens: 5,
+            keep_recent: 1,
+        };
+        let mut messages = vec![Message::system("long system prompt text"), Message::user("hi")];
+        let changed = compaction.compact(&mut messages, &FakeProvider).await.unwrap();
+        assert!(!changed);
     }
 }

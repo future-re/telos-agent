@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use crate::error::AgentError;
 use crate::tool::{PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput};
 
-use super::{modified_timestamp_ms, required_string, required_string_any, resolve_workspace_path};
+use super::{ensure_file_was_read_and_unchanged, modified_timestamp_ms, required_string, required_string_any, resolve_workspace_path};
 
 /// Built-in file-write tool. Writes (and creates) text files inside the workspace.
 pub struct FileWriteTool;
@@ -60,7 +60,7 @@ impl Tool for FileWriteTool {
         let path = resolve_workspace_path(&context.cwd, input_path)?;
         let content = required_string(&arguments, "content")?;
         if let Ok(existing_content) = tokio::fs::read_to_string(&path).await {
-            ensure_file_was_read_and_unchanged(&context, &path, &existing_content).await?;
+            ensure_file_was_read_and_unchanged("Write", &context, &path, &existing_content).await?;
         }
         // Create any missing parent directories so the model can write nested paths in one call.
         if let Some(parent) = path.parent() {
@@ -96,30 +96,3 @@ impl Tool for FileWriteTool {
     }
 }
 
-async fn ensure_file_was_read_and_unchanged(
-    context: &ToolContext,
-    path: &std::path::Path,
-    current_content: &str,
-) -> Result<(), AgentError> {
-    let last_read = context.read_file_state.lock().await.get(path).cloned();
-    let Some(last_read) = last_read else {
-        return Err(AgentError::ToolExecution {
-            tool: "Write".into(),
-            message: "File has not been read yet. Read it first before writing to it.".into(),
-        });
-    };
-    if last_read.is_partial_view {
-        return Err(AgentError::ToolExecution {
-            tool: "Write".into(),
-            message: "File has only been partially read. Read the full file before writing to it."
-                .into(),
-        });
-    }
-    if current_content != last_read.content {
-        return Err(AgentError::ToolExecution {
-            tool: "Write".into(),
-            message: "File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.".into(),
-        });
-    }
-    Ok(())
-}

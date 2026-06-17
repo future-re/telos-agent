@@ -8,7 +8,7 @@
 
 use async_trait::async_trait;
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
 use crate::error::AgentError;
 use crate::provider::{CompletionRequest, CompletionResponse, ModelProvider};
@@ -33,12 +33,12 @@ impl MockProvider {
 #[async_trait]
 impl ModelProvider for MockProvider {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AgentError> {
-        self.requests.lock().unwrap().push(request);
+        self.requests.lock().await.push(request);
         self.responses
             .lock()
-            .unwrap()
+            .await
             .pop_front()
-            .ok_or_else(|| AgentError::Provider("mock provider has no more responses".into()))
+            .ok_or_else(|| AgentError::Provider(crate::error::ProviderError::Other("mock provider has no more responses".into())))
     }
 
     /// Rough 4-chars-per-token heuristic — good enough for budget-test setups.

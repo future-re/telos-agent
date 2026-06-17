@@ -435,10 +435,7 @@ fn tool_result_budget_compacts_large_output() {
         let tool_result = result
             .events
             .iter()
-            .find_map(|event| match event {
-                TurnEvent::ToolResult(_) => Some(event),
-                _ => None,
-            })
+            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
             .unwrap();
         assert!(tool_result.text().contains("truncated"));
     });
@@ -553,10 +550,7 @@ fn permission_engine_denies_tool() {
         let tool_result = result
             .events
             .iter()
-            .find_map(|event| match event {
-                TurnEvent::ToolResult(_) => Some(event),
-                _ => None,
-            })
+            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
             .unwrap();
         assert!(tool_result.text().contains("permission_denied"));
         assert!(tool_result.text().contains("permission rule"));
@@ -600,10 +594,7 @@ fn permission_engine_allows_tool() {
         let tool_result = result
             .events
             .iter()
-            .find_map(|event| match event {
-                TurnEvent::ToolResult(_) => Some(event),
-                _ => None,
-            })
+            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
             .unwrap();
         assert!(tool_result.text().contains("\"sum\":3"));
     });
@@ -647,10 +638,7 @@ fn permission_engine_matches_tool_aliases_with_last_rule_wins() {
         let tool_result = result
             .events
             .iter()
-            .find_map(|event| match event {
-                TurnEvent::ToolResult(_) => Some(event),
-                _ => None,
-            })
+            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
             .unwrap();
         assert!(tool_result.text().contains("\"sum\":3"));
     });
@@ -764,7 +752,7 @@ fn builtin_file_read_tool_returns_file_contents() {
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "file_read".into(),
-                        arguments: json!({ "path": "sample.txt" }),
+                        arguments: json!({ "file_path": "sample.txt" }),
                     })],
                 },
                 stop_reason: StopReason::ToolUse,
@@ -787,10 +775,7 @@ fn builtin_file_read_tool_returns_file_contents() {
         let tool_result = result
             .events
             .iter()
-            .find_map(|event| match event {
-                TurnEvent::ToolResult(_) => Some(event),
-                _ => None,
-            })
+            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
             .unwrap();
         assert!(tool_result.text().contains("1: alpha"));
         assert!(tool_result.text().contains("2: beta"));
@@ -1008,10 +993,7 @@ fn permission_engine_allows_shell_by_command_prefix() {
         let tool_result = result
             .events
             .iter()
-            .find_map(|event| match event {
-                TurnEvent::ToolResult(_) => Some(event),
-                _ => None,
-            })
+            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
             .unwrap();
         assert!(
             tool_result.text().contains("allowed"),
@@ -1088,10 +1070,10 @@ fn token_budget_triggers_auto_compaction() {
         ]);
         let tools = ToolRegistry::new();
         let mut session = AgentSession::new(AgentConfig {
-            system_prompt: Some("x".repeat(200)),
+            system_prompt: Some("sys".into()),
             compaction: Some(Arc::new(SummaryCompaction {
-                max_tokens: 20,
-                keep_recent: 1,
+                max_tokens: 50,
+                keep_recent: 0,
             })),
             token_budget: Some(TokenBudget {
                 max_tokens: 1_000,
@@ -1100,7 +1082,10 @@ fn token_budget_triggers_auto_compaction() {
             ..AgentConfig::default()
         });
 
-        let result = session.run_turn(&provider, &tools, "hello").await.unwrap();
+        let result = session
+            .run_turn(&provider, &tools, "x".repeat(200))
+            .await
+            .unwrap();
         assert!(result.events.iter().any(|event| {
             matches!(event, TurnEvent::CompactionStarted { reason } if reason == "token_budget")
         }));
@@ -1159,11 +1144,294 @@ fn subagent_tool_runs_in_process_agent() {
         let tool_result = result
             .events
             .iter()
-            .find_map(|event| match event {
-                TurnEvent::ToolResult(_) => Some(event),
-                _ => None,
-            })
+            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
             .unwrap();
         assert!(tool_result.text().contains("inner answer"));
+    });
+}
+
+#[test]
+fn thinking_blocks_are_separate_from_final_text() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let provider = MockProvider::new(vec![CompletionResponse {
+            message: Message {
+                role: tiny_agent_core::Role::Assistant,
+                blocks: vec![
+                    ContentBlock::Thinking(tiny_agent_core::ThinkingBlock {
+                        text: "I need to reason about this.".into(),
+                        signature: None,
+                        is_redacted: false,
+                    }),
+                    ContentBlock::Text(tiny_agent_core::TextBlock {
+                        text: "The answer is 7.".into(),
+                    }),
+                ],
+            },
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+        }]);
+
+        let tools = ToolRegistry::new();
+        let mut session = AgentSession::new(AgentConfig::default());
+
+        let result = session.run_turn(&provider, &tools, "what is 3 + 4?").await.unwrap();
+        assert_eq!(result.final_message.text_content(), "The answer is 7.");
+        assert_eq!(
+            result.final_message.thinking_content(),
+            "I need to reason about this."
+        );
+
+        // The streaming turn loop should emit at least one thinking delta.
+        assert!(
+            result
+                .events
+                .iter()
+                .any(|event| matches!(event, TurnEvent::ThinkingDelta { .. }))
+        );
+
+        // text_content should not leak into the final answer.
+        assert!(!result.final_message.text_content().contains("reason"));
+    });
+}
+
+#[test]
+fn schema_validation_rejects_invalid_tool_arguments() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "add".into(),
+                        arguments: json!({ "a": "not an integer", "b": 3 }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("Schema error."),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+
+        let mut tools = ToolRegistry::new();
+        tools.register(AddTool);
+
+        let mut session = AgentSession::new(AgentConfig::default());
+        let result = session.run_turn(&provider, &tools, "add wrong types").await.unwrap();
+        let tool_result = result
+            .events
+            .iter()
+            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
+            .unwrap();
+        assert!(tool_result.text().contains("validation_error"));
+        assert!(tool_result.text().contains("schema validation"));
+    });
+}
+
+#[test]
+fn schema_validation_can_be_disabled() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "add".into(),
+                        arguments: json!({ "a": "not an integer", "b": 3 }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("Done."),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+
+        let mut tools = ToolRegistry::new();
+        tools.register(AddTool);
+
+        let mut session = AgentSession::new(AgentConfig {
+            auto_validate_schema: false,
+            ..AgentConfig::default()
+        });
+        let result = session.run_turn(&provider, &tools, "add wrong types").await.unwrap();
+        let tool_result = result
+            .events
+            .iter()
+            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
+            .unwrap();
+        // The tool's own invoke fails because it expects an integer, not schema validation.
+        assert!(tool_result.text().contains("missing integer `a`"));
+    });
+}
+
+#[test]
+fn approval_handler_allows_asked_tool_call() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::ask_tool("add"));
+
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "add".into(),
+                        arguments: json!({ "a": 2, "b": 3 }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("Approved."),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+
+        let mut tools = ToolRegistry::new();
+        tools.register(AddTool);
+
+        let mut session = AgentSession::new(AgentConfig {
+            permission_engine: Some(engine),
+            approval_handler: Some(Arc::new(tiny_agent_core::FixedDecisionHandler {
+                decision: tiny_agent_core::ApprovalDecision::Allow,
+            })),
+            ..AgentConfig::default()
+        });
+
+        let result = session.run_turn(&provider, &tools, "add").await.unwrap();
+        let tool_result = result
+            .events
+            .iter()
+            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
+            .unwrap();
+        assert!(tool_result.text().contains("\"sum\":5"));
+        assert!(
+            result
+                .events
+                .iter()
+                .any(|event| matches!(event, TurnEvent::ApprovalRequested { .. }))
+        );
+        assert!(
+            result
+                .events
+                .iter()
+                .any(|event| matches!(event, TurnEvent::ApprovalResolved { .. }))
+        );
+    });
+}
+
+#[test]
+fn approval_handler_denies_asked_tool_call() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::ask_tool("add"));
+
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "add".into(),
+                        arguments: json!({ "a": 2, "b": 3 }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("Denied."),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+
+        let mut tools = ToolRegistry::new();
+        tools.register(AddTool);
+
+        let mut session = AgentSession::new(AgentConfig {
+            permission_engine: Some(engine),
+            approval_handler: Some(Arc::new(tiny_agent_core::FixedDecisionHandler {
+                decision: tiny_agent_core::ApprovalDecision::Deny {
+                    reason: "not today".into(),
+                },
+            })),
+            ..AgentConfig::default()
+        });
+
+        let result = session.run_turn(&provider, &tools, "add").await.unwrap();
+        let tool_result = result
+            .events
+            .iter()
+            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
+            .unwrap();
+        assert!(tool_result.text().contains("permission_denied"));
+    });
+}
+
+#[test]
+fn approval_handler_modifies_asked_tool_call() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::ask_tool("add"));
+
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: tiny_agent_core::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "add".into(),
+                        arguments: json!({ "a": 2, "b": 3 }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("Modified."),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+
+        let mut tools = ToolRegistry::new();
+        tools.register(AddTool);
+
+        let mut session = AgentSession::new(AgentConfig {
+            permission_engine: Some(engine),
+            approval_handler: Some(Arc::new(tiny_agent_core::FixedDecisionHandler {
+                decision: tiny_agent_core::ApprovalDecision::Modify {
+                    arguments: json!({ "a": 10, "b": 5 }),
+                },
+            })),
+            ..AgentConfig::default()
+        });
+
+        let result = session.run_turn(&provider, &tools, "add").await.unwrap();
+        let tool_result = result
+            .events
+            .iter()
+            .find(|event| matches!(event, TurnEvent::ToolResult(_)))
+            .unwrap();
+        assert!(tool_result.text().contains("\"sum\":15"));
     });
 }

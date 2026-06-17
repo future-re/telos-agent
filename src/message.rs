@@ -83,12 +83,28 @@ impl Message {
 
     /// Concatenate all [`TextBlock`] contents in this message, separated by newlines.
     ///
-    /// Non-text blocks (tool calls, tool results) are skipped.
+    /// Non-text blocks (tool calls, tool results, thinking blocks) are skipped.
+    /// Thinking content is intentionally excluded so callers receive the model's
+    /// final answer rather than its internal reasoning trace.
     pub fn text_content(&self) -> String {
         self.blocks
             .iter()
             .filter_map(|block| match block {
                 ContentBlock::Text(text) => Some(text.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Concatenate all [`ThinkingBlock`] contents in this message, separated by newlines.
+    ///
+    /// Non-thinking blocks are skipped.
+    pub fn thinking_content(&self) -> String {
+        self.blocks
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Thinking(thinking) => Some(thinking.text.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -115,7 +131,8 @@ impl Message {
 /// A single piece of content within a [`Message`].
 ///
 /// Messages are made of heterogeneous blocks because modern LLMs interleave
-/// natural language, tool invocations, and tool outputs within a single turn.
+/// natural language, tool invocations, tool outputs, and reasoning traces
+/// within a single turn.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ContentBlock {
     /// Natural-language text.
@@ -124,12 +141,29 @@ pub enum ContentBlock {
     ToolCall(ToolCall),
     /// The result of having invoked a tool.
     ToolResult(ToolResult),
+    /// A reasoning trace emitted by a thinking-capable model.
+    Thinking(ThinkingBlock),
 }
 
 /// A plain-text block of content.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TextBlock {
     pub text: String,
+}
+
+/// A reasoning trace produced by a thinking-capable model.
+///
+/// Kept separate from [`TextBlock`] so consumers can choose whether to surface
+/// the reasoning to end users.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ThinkingBlock {
+    /// The raw reasoning text.
+    pub text: String,
+    /// Cryptographic signature provided by some providers (e.g. Claude 3.7
+    /// thinking) to verify the reasoning block was not tampered with.
+    pub signature: Option<String>,
+    /// Whether the reasoning content was redacted by the provider.
+    pub is_redacted: bool,
 }
 
 /// A request from the assistant to invoke a named tool with structured arguments.
@@ -154,4 +188,61 @@ pub struct ToolResult {
     pub name: String,
     pub content: Value,
     pub is_error: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_content_excludes_thinking_blocks() {
+        let message = Message {
+            role: Role::Assistant,
+            blocks: vec![
+                ContentBlock::Thinking(ThinkingBlock {
+                    text: "I should think step by step".into(),
+                    signature: None,
+                    is_redacted: false,
+                }),
+                ContentBlock::Text(TextBlock { text: "The answer is 42.".into() }),
+            ],
+        };
+        assert_eq!(message.text_content(), "The answer is 42.");
+    }
+
+    #[test]
+    fn thinking_content_extracts_thinking_blocks() {
+        let message = Message {
+            role: Role::Assistant,
+            blocks: vec![
+                ContentBlock::Thinking(ThinkingBlock {
+                    text: "first thought".into(),
+                    signature: None,
+                    is_redacted: false,
+                }),
+                ContentBlock::Text(TextBlock { text: "answer".into() }),
+                ContentBlock::Thinking(ThinkingBlock {
+                    text: "second thought".into(),
+                    signature: None,
+                    is_redacted: false,
+                }),
+            ],
+        };
+        assert_eq!(message.thinking_content(), "first thought\nsecond thought");
+    }
+
+    #[test]
+    fn thinking_block_roundtrips_through_json() {
+        let message = Message {
+            role: Role::Assistant,
+            blocks: vec![ContentBlock::Thinking(ThinkingBlock {
+                text: "reasoning".into(),
+                signature: Some("sig".into()),
+                is_redacted: false,
+            })],
+        };
+        let json = serde_json::to_string(&message).unwrap();
+        let restored: Message = serde_json::from_str(&json).unwrap();
+        assert_eq!(message, restored);
+    }
 }

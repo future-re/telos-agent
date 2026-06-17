@@ -6,12 +6,41 @@
 
 use thiserror::Error;
 
+/// Structured failure categories for provider (HTTP / API / stream) errors.
+///
+/// Carrying the HTTP status code lets the runtime decide whether an error is
+/// transient and worth retrying without parsing free-text messages.
+#[derive(Debug, Error, Clone)]
+pub enum ProviderError {
+    /// An HTTP response with a non-success status code.
+    #[error("HTTP {status}: {message}")]
+    Http { status: u16, message: String },
+    /// A low-level network error (connection reset, refused, EOF, etc.).
+    #[error("network error: {0}")]
+    Network(String),
+    /// A provider API-level error response.
+    #[error("API error: {0}")]
+    Api(String),
+    /// The request timed out before completing.
+    #[error("timeout")]
+    Timeout,
+    /// The provider stream ended before a complete message was received.
+    #[error("stream ended unexpectedly")]
+    StreamEnded,
+    /// The provider returned a response that could not be parsed.
+    #[error("invalid response: {0}")]
+    InvalidResponse(String),
+    /// Any other provider failure that does not fit the categories above.
+    #[error("{0}")]
+    Other(String),
+}
+
 /// All error conditions surfaced by the agent runtime.
 #[derive(Debug, Error)]
 pub enum AgentError {
     /// The model provider (HTTP transport, API contract, deserialisation, …) failed.
     #[error("provider error: {0}")]
-    Provider(String),
+    Provider(ProviderError),
     /// A misconfigured session or backend (missing env var, unwritable storage dir, …).
     #[error("configuration error: {0}")]
     Config(String),
@@ -45,22 +74,13 @@ impl AgentError {
     /// configuration errors, validation failures, and permission denials are not.
     pub fn is_retryable(&self) -> bool {
         match self {
-            AgentError::Provider(msg) => {
-                let lower = msg.to_lowercase();
-                lower.contains("429")
-                    || lower.contains("500")
-                    || lower.contains("502")
-                    || lower.contains("503")
-                    || lower.contains("504")
-                    || lower.contains("timeout")
-                    || lower.contains("timed out")
-                    || lower.contains("connection")
-                    || lower.contains("reset")
-                    || lower.contains("refused")
-                    || lower.contains("eof")
-                    || lower.contains("broken pipe")
-                    || lower.contains("rate limit")
-            }
+            AgentError::Provider(err) => match err {
+                ProviderError::Http { status, .. } => {
+                    *status == 429 || (500..=599).contains(status)
+                }
+                ProviderError::Network(_) | ProviderError::Timeout => true,
+                _ => false,
+            },
             _ => false,
         }
     }

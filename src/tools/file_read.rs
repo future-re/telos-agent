@@ -51,6 +51,22 @@ impl Tool for FileReadTool {
     ) -> Result<ToolOutput, AgentError> {
         let input_path = required_string_any(&arguments, &["file_path", "path"])?;
         let path = resolve_workspace_path(&context.cwd, input_path)?;
+        let metadata = tokio::fs::metadata(&path)
+            .await
+            .map_err(|err| AgentError::ToolExecution {
+                tool: "Read".into(),
+                message: friendly_file_error(&context.cwd, &path, err),
+            })?;
+        if metadata.len() > context.max_file_read_bytes as u64 {
+            return Err(AgentError::ToolExecution {
+                tool: "Read".into(),
+                message: format!(
+                    "file exceeds maximum read size ({} bytes): {}",
+                    context.max_file_read_bytes,
+                    path.display()
+                ),
+            });
+        }
         let bytes = tokio::fs::read(&path)
             .await
             .map_err(|err| AgentError::ToolExecution {
@@ -130,5 +146,46 @@ fn friendly_file_error(
         )
     } else {
         err.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn ctx(cwd: std::path::PathBuf, max_bytes: usize) -> ToolContext {
+        ToolContext {
+            session_id: "test".into(),
+            turn_id: 1,
+            cwd,
+            env: HashMap::new(),
+            messages: vec![],
+            progress: None,
+            read_file_state: std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            timeout: None,
+            max_file_read_bytes: max_bytes,
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_file() {
+        let dir = std::env::temp_dir().join("tiny_agent_read_size_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("big.txt"), "x".repeat(100)).unwrap();
+
+        let tool = FileReadTool;
+        let result = tool
+            .invoke(json!({ "file_path": "big.txt" }), ctx(dir.clone(), 50))
+            .await;
+        assert!(matches!(result, Err(AgentError::ToolExecution { .. })));
+        assert!(
+            result.unwrap_err().to_string().contains("maximum read size"),
+            "error should mention maximum read size"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

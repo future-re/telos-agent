@@ -89,7 +89,6 @@ impl Tool for SubagentTool {
         config.cwd = context.cwd;
         config.env = context.env;
         config.storage = None;
-        config.permission_engine = self.config.permission_engine.clone();
         if let Some(system_prompt) = arguments.get("system_prompt").and_then(|value| value.as_str())
         {
             config.system_prompt = Some(system_prompt.to_string());
@@ -109,14 +108,14 @@ impl Tool for SubagentTool {
                 let event = event?;
                 // Forward a coarse-grained progress message to the parent's
                 // tool-progress channel so callers can show "subagent is doing X".
-                if let Some(progress) = progress_summary(&event) {
-                    if let Some(tx) = &context.progress {
-                        let _ = tx.send(crate::tool::ToolProgress {
-                            tool_call_id: None,
-                            message: progress,
-                            data: None,
-                        });
-                    }
+                if let Some(progress) = progress_summary(&event)
+                    && let Some(tx) = &context.progress
+                {
+                    let _ = tx.send(crate::tool::ToolProgress {
+                        tool_call_id: None,
+                        message: progress,
+                        data: None,
+                    });
                 }
                 events.push(event);
             }

@@ -16,6 +16,8 @@ use tokio::sync::mpsc;
 use crate::error::AgentError;
 use crate::message::Message;
 
+pub mod validate;
+
 /// Public-facing description of a tool sent to the model.
 ///
 /// `input_schema` is JSON Schema; providers translate it into their native
@@ -119,6 +121,8 @@ pub struct ToolContext {
     /// Optional per-call timeout. The executor will cancel `invoke` if it
     /// exceeds this duration and return an `is_error: true` result.
     pub timeout: Option<std::time::Duration>,
+    /// Maximum bytes the built-in file tools will read from a single file.
+    pub max_file_read_bytes: usize,
 }
 
 /// A tool that can be invoked by the agent.
@@ -206,7 +210,11 @@ impl ToolRegistry {
         self.tools.insert(name.clone(), tool.clone());
         self.canonical_names.push(name);
         for alias in aliases {
-            self.tools.insert((*alias).to_string(), tool.clone());
+            // Aliases must not shadow an existing canonical name, otherwise the
+            // model would see one tool's schema but invoke another's implementation.
+            if !self.canonical_names.contains(&(*alias).to_string()) {
+                self.tools.insert((*alias).to_string(), tool.clone());
+            }
         }
     }
 
@@ -314,5 +322,17 @@ mod tests {
         // Still returns one definition (canonical name is deduplicated in the filter)
         let defs = registry.definitions();
         assert_eq!(defs.len(), 1);
+    }
+
+    #[test]
+    fn registry_alias_does_not_override_canonical_name() {
+        let mut registry = ToolRegistry::new();
+        registry.register(FakeTool::new("A", &[]));
+        // B's alias clashes with A's canonical name; A must remain invocable.
+        registry.register(FakeTool::new("B", &["A"]));
+        let defs = registry.definitions();
+        assert_eq!(defs.len(), 2);
+        assert!(registry.get("A").is_ok());
+        assert!(registry.get("B").is_ok());
     }
 }

@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use crate::approval::ApprovalHandler;
 use crate::compaction::CompactionStrategy;
 use crate::hooks::HookRegistry;
 use crate::storage::Storage;
@@ -39,6 +40,8 @@ pub struct AgentConfig {
     pub compaction: Option<Arc<dyn CompactionStrategy>>,
     /// Optional rule-based permission engine consulted before every tool call.
     pub permission_engine: Option<crate::permissions::PermissionEngine>,
+    /// Optional handler invoked when a tool call requires explicit human approval.
+    pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
     /// Maximum number of concurrency-safe tools to run in parallel within a single batch.
     pub tool_concurrency_limit: usize,
     /// Optional token budget that triggers proactive compaction.
@@ -46,6 +49,9 @@ pub struct AgentConfig {
     /// Retry configuration for transient provider failures.
     /// When `None`, provider calls are not retried.
     pub retry: RetryConfig,
+    /// Whether to automatically validate tool arguments against the tool's
+    /// `input_schema` after the tool's own `validate` method runs.
+    pub auto_validate_schema: bool,
     /// Shared cancellation flag. Set to `true` from another task to cancel the
     /// running turn as soon as the next checkpoint is reached.
     pub cancelled: Arc<AtomicBool>,
@@ -53,6 +59,9 @@ pub struct AgentConfig {
     /// longer than this will be interrupted and its result will be an
     /// `is_error: true` timeout so the model can recover.
     pub tool_timeout_ms: Option<u64>,
+    /// Maximum number of bytes the built-in file tools will read from a single
+    /// file. Files larger than this are rejected to avoid OOMing the agent.
+    pub max_file_read_bytes: usize,
 }
 
 impl Default for AgentConfig {
@@ -61,17 +70,23 @@ impl Default for AgentConfig {
             system_prompt: None,
             max_iterations: 8,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            env: std::env::vars().collect(),
+            // Start with an empty environment for shell tools. Callers that need
+            // specific variables can add them explicitly; inheriting the entire
+            // process environment risks leaking secrets to arbitrary tool calls.
+            env: HashMap::new(),
             max_tool_result_chars: usize::MAX,
             hooks: Arc::new(HookRegistry::new()),
             storage: None,
             compaction: None,
             permission_engine: None,
+            approval_handler: None,
             tool_concurrency_limit: 10,
             token_budget: None,
             retry: RetryConfig::default(),
+            auto_validate_schema: true,
             cancelled: Arc::new(AtomicBool::new(false)),
             tool_timeout_ms: None,
+            max_file_read_bytes: 50 * 1024 * 1024,
         }
     }
 }
@@ -164,5 +179,11 @@ mod tests {
         let budget2 = TokenBudget::new(101);
         // 80% of 101 = 80.8, ceil = 81
         assert_eq!(budget2.compact_at_tokens, 81);
+    }
+
+    #[test]
+    fn default_env_is_empty() {
+        let config = AgentConfig::default();
+        assert!(config.env.is_empty());
     }
 }

@@ -6,6 +6,9 @@
 //! prefix. The result of the **last matching rule wins** — order rules from
 //! general to specific.
 
+use crate::bash_security::extract_command_prefix;
+use crate::bash_security::prefix::PrefixResult;
+
 /// Outcome of a permission check for a tool call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleDecision {
@@ -135,13 +138,71 @@ impl PermissionEngine {
         result
     }
 
+    /// Evaluate a shell-style tool call using an extracted command prefix.
+    ///
+    /// For rules with a [`command_prefix`](PermissionRule::command_prefix), the
+    /// prefix is matched against the *normalized* command prefix produced by
+    /// [`bash_security::extract_command_prefix`]. This is stricter than raw
+    /// string matching: it strips trailing arguments and redirects, but also
+    /// refuses to match when the command contains injection-like constructs.
+    ///
+    /// Rules without a `command_prefix` still match on tool name and cwd as
+    /// usual, so a blanket `deny_tool("Bash")` continues to work.
+    pub fn evaluate_shell_call(
+        &self,
+        tool_names: &[&str],
+        command: &str,
+        _arguments: &serde_json::Value,
+        cwd: &std::path::Path,
+    ) -> Option<RuleDecision> {
+        // `_arguments` is reserved for future use (e.g. argument-based rules).
+        let _ = _arguments;
+
+        let extracted = match extract_command_prefix(command) {
+            PrefixResult::Prefix(p) => Some(p),
+            PrefixResult::None => None,
+            // When the command cannot be safely analyzed (contains injections,
+            // parse errors, etc.), command_prefix rules must not auto-allow it.
+            // General tool-level rules without a command_prefix still apply.
+            PrefixResult::NeedsReview => {
+                let mut result = None;
+                for rule in &self.rules {
+                    if tool_names.iter().any(|tool_name| Self::match_name(&rule.tool_name, tool_name))
+                        && rule.command_prefix.is_none()
+                        && Self::match_cwd_prefix(rule, cwd)
+                    {
+                        result = Some(rule.decision.clone());
+                    }
+                }
+                return result;
+            }
+        };
+
+        let mut result = None;
+        for rule in &self.rules {
+            if !tool_names.iter().any(|tool_name| Self::match_name(&rule.tool_name, tool_name)) {
+                continue;
+            }
+            if !Self::match_cwd_prefix(rule, cwd) {
+                continue;
+            }
+            if let Some(prefix) = &rule.command_prefix {
+                let haystack = extracted.as_deref().unwrap_or_else(|| command.trim_start());
+                if !haystack.starts_with(prefix) {
+                    continue;
+                }
+            }
+            result = Some(rule.decision.clone());
+        }
+        result
+    }
+
     /// Match `pattern` against `name` with `*` wildcard support (trailing or solo).
     fn match_name(pattern: &str, name: &str) -> bool {
         if pattern == "*" {
             return true;
         }
-        if pattern.ends_with('*') {
-            let prefix = &pattern[..pattern.len() - 1];
+        if let Some(prefix) = pattern.strip_suffix('*') {
             return name.starts_with(prefix);
         }
         pattern == name
@@ -229,7 +290,7 @@ mod tests {
         // The tool is registered as "Bash" with alias "shell" — both should hit.
         assert!(
             engine
-                .evaluate_call_any(&["Bash", "shell"], &json!({}), &std::path::Path::new("."))
+                .evaluate_call_any(&["Bash", "shell"], &json!({}), std::path::Path::new("."))
                 .is_some()
         );
     }
@@ -242,7 +303,7 @@ mod tests {
         // "Bash" and "shell" are both accepted names for the same call;
         // the last matching rule wins.
         assert_eq!(
-            engine.evaluate_call_any(&["Bash", "shell"], &json!({}), &std::path::Path::new(".")),
+            engine.evaluate_call_any(&["Bash", "shell"], &json!({}), std::path::Path::new(".")),
             Some(RuleDecision::Deny)
         );
     }
@@ -257,7 +318,7 @@ mod tests {
             engine.evaluate_call(
                 "Bash",
                 &json!({"command": "git status"}),
-                &std::path::Path::new(".")
+                std::path::Path::new(".")
             ),
             Some(RuleDecision::Allow)
         );
@@ -271,7 +332,7 @@ mod tests {
             engine.evaluate_call(
                 "Bash",
                 &json!({"command": "rm -rf /"}),
-                &std::path::Path::new(".")
+                std::path::Path::new(".")
             ),
             None
         );
@@ -281,7 +342,7 @@ mod tests {
     fn command_prefix_does_not_match_without_command_key() {
         let mut engine = PermissionEngine::new();
         engine.add_rule(PermissionRule::allow_tool("Bash").command_prefix("ls "));
-        assert_eq!(engine.evaluate_call("Bash", &json!({}), &std::path::Path::new(".")), None);
+        assert_eq!(engine.evaluate_call("Bash", &json!({}), std::path::Path::new(".")), None);
     }
 
     // --- cwd_prefix ---
@@ -293,7 +354,7 @@ mod tests {
             PermissionRule::allow_tool("Write").cwd_prefix(std::path::PathBuf::from("/safe")),
         );
         assert_eq!(
-            engine.evaluate_call("Write", &json!({}), &std::path::Path::new("/safe/sub/dir")),
+            engine.evaluate_call("Write", &json!({}), std::path::Path::new("/safe/sub/dir")),
             Some(RuleDecision::Allow)
         );
     }
@@ -305,7 +366,7 @@ mod tests {
             PermissionRule::allow_tool("Write").cwd_prefix(std::path::PathBuf::from("/safe")),
         );
         assert_eq!(
-            engine.evaluate_call("Write", &json!({}), &std::path::Path::new("/unsafe")),
+            engine.evaluate_call("Write", &json!({}), std::path::Path::new("/unsafe")),
             None
         );
     }
@@ -325,7 +386,7 @@ mod tests {
             engine.evaluate_call(
                 "Bash",
                 &json!({"command": "rm file"}),
-                &std::path::Path::new("/tmp")
+                std::path::Path::new("/tmp")
             ),
             None
         );
@@ -334,7 +395,7 @@ mod tests {
             engine.evaluate_call(
                 "Bash",
                 &json!({"command": "ls"}),
-                &std::path::Path::new("/protected/dir")
+                std::path::Path::new("/protected/dir")
             ),
             None
         );
@@ -343,7 +404,72 @@ mod tests {
             engine.evaluate_call(
                 "Bash",
                 &json!({"command": "rm file"}),
-                &std::path::Path::new("/protected/dir")
+                std::path::Path::new("/protected/dir")
+            ),
+            Some(RuleDecision::Deny)
+        );
+    }
+
+    // --- evaluate_shell_call ---
+
+    #[test]
+    fn shell_call_matches_extracted_prefix() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::allow_tool("Bash").command_prefix("git status"));
+        assert_eq!(
+            engine.evaluate_shell_call(
+                &["Bash"],
+                "git status --short",
+                &json!({"command": "git status --short"}),
+                std::path::Path::new(".")
+            ),
+            Some(RuleDecision::Allow)
+        );
+    }
+
+    #[test]
+    fn shell_call_strips_redirects_for_prefix() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::allow_tool("Bash").command_prefix("git status"));
+        assert_eq!(
+            engine.evaluate_shell_call(
+                &["Bash"],
+                "git status 2>&1",
+                &json!({"command": "git status 2>&1"}),
+                std::path::Path::new(".")
+            ),
+            Some(RuleDecision::Allow)
+        );
+    }
+
+    #[test]
+    fn shell_call_rejects_injection_for_prefix_rules() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::allow_tool("Bash").command_prefix("git status"));
+        // A command with a compound operator cannot be safely prefixed; the
+        // allow-prefix rule must not match.
+        assert_eq!(
+            engine.evaluate_shell_call(
+                &["Bash"],
+                "git status; rm -rf /",
+                &json!({"command": "git status; rm -rf /"}),
+                std::path::Path::new(".")
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn shell_call_general_tool_rule_still_applies_to_injection() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::allow_tool("Bash").command_prefix("git status"));
+        engine.add_rule(PermissionRule::deny_tool("Bash"));
+        assert_eq!(
+            engine.evaluate_shell_call(
+                &["Bash"],
+                "git status; rm -rf /",
+                &json!({"command": "git status; rm -rf /"}),
+                std::path::Path::new(".")
             ),
             Some(RuleDecision::Deny)
         );

@@ -12,7 +12,8 @@ use tokio::time::{Duration, timeout};
 use crate::error::AgentError;
 use crate::tool::{PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput};
 
-use super::{is_obviously_read_only_command, optional_usize_any, required_string};
+use super::{optional_usize_any, required_string};
+use crate::bash_security::{CommandSafety, analyze as analyze_command_safety};
 
 /// Built-in shell tool. Spawns `sh -c <command>` inside the workspace.
 pub struct ShellTool;
@@ -49,12 +50,11 @@ impl Tool for ShellTool {
         _context: &ToolContext,
     ) -> Result<PermissionDecision, AgentError> {
         let command = required_string(arguments, "command")?;
-        if is_obviously_read_only_command(command) {
-            Ok(PermissionDecision::Allow)
-        } else {
-            Ok(PermissionDecision::Ask {
-                reason: "shell command may mutate state".into(),
-            })
+        match analyze_command_safety(command) {
+            CommandSafety::Safe => Ok(PermissionDecision::Allow),
+            CommandSafety::NeedsReview { reason } => Ok(PermissionDecision::Ask {
+                reason: format!("shell command needs review: {reason}"),
+            }),
         }
     }
 

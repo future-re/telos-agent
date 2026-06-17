@@ -44,9 +44,26 @@ impl JsonlStorage {
     }
 
     /// Path on disk for the given session ID.
-    fn path(&self, session_id: &str) -> PathBuf {
-        self.dir.join(format!("{session_id}.jsonl"))
+    fn path(&self, session_id: &str) -> Result<PathBuf, AgentError> {
+        validate_session_id(session_id)?;
+        Ok(self.dir.join(format!("{session_id}.jsonl")))
     }
+}
+
+/// Reject session IDs that could escape the storage directory.
+fn validate_session_id(session_id: &str) -> Result<(), AgentError> {
+    if session_id.is_empty() {
+        return Err(AgentError::Config("session_id cannot be empty".into()));
+    }
+    if !session_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(AgentError::Config(format!(
+            "session_id contains invalid characters: {session_id}"
+        )));
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -59,13 +76,15 @@ impl Storage for JsonlStorage {
         tokio::fs::create_dir_all(&self.dir)
             .await
             .map_err(|e| AgentError::Config(format!("failed to create storage directory: {e}")))?;
-        let path = self.path(session_id);
-        // Truncate-and-rewrite — snapshots fully replace the prior log.
+        let path = self.path(session_id)?;
+        // Write to a temporary file first, then atomically rename to the target
+        // on the same filesystem. A crash mid-write leaves the original intact.
+        let tmp_path = path.with_extension("jsonl.tmp");
         let file = OpenOptions::new()
             .create(true)
             .truncate(true)
             .write(true)
-            .open(&path)
+            .open(&tmp_path)
             .await
             .map_err(|e| AgentError::Config(format!("storage open failed: {e}")))?;
 
@@ -86,6 +105,10 @@ impl Storage for JsonlStorage {
             .flush()
             .await
             .map_err(|e| AgentError::Config(format!("storage flush failed: {e}")))?;
+        // Atomically rename temp -> target (same-filesystem guarantee on Linux).
+        tokio::fs::rename(&tmp_path, &path)
+            .await
+            .map_err(|e| AgentError::Config(format!("storage rename failed: {e}")))?;
         Ok(())
     }
 
@@ -93,7 +116,7 @@ impl Storage for JsonlStorage {
         tokio::fs::create_dir_all(&self.dir)
             .await
             .map_err(|e| AgentError::Config(format!("failed to create storage directory: {e}")))?;
-        let path = self.path(session_id);
+        let path = self.path(session_id)?;
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -122,7 +145,7 @@ impl Storage for JsonlStorage {
     }
 
     async fn load(&self, session_id: &str) -> Result<Vec<Message>, AgentError> {
-        let path = self.path(session_id);
+        let path = self.path(session_id)?;
         if !path.exists() {
             // Unknown session — treat as empty rather than an error so resume() can fall back.
             return Ok(Vec::new());
@@ -247,5 +270,20 @@ mod tests {
         storage.append("x", &[Message::user("more")]).await.unwrap();
         let loaded2 = storage.load("x").await.unwrap();
         assert!(loaded2.is_empty());
+    }
+
+    #[tokio::test]
+    async fn jsonl_rejects_path_traversal_session_id() {
+        let dir = std::env::temp_dir().join("tiny_agent_test_storage_path_traversal");
+        let _ = std::fs::remove_dir_all(&dir);
+        let storage = JsonlStorage::new(&dir).unwrap();
+
+        let result = storage.save_snapshot("../../../etc/evil", &[Message::user("x")]).await;
+        assert!(matches!(result, Err(AgentError::Config(_))));
+
+        let result = storage.load("dir/sub").await;
+        assert!(matches!(result, Err(AgentError::Config(_))));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

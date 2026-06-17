@@ -121,4 +121,44 @@ impl SessionMetrics {
     pub(crate) fn add_retry(&self) {
         self.inner.retry_count.fetch_add(1, Ordering::Relaxed);
     }
+
+    // -- Checkpoint / restore (used by the runtime to roll back failed turns) --
+
+    /// Snapshot current counter values for later restore.
+    pub(crate) fn checkpoint(&self) -> MetricsCheckpoint {
+        MetricsCheckpoint {
+            total_input_tokens: self.inner.total_input_tokens.load(Ordering::Relaxed),
+            total_output_tokens: self.inner.total_output_tokens.load(Ordering::Relaxed),
+            total_tool_calls: self.inner.total_tool_calls.load(Ordering::Relaxed),
+            total_tool_errors: self.inner.total_tool_errors.load(Ordering::Relaxed),
+            total_iterations: self.inner.total_iterations.load(Ordering::Relaxed),
+            compaction_count: self.inner.compaction_count.load(Ordering::Relaxed),
+            turn_count: self.inner.turn_count.load(Ordering::Relaxed),
+            retry_count: self.inner.retry_count.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Restore counters to previously snapshotted values.
+    pub(crate) fn restore(&self, cp: &MetricsCheckpoint) {
+        self.inner.total_input_tokens.store(cp.total_input_tokens, Ordering::Relaxed);
+        self.inner.total_output_tokens.store(cp.total_output_tokens, Ordering::Relaxed);
+        self.inner.total_tool_calls.store(cp.total_tool_calls, Ordering::Relaxed);
+        self.inner.total_tool_errors.store(cp.total_tool_errors, Ordering::Relaxed);
+        self.inner.total_iterations.store(cp.total_iterations, Ordering::Relaxed);
+        self.inner.compaction_count.store(cp.compaction_count, Ordering::Relaxed);
+        self.inner.turn_count.store(cp.turn_count, Ordering::Relaxed);
+        self.inner.retry_count.store(cp.retry_count, Ordering::Relaxed);
+    }
+}
+
+/// Opaque snapshot of [`SessionMetrics`] counter values.
+pub(crate) struct MetricsCheckpoint {
+    total_input_tokens: usize,
+    total_output_tokens: usize,
+    total_tool_calls: usize,
+    total_tool_errors: usize,
+    total_iterations: usize,
+    compaction_count: usize,
+    turn_count: usize,
+    retry_count: usize,
 }

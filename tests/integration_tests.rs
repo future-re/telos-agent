@@ -90,7 +90,7 @@ fn multi_step_tool_loop_completes() {
         tools.register(AddTool);
 
         let mut session = AgentSession::new(AgentConfig {
-            system_prompt: Some("You are a coding agent.".into()),
+            base_system_prompt: Some("You are a coding agent.".into()),
             max_iterations: 4,
             ..AgentConfig::default()
         })
@@ -454,7 +454,7 @@ fn session_save_and_resume_works() {
         }]);
         let tools = ToolRegistry::new();
         let mut session = AgentSession::new(AgentConfig {
-            system_prompt: Some("sys".into()),
+            base_system_prompt: Some("sys".into()),
             storage: Some(storage.clone()),
             ..AgentConfig::default()
         })
@@ -467,7 +467,7 @@ fn session_save_and_resume_works() {
         let resumed = AgentSession::resume(
             session_id,
             AgentConfig {
-                system_prompt: Some("sys".into()),
+                base_system_prompt: Some("sys".into()),
                 storage: Some(storage.clone()),
                 ..AgentConfig::default()
             },
@@ -1094,7 +1094,7 @@ fn token_budget_triggers_auto_compaction() {
         ]);
         let tools = ToolRegistry::new();
         let mut session = AgentSession::new(AgentConfig {
-            system_prompt: Some("sys".into()),
+            base_system_prompt: Some("sys".into()),
             compaction: Some(Arc::new(SummaryCompaction { max_tokens: 50, keep_recent: 0 })),
             token_budget: Some(TokenBudget { max_tokens: 1_000, compact_at_tokens: 10 }),
             ..AgentConfig::default()
@@ -1676,4 +1676,35 @@ async fn builtin_prompt_sections_render_without_error() {
     assert!(result.contains("tiny-agent"));
     assert!(result.contains("Today's date"));
     assert!(result.contains("Working directory"));
+}
+
+#[test]
+fn prompt_assembly_integration_with_session() {
+    use async_trait::async_trait;
+    use tiny_agent_core::prompt::{PromptAssembly, PromptSection, PromptStability};
+
+    struct TestSection;
+    #[async_trait]
+    impl PromptSection for TestSection {
+        fn name(&self) -> &str {
+            "test"
+        }
+        fn stability(&self) -> PromptStability {
+            PromptStability::Static
+        }
+        async fn render(&self, _ctx: &()) -> String {
+            "TEST_SECTION_CONTENT".into()
+        }
+    }
+
+    let mut assembly = PromptAssembly::new();
+    assembly.add_static(TestSection);
+
+    let config = AgentConfig {
+        prompt_assembly: Some(std::sync::Arc::new(assembly)),
+        ..AgentConfig::default()
+    };
+
+    let session = AgentSession::new(config).unwrap();
+    assert!(session.messages().is_empty()); // assembly renders at turn time
 }

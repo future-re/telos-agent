@@ -21,8 +21,12 @@ use crate::storage::Storage;
 /// are public so callers don't need a builder for simple cases.
 #[derive(Clone)]
 pub struct AgentConfig {
-    /// Optional system prompt prepended to every conversation.
-    pub system_prompt: Option<String>,
+    /// Optional base instruction appended to the identity section of the
+    /// system prompt. For full control, use `prompt_assembly` instead.
+    pub base_system_prompt: Option<String>,
+    /// Optional pre-built prompt assembly. When set, the runtime uses this
+    /// instead of constructing the prompt from `base_system_prompt` alone.
+    pub prompt_assembly: Option<std::sync::Arc<crate::prompt::PromptAssembly>>,
     /// Maximum number of model ⇄ tool round-trips per turn before the loop aborts
     /// with [`AgentError::MaxIterations`](crate::AgentError::MaxIterations).
     pub max_iterations: usize,
@@ -71,7 +75,8 @@ impl std::fmt::Debug for AgentConfig {
         // for debugging. Other fields are considered non-sensitive.
         let env_keys: Vec<&String> = self.env.keys().collect();
         f.debug_struct("AgentConfig")
-            .field("system_prompt", &self.system_prompt)
+            .field("base_system_prompt", &self.base_system_prompt)
+            .field("prompt_assembly", &self.prompt_assembly.as_ref().map(|_| "<set>"))
             .field("max_iterations", &self.max_iterations)
             .field("cwd", &self.cwd)
             .field("env", &format!("{} keys: [REDACTED]", env_keys.len()))
@@ -95,7 +100,8 @@ impl std::fmt::Debug for AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            system_prompt: None,
+            base_system_prompt: None,
+            prompt_assembly: None,
             max_iterations: 8,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             // Start with a minimal environment for shell tools. Callers that need

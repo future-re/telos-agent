@@ -45,7 +45,7 @@ async fn main() -> Result<(), AgentError> {
     tools.register(EchoJsonTool);
 
     let mut session = AgentSession::new(AgentConfig {
-        system_prompt: Some("You are a concise coding agent.".into()),
+        base_system_prompt: Some("You are a concise coding agent.".into()),
         max_iterations: 6,
         ..AgentConfig::default()
     })?;

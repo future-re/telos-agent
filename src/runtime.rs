@@ -131,13 +131,18 @@ enum CompactionResult {
 }
 
 impl AgentSession {
-    /// Start a fresh session. If `config.system_prompt` is set, it is appended
-    /// as the first message.
+    /// Start a fresh session. System prompt is constructed at turn time via
+    /// PromptAssembly. If no assembly is provided, use `base_system_prompt`
+    /// as a simple fallback.
     pub fn new(config: AgentConfig) -> Result<Self, AgentError> {
         config.validate()?;
         let mut messages = Vec::new();
-        if let Some(system_prompt) = config.system_prompt.as_ref() {
-            messages.push(Message::system(system_prompt.clone()));
+        // System prompt is now constructed at turn time via PromptAssembly.
+        // If no assembly is provided, use base_system_prompt as simple fallback.
+        if config.prompt_assembly.is_none()
+            && let Some(sp) = config.base_system_prompt.as_ref()
+        {
+            messages.push(Message::system(sp.clone()));
         }
 
         Ok(Self {
@@ -207,24 +212,28 @@ impl AgentSession {
         config.validate()?;
         let session_id = session_id.into();
         let mut messages = storage.load(&session_id).await?;
-        if messages.is_empty() {
-            if let Some(system_prompt) = config.system_prompt.as_ref() {
-                messages.push(Message::system(system_prompt.clone()));
-            }
-        } else {
-            // Ensure the loaded system prompt matches config
-            let loaded_system = messages
-                .first()
-                .filter(|m| m.role == crate::message::Role::System)
-                .map(|m| m.text_content());
-            if let Some(config_system) = &config.system_prompt
-                && loaded_system.as_deref() != Some(config_system.as_str())
-            {
-                // Replace system prompt if config differs
-                if messages.first().map(|m| m.role) == Some(crate::message::Role::System) {
-                    messages[0] = Message::system(config_system.clone());
-                } else {
-                    messages.insert(0, Message::system(config_system.clone()));
+        // System prompt is now constructed at turn time via PromptAssembly.
+        // If no assembly is provided, use base_system_prompt as simple fallback.
+        if config.prompt_assembly.is_none() {
+            if messages.is_empty() {
+                if let Some(sp) = config.base_system_prompt.as_ref() {
+                    messages.push(Message::system(sp.clone()));
+                }
+            } else {
+                // Ensure the loaded system prompt matches config
+                let loaded_system = messages
+                    .first()
+                    .filter(|m| m.role == crate::message::Role::System)
+                    .map(|m| m.text_content());
+                if let Some(config_system) = &config.base_system_prompt
+                    && loaded_system.as_deref() != Some(config_system.as_str())
+                {
+                    // Replace system prompt if config differs
+                    if messages.first().map(|m| m.role) == Some(crate::message::Role::System) {
+                        messages[0] = Message::system(config_system.clone());
+                    } else {
+                        messages.insert(0, Message::system(config_system.clone()));
+                    }
                 }
             }
         }
@@ -331,8 +340,14 @@ impl AgentSession {
                 return Err(AgentError::Cancelled);
             }
 
+            let system_prompt = if let Some(assembly) = &self.config.prompt_assembly {
+                Some(assembly.build().await)
+            } else {
+                self.config.base_system_prompt.clone()
+            };
+
             let request = CompletionRequest {
-                system_prompt: self.config.system_prompt.clone(),
+                system_prompt,
                 messages: self.messages.clone(),
                 tools: tool_definitions.to_vec(),
             };

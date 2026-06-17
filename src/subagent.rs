@@ -91,7 +91,7 @@ impl Tool for SubagentTool {
         config.storage = None;
         if let Some(system_prompt) = arguments.get("system_prompt").and_then(|value| value.as_str())
         {
-            config.system_prompt = Some(system_prompt.to_string());
+            config.base_system_prompt = Some(system_prompt.to_string());
         }
         if let Some(max_iterations) =
             arguments.get("max_iterations").and_then(|value| value.as_u64())

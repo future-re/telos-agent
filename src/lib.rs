@@ -24,6 +24,7 @@ pub mod config;
 pub mod error;
 pub mod executor;
 pub mod hooks;
+pub mod memory;
 pub mod message;
 pub mod metrics;
 pub mod mock;
@@ -53,6 +54,8 @@ pub use executor::{ToolExecutionEvent, ToolExecutionOutput, execute_tool_calls};
 pub use hooks::{Hook, HookContext, HookPhase, HookRegistry};
 // Message model — the lingua franca between session, provider, and tools.
 pub use message::{ContentBlock, Message, Role, TextBlock, ThinkingBlock, ToolCall, ToolResult};
+// Memory — persistent cross-session agent memory.
+pub use memory::{MemoryCategory, MemoryEntry, MemoryFormat, MemoryStatus};
 // Metrics — session-level counters accumulated by the runtime.
 pub use metrics::SessionMetrics;
 // Test helper — pre-canned [`ModelProvider`] for unit tests.

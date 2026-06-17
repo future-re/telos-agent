@@ -222,3 +222,240 @@ impl SkillLoader {
 - [ ] **Step 3: Fix all tests** referencing system_prompt → base_system_prompt
 - [ ] **Step 4: Integration test** — prompt_assembly_integration_with_session
 - [ ] **Step 5: Run all tests, commit**
+
+---
+
+## Phase 1 — Sprint 3: Memory System
+
+### Task 8: MemoryEntry type and format parser
+
+**Files:**
+- Create: `src/memory/mod.rs`
+- Create: `src/memory/format.rs`
+- Modify: `src/lib.rs` — add `pub mod memory;`
+
+**Interfaces:**
+- Produces: `MemoryCategory { Script, Command, Pattern, Fact, Workflow }`, `MemoryStatus { Working, NeedsFix, Deprecated }`, `MemoryEntry { name, description, category, tags, created, updated, status, times_used, confidence, related, source_session, body }`, `MemoryFormat::parse(content: &str) -> Option<MemoryEntry>`, `MemoryFormat::serialize(entry: &MemoryEntry) -> String`
+
+**Code:**
+
+Write `src/memory/mod.rs`:
+```rust
+pub mod format;
+pub use format::{MemoryCategory, MemoryEntry, MemoryFormat, MemoryStatus};
+```
+
+Write `src/memory/format.rs`:
+```rust
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryCategory { Script, Command, Pattern, Fact, Workflow }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryStatus { Working, NeedsFix, Deprecated }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryEntry {
+    pub name: String,
+    pub description: String,
+    pub category: MemoryCategory,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub created: String,
+    pub updated: String,
+    #[serde(default)]
+    pub status: MemoryStatus,
+    #[serde(default)]
+    pub times_used: u32,
+    #[serde(default)]
+    pub confidence: Option<String>,
+    #[serde(default)]
+    pub related: Vec<String>,
+    #[serde(default)]
+    pub source_session: Option<String>,
+    #[serde(skip)]
+    pub body: String,
+}
+
+pub struct MemoryFormat;
+
+impl MemoryFormat {
+    pub fn parse(content: &str) -> Option<MemoryEntry> {
+        let content = content.trim();
+        let rest = content.strip_prefix("---")?;
+        let (frontmatter, body) = rest.split_once("\n---")?;
+        let body = body.trim().to_string();
+        let mut entry: MemoryEntry = serde_yaml::from_str(frontmatter).ok()?;
+        entry.body = body;
+        Some(entry)
+    }
+
+    pub fn serialize(entry: &MemoryEntry) -> String {
+        let frontmatter = serde_yaml::to_string(entry).unwrap_or_default();
+        format!("---\n{}---\n\n{}", frontmatter, entry.body)
+    }
+}
+```
+
+Update `src/lib.rs`: add `pub mod memory;` and `pub use memory::...;`
+
+**Test:** Parse a sample memory file, verify all fields round-trip through serialize→parse.
+
+- [ ] **Step 1: Write files, test, commit**
+
+---
+
+### Task 9: MemoryStore with index and query
+
+**Files:**
+- Create: `src/memory/index.rs`
+- Create: `src/memory/query.rs`
+- Modify: `src/memory/mod.rs`
+
+**Interfaces:**
+- Produces: `MemoryStore::new(root: PathBuf)`, `write(entry: MemoryEntry)`, `read(name: &str) -> Option<MemoryEntry>`, `list() -> Vec<String>`, `search(query: &str) -> Vec<MemoryEntry>`, `update_status(name: &str, status: MemoryStatus)`, `delete(name: &str)` (moves to _archived/)
+- MEMORY.md index format: `- [name](file.md) — description`
+
+**Code:**
+
+Write `src/memory/index.rs`:
+```rust
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use crate::memory::format::{MemoryEntry, MemoryFormat};
+
+pub struct MemoryStore {
+    root: PathBuf,
+    index: HashMap<String, PathBuf>, // name → relative path
+}
+
+impl MemoryStore {
+    pub fn new(root: PathBuf) -> Self {
+        std::fs::create_dir_all(&root).ok();
+        let mut store = Self { root, index: HashMap::new() };
+        store.rebuild_index();
+        store
+    }
+
+    pub fn rebuild_index(&mut self) {
+        self.index.clear();
+        if let Ok(entries) = std::fs::read_dir(&self.root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map_or(true, |e| e != "md") { continue; }
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Some(mem) = MemoryFormat::parse(&content) {
+                        self.index.insert(mem.name.clone(), path.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn write(&mut self, entry: MemoryEntry) -> std::io::Result<()> {
+        let filename = sanitize_filename(&entry.name);
+        // Determine subdirectory from category
+        let subdir = match entry.category {
+            MemoryCategory::Script => "scripts",
+            MemoryCategory::Command => "commands",
+            MemoryCategory::Pattern => "patterns",
+            MemoryCategory::Fact => "facts",
+            MemoryCategory::Workflow => "workflows",
+        };
+        let dir = self.root.join(subdir);
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join(format!("{}.md", filename));
+        let content = MemoryFormat::serialize(&entry);
+        std::fs::write(&path, content)?;
+        self.index.insert(entry.name.clone(), path);
+        self.write_index_md()?;
+        Ok(())
+    }
+
+    pub fn read(&self, name: &str) -> Option<MemoryEntry> {
+        let path = self.index.get(name)?;
+        let content = std::fs::read_to_string(path).ok()?;
+        MemoryFormat::parse(&content)
+    }
+
+    pub fn list(&self) -> Vec<&String> {
+        self.index.keys().collect()
+    }
+
+    pub fn search(&self, query: &str) -> Vec<MemoryEntry> {
+        let query_lower = query.to_lowercase();
+        self.index.keys()
+            .filter_map(|name| self.read(name))
+            .filter(|entry| {
+                entry.name.to_lowercase().contains(&query_lower)
+                || entry.description.to_lowercase().contains(&query_lower)
+                || entry.tags.iter().any(|t| t.to_lowercase().contains(&query_lower))
+                || entry.body.to_lowercase().contains(&query_lower)
+            })
+            .collect()
+    }
+
+    fn write_index_md(&self) -> std::io::Result<()> {
+        let mut lines = Vec::new();
+        for name in self.index.keys() {
+            if let Some(entry) = self.read(name) {
+                let filename = sanitize_filename(name);
+                let subdir = match entry.category {
+                    MemoryCategory::Script => "scripts",
+                    MemoryCategory::Command => "commands",
+                    MemoryCategory::Pattern => "patterns",
+                    MemoryCategory::Fact => "facts",
+                    MemoryCategory::Workflow => "workflows",
+                };
+                lines.push(format!("- [{}]({}/{}.md) — {}", entry.name, subdir, filename, entry.description));
+            }
+        }
+        std::fs::write(self.root.join("MEMORY.md"), lines.join("\n"))
+    }
+}
+
+fn sanitize_filename(name: &str) -> String {
+    name.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).collect::<String>().to_lowercase()
+}
+```
+
+**Test:** Write 2 entries, list them, search by tag, round-trip read.
+
+- [ ] **Step 1: Write files, test, commit**
+
+---
+
+### Task 10: Memory tools (Read/Write/Grep/Edit/Status)
+
+**Files:**
+- Create: `src/memory/tool.rs`
+- Modify: `src/memory/mod.rs`
+- Modify: `src/lib.rs`
+- Modify: `src/tools/mod.rs`
+
+**Interfaces:**
+- Produces: `MemoryReadTool`, `MemoryWriteTool`, `MemoryGrepTool`, `MemoryEditTool`, `MemoryStatusTool` — all implement Tool trait, all return PermissionDecision::Allow
+- Each wraps `Arc<Mutex<MemoryStore>>`
+
+**Test:** Write→Read roundtrip via tools, Status update, Grep search.
+
+- [ ] **Step 1: Write files, test, commit**
+
+---
+
+### Task 11: Memory injection into prompt
+
+**Files:**
+- Create: `src/prompt/builtins/memory.rs` or add to `builtins.rs`
+- Modify: `src/prompt/builtins.rs`
+
+**Interfaces:**
+- Produces: `MemorySection::new(store: Arc<Mutex<MemoryStore>>)` — renders relevant memories based on session context
+- Renders "## Relevant Memories" with top 5 most-used entries
+
+**Test:** Memory section renders with entries, empty when no memories.
+
+- [ ] **Step 1: Write, test, commit**

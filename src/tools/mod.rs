@@ -6,6 +6,7 @@
 
 use crate::tool::ToolRegistry;
 
+mod ask_user_question;
 mod file_edit;
 mod file_read;
 mod file_write;
@@ -14,7 +15,10 @@ mod grep;
 mod shared;
 mod shell;
 mod skill;
+mod web_fetch;
+mod web_search;
 
+pub use ask_user_question::AskUserQuestionTool;
 pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
 pub use file_write::FileWriteTool;
@@ -22,6 +26,8 @@ pub use glob::GlobTool;
 pub use grep::GrepTool;
 pub use shell::ShellTool;
 pub use skill::SkillTool;
+pub use web_fetch::WebFetchTool;
+pub use web_search::WebSearchTool;
 
 /// Register every built-in tool with the supplied registry.
 pub fn register_core_tools(registry: &mut ToolRegistry) {
@@ -31,6 +37,8 @@ pub fn register_core_tools(registry: &mut ToolRegistry) {
     registry.register(FileEditTool);
     registry.register(GlobTool);
     registry.register(GrepTool);
+    registry.register(WebFetchTool::new());
+    registry.register(WebSearchTool);
 }
 
 // Re-export shared helpers that other crate modules use directly.

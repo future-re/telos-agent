@@ -90,8 +90,8 @@ pub use tool::{
     InterruptBehavior, PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput,
     ToolProgress, ToolRegistry,
 };
-// Built-in tools — filesystem, shell, search.
+// Built-in tools — filesystem, shell, search, web, user interaction.
 pub use tools::{
-    FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ShellTool, SkillTool,
-    register_core_tools,
+    AskUserQuestionTool, FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ShellTool,
+    SkillTool, WebFetchTool, WebSearchTool, register_core_tools,
 };

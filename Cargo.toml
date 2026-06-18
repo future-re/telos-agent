@@ -1,10 +1,14 @@
+[workspace]
+members = [".", "cli"]
+resolver = "3"
+
 [package]
 name = "telos_agent"
 version = "0.1.0"
 edition = "2024"
 description = "telos — an intent-driven agent runtime. Loop: intent → execute → think → complete"
 license = "MIT"
-repository = "https://github.com/future-re/telos-agent"
+repository = "https://github.com/future-re/tiny_agent_core"
 readme = "README.md"
 keywords = ["llm", "agent", "ai", "tool-use"]
 categories = ["development-tools", "api-bindings", "asynchronous"]

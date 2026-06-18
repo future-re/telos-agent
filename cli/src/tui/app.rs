@@ -69,6 +69,8 @@ pub struct App {
     pub pending_approvals: VecDeque<PendingApproval>,
     /// Whether a background turn is currently running.
     pub turn_active: bool,
+    /// Saved base status text — restored after each turn.
+    base_status: String,
     /// Shared cancellation flag — set by Ctrl+C and read by the background task.
     cancel_flag: Arc<AtomicBool>,
     /// Auto-approve mode — toggle with Shift+Tab.
@@ -160,7 +162,8 @@ impl App {
         Ok(Self {
             mode: Mode::Normal,
             should_quit: false,
-            status_text,
+            status_text: status_text.clone(),
+            base_status: status_text,
             messages: Vec::new(),
             chat: ChatPanel::new(),
             input: InputPanel::new(),
@@ -191,7 +194,9 @@ impl App {
                     }
                     (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                         self.cancel_flag.store(true, Ordering::Relaxed);
-                        self.status_text = "telos · cancelling...".to_string();
+                        self.turn_active = false;
+                        self.turn_started = None;
+                        self.status_text = self.base_status.clone();
                         return Ok(());
                     }
                     (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
@@ -297,6 +302,7 @@ impl App {
                 self.turn_started = None;
                 self.turn_input_tokens = 0;
                 self.turn_output_tokens = 0;
+                self.status_text = self.base_status.clone();
             }
             Event::Mouse(_) => {}
         }
@@ -345,6 +351,7 @@ impl App {
     /// Send a user prompt to the background agent task.
     pub fn send_prompt(&mut self, prompt: String) {
         self.messages.push(UiMessage::User(prompt.clone()));
+        self.base_status = self.status_text.clone();
         let _ = self.turn_tx.send(prompt);
         self.mode = Mode::Streaming;
         self.turn_active = true;

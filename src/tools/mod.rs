@@ -20,10 +20,10 @@ mod memory;
 mod shared;
 mod shell;
 mod skill;
+mod tasks;
 mod web_fetch;
 mod web_search;
 
-pub use crate::tasks::tool::{TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool};
 pub use ask_user_question::AskUserQuestionTool;
 pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
@@ -35,6 +35,7 @@ pub use memory::{
 };
 pub use shell::ShellTool;
 pub use skill::SkillTool;
+pub use tasks::{TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool};
 pub use web_fetch::WebFetchTool;
 pub use web_search::WebSearchTool;
 

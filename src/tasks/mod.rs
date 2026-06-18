@@ -1,11 +1,13 @@
 mod persistence;
 pub mod task;
-pub mod tool;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 pub use task::{Task, TaskStatus};
-pub use tool::{TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool};
+
+// Compatibility re-export: the task tool implementations now live in
+// `crate::tools` so they live next to the other built-in tools.
+pub use crate::tools::{TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool};
 
 pub struct TaskManager {
     tasks: Mutex<HashMap<String, Task>>,

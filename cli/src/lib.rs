@@ -3,6 +3,7 @@ pub mod config;
 pub mod project;
 pub mod runner;
 pub mod terminal;
+pub mod tui;
 
 pub mod approval;
 pub mod repl;

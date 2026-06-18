@@ -70,36 +70,6 @@ pub async fn run_chat(
     crate::tui::run(config, provider, tools, status, project_root.as_deref()).await
 }
 
-/// Represents a parsed slash command or chat input.
-#[derive(Debug, PartialEq)]
-pub enum ReplCommand {
-    Exit,
-    Reset,
-    Tools,
-    Clear,
-    Help,
-    Add(String),
-    Drop(String),
-    Model(String),
-    Chat(String),
-}
-
-/// Parse a line of user input into a `ReplCommand`.
-pub fn parse_repl_command(input: &str) -> ReplCommand {
-    let input = input.trim();
-    match input {
-        "/exit" | "/quit" => ReplCommand::Exit,
-        "/reset" => ReplCommand::Reset,
-        "/tools" => ReplCommand::Tools,
-        "/clear" => ReplCommand::Clear,
-        "/help" => ReplCommand::Help,
-        s if s.starts_with("/add ") => ReplCommand::Add(s[5..].trim().to_string()),
-        s if s.starts_with("/drop ") => ReplCommand::Drop(s[6..].trim().to_string()),
-        s if s.starts_with("/model ") => ReplCommand::Model(s[7..].trim().to_string()),
-        _ => ReplCommand::Chat(input.to_string()),
-    }
-}
-
 async fn run_with_provider<P: telos_agent::ModelProvider>(
     session: &mut AgentSession,
     provider: &P,

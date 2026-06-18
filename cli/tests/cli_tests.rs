@@ -116,42 +116,6 @@ fn detects_project_root_via_telos_toml() {
     assert_eq!(found, root.canonicalize().unwrap());
 }
 
-// ── Task 4: Expanded slash commands ─────────────────────────────────────────
-
-use telos_cli::runner::{ReplCommand, parse_repl_command};
-
-#[test]
-fn parse_add_command() {
-    assert!(matches!(parse_repl_command("/add src/*.rs"), ReplCommand::Add(p) if p == "src/*.rs"));
-}
-
-#[test]
-fn parse_drop_command() {
-    assert!(
-        matches!(parse_repl_command("/drop src/old.rs"), ReplCommand::Drop(p) if p == "src/old.rs")
-    );
-}
-
-#[test]
-fn parse_clear_command() {
-    assert!(matches!(parse_repl_command("/clear"), ReplCommand::Clear));
-}
-
-#[test]
-fn parse_help_command() {
-    assert!(matches!(parse_repl_command("/help"), ReplCommand::Help));
-}
-
-#[test]
-fn parse_model_command() {
-    assert!(matches!(parse_repl_command("/model gpt-5"), ReplCommand::Model(m) if m == "gpt-5"));
-}
-
-#[test]
-fn parse_chat_fallback() {
-    assert!(matches!(parse_repl_command("plain text"), ReplCommand::Chat(t) if t == "plain text"));
-}
-
 // ── Task 5: Approval policy system ──────────────────────────────────────────
 
 use telos_cli::approval::{ApprovalPolicy, PolicyConfig};

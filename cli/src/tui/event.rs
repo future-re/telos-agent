@@ -14,6 +14,8 @@ pub enum Event {
     Turn(TurnEvent),
     /// The agent turn completed (stream ended).
     TurnComplete,
+    /// A non-recoverable error from the session or turn stream.
+    SessionError { message: String },
     /// Request to redraw (e.g. from a timer tick).
     Tick,
 }

@@ -43,6 +43,8 @@ pub enum UiMessage {
     ToolCompleted { id: String, name: String, is_error: bool },
     /// Marks the end of a turn.
     TurnComplete,
+    /// An error message (turn stream failure, session error, etc.).
+    Error(String),
 }
 
 /// Root application state for the TUI.
@@ -97,8 +99,15 @@ impl App {
             let mut config = config;
             config.approval_handler = approval_handler;
 
-            let mut session =
-                telos_agent::AgentSession::new(config).expect("failed to create agent session");
+            let mut session = match telos_agent::AgentSession::new(config) {
+                Ok(s) => s,
+                Err(e) => {
+                    // Surface the error so the TUI can display it.
+                    let _ = event_tx.send(Event::SessionError { message: e.to_string() });
+                    let _ = event_tx.send(Event::TurnComplete);
+                    return;
+                }
+            };
 
             while let Some(prompt) = prompt_rx.recv().await {
                 let erased = telos_agent::ErasedProvider(provider.as_ref());
@@ -109,7 +118,11 @@ impl App {
                             Ok(te) => {
                                 let _ = event_tx.send(Event::Turn(te));
                             }
-                            Err(_e) => break,
+                            Err(e) => {
+                                let _ =
+                                    event_tx.send(Event::SessionError { message: e.to_string() });
+                                break;
+                            }
                         }
                     }
                 }
@@ -227,6 +240,11 @@ impl App {
                     self.mode = Mode::Approving;
                 }
             }
+            Event::SessionError { message } => {
+                self.messages.push(UiMessage::Error(message));
+                self.mode = Mode::Normal;
+                self.turn_active = false;
+            }
             Event::Resize { .. } => {}
             Event::Turn(turn_event) => self.handle_turn_event(turn_event),
             Event::TurnComplete => {
@@ -272,6 +290,9 @@ impl App {
     /// Convert an agent `TurnEvent` into a `UiMessage`.
     fn handle_turn_event(&mut self, event: TurnEvent) {
         match event {
+            TurnEvent::TurnStarted { .. } => {
+                // User message already pushed by send_prompt — skip the duplicate.
+            }
             TurnEvent::AssistantDelta { text } => {
                 self.messages.push(UiMessage::AssistantDelta(text));
                 self.chat.scroll_to_bottom();
@@ -285,7 +306,23 @@ impl App {
             TurnEvent::ToolCompleted { tool_call_id, name, is_error } => {
                 self.messages.push(UiMessage::ToolCompleted { id: tool_call_id, name, is_error });
             }
-            // TODO: ignored intentionally while stubbing
+            TurnEvent::ToolProgress { name, message, .. } => {
+                self.status_text = format!("{}: {}", name, message);
+            }
+            TurnEvent::TurnFinished { final_text, .. } => {
+                if !final_text.is_empty() {
+                    self.messages.push(UiMessage::AssistantDelta(final_text));
+                }
+            }
+            TurnEvent::TokenBudgetExceeded { used_tokens, max_tokens } => {
+                self.messages.push(UiMessage::Error(format!(
+                    "token budget exceeded: {used_tokens}/{max_tokens}"
+                )));
+            }
+            TurnEvent::ProviderRetry { attempt, max_retries, delay_ms } => {
+                self.status_text =
+                    format!("retrying provider ({attempt}/{max_retries}, {delay_ms}ms)");
+            }
             _ => {}
         }
     }

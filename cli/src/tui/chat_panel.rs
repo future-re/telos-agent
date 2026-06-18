@@ -74,6 +74,14 @@ impl ChatPanel {
                         Span::styled(name.clone(), style),
                     ]));
                 }
+                UiMessage::Error(message) => {
+                    for line in message.lines() {
+                        lines.push(Line::from(Span::styled(
+                            format!("✗ {line}"),
+                            theme.tool_error_style(),
+                        )));
+                    }
+                }
                 UiMessage::TurnComplete => {
                     lines.push(Line::from(Span::styled(
                         "───",

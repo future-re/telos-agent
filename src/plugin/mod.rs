@@ -12,6 +12,7 @@ pub mod manifest;
 pub mod marketplace;
 pub mod registry;
 pub mod sources;
+pub mod tool_loader;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -25,6 +26,7 @@ pub use manifest::{
 pub use marketplace::{Marketplace, MarketplaceRegistry};
 pub use registry::{LoadedPlugin, PluginEntry, PluginRegistry, PluginStatus};
 pub use sources::MarketplaceSource;
+pub use tool_loader::{CommandTool, ToolPermission, ToolSpec, load_tool_spec};
 
 /// Universal plugin identifier: `name@marketplace`.
 ///

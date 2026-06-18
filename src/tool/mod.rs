@@ -126,6 +126,26 @@ pub struct ToolContext {
     pub max_file_read_bytes: usize,
 }
 
+impl ToolContext {
+    /// Create a minimal context for unit tests.
+    #[cfg(test)]
+    pub fn dummy() -> Self {
+        Self {
+            session_id: "test-session".into(),
+            turn_id: 0,
+            cwd: std::path::PathBuf::from("."),
+            env: std::collections::HashMap::new(),
+            messages: std::sync::Arc::new(Vec::new()),
+            progress: None,
+            read_file_state: std::sync::Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            timeout: None,
+            max_file_read_bytes: 50 * 1024 * 1024,
+        }
+    }
+}
+
 /// A tool that can be invoked by the agent.
 ///
 /// Implementations must provide at least [`definition`](Tool::definition) and

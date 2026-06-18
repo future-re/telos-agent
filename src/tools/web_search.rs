@@ -54,10 +54,24 @@ impl Tool for WebSearchTool {
         }
 
         let body = String::from_utf8_lossy(&output.stdout);
+
+        if is_bot_challenge(&body) {
+            return Err(AgentError::ToolExecution {
+                tool: "WebSearch".into(),
+                message: "curl returned DuckDuckGo bot challenge page; automated search is blocked"
+                    .into(),
+            });
+        }
+
         let results = parse_ddg_lite(&body);
 
         Ok(ToolOutput::json(json!({"results": results, "count": results.len()})))
     }
+}
+
+/// Detect DuckDuckGo Lite bot challenge / CAPTCHA pages.
+fn is_bot_challenge(html: &str) -> bool {
+    html.contains("anomaly-modal") || html.contains("bots use DuckDuckGo")
 }
 
 fn url_encode(s: &str) -> String {
@@ -161,4 +175,22 @@ fn extract_snippet_after_link(html: &str, link_line: &str) -> Option<String> {
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_ddg_bot_challenge_page() {
+        let challenge_html =
+            r#"<div class="anomaly-modal__title">Unfortunately, bots use DuckDuckGo too.</div>"#;
+        assert!(is_bot_challenge(challenge_html));
+    }
+
+    #[test]
+    fn normal_html_is_not_a_bot_challenge() {
+        let normal_html = r#"<a rel="nofollow" href="https://example.com">Example</a><td class="result-snippet">A snippet</td>"#;
+        assert!(!is_bot_challenge(normal_html));
+    }
 }

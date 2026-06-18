@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use telos_agent::{
     AgentConfig, AgentError, AgentSession, KimiConfig, KimiProvider, Tool, ToolContext,
     ToolDefinition, ToolOutput, ToolRegistry,
@@ -43,12 +44,14 @@ async fn main() -> Result<(), AgentError> {
 
     let mut tools = ToolRegistry::new();
     tools.register(EchoJsonTool);
+    let tools = Arc::new(tools);
 
-    let mut session = AgentSession::new(AgentConfig {
-        base_system_prompt: Some("You are a concise coding agent.".into()),
-        max_iterations: 6,
-        ..AgentConfig::default()
-    })?;
+    // Use the default modular prompt assembly (Claude Code-style sections).
+    // You can also pass `base_system_prompt` or build a custom PromptAssembly.
+    let config = AgentConfig { max_iterations: 6, ..AgentConfig::default() }
+        .with_default_prompt_assembly(Arc::clone(&tools))?;
+
+    let mut session = AgentSession::new(config)?;
 
     let result = session.run_turn(&provider, &tools, prompt).await?;
     println!("{}", result.final_message.text_content());

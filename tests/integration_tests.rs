@@ -1665,6 +1665,10 @@ async fn builtin_prompt_sections_render_without_error() {
 
     let mut assembly = PromptAssembly::new();
     assembly.add_static(IdentitySection::new(Some("Be helpful.".into())));
+    assembly.add_static(ToneStyleSection);
+    assembly.add_static(TaskGuidanceSection);
+    assembly.add_static(SafetySection);
+    assembly.add_static(ToolUsageSection);
     assembly.add_static(ToolsSection::new(std::sync::Arc::new(ToolRegistry::new())));
     assembly.add_dynamic(DateSection);
     assembly.add_dynamic(CwdSection::new(std::env::current_dir().unwrap()));
@@ -1672,8 +1676,55 @@ async fn builtin_prompt_sections_render_without_error() {
 
     let result = assembly.build().await;
     assert!(result.contains("telos-agent"));
+    assert!(result.contains("Tone and style"));
+    assert!(result.contains("Doing tasks"));
+    assert!(result.contains("Executing actions with care"));
+    assert!(result.contains("Using your tools"));
     assert!(result.contains("Today's date"));
     assert!(result.contains("Working directory"));
+}
+
+#[tokio::test]
+async fn default_coding_assembly_renders_claude_style_sections() {
+    use telos_agent::prompt::default_coding_assembly;
+    use telos_agent::tool::ToolRegistry;
+
+    let tools = std::sync::Arc::new(ToolRegistry::new());
+    let assembly = default_coding_assembly(tools, std::env::current_dir().unwrap());
+    let result = assembly.build().await;
+
+    assert!(result.contains("You are telos-agent"));
+    assert!(result.contains("IMPORTANT: Assist with authorized security testing"));
+    assert!(result.contains("# System"));
+    assert!(result.contains("# Tone and style"));
+    assert!(result.contains("# Output efficiency"));
+    assert!(result.contains("# Doing tasks"));
+    assert!(result.contains("# Executing actions with care"));
+    assert!(result.contains("# Using your tools"));
+    assert!(result.contains("Do NOT use the Bash tool to run commands"));
+    assert!(result.contains("You can call multiple tools in a single response"));
+    assert!(result.contains("Today's date"));
+    assert!(result.contains("Working directory"));
+}
+
+#[tokio::test]
+async fn agent_session_falls_back_to_default_assembly() {
+    use telos_agent::mock::MockProvider;
+    use telos_agent::provider::{CompletionResponse, StopReason};
+    use telos_agent::{Message, ToolRegistry};
+
+    let provider = MockProvider::new(vec![CompletionResponse {
+        message: Message::assistant("done"),
+        stop_reason: StopReason::EndTurn,
+        usage: None,
+    }]);
+
+    let config = AgentConfig::default();
+    let mut session = AgentSession::new(config).unwrap();
+    let tools = ToolRegistry::new();
+
+    let result = session.run_turn(&provider, &tools, "hello").await.unwrap();
+    assert_eq!(result.final_message.text_content(), "done");
 }
 
 #[test]

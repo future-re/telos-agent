@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Expanded prompt system with new built-in sections (`ToneStyleSection`, `TaskGuidanceSection`, `SafetySection`, `ToolUsageSection`) and richer `IdentitySection` content adapted from publicly exposed Claude Code system prompts.
+- `telos_agent::prompt::default_coding_assembly(tools, cwd)` helper to build a standard coding-agent prompt assembly without manual section wiring.
+- `AgentConfig::with_default_prompt_assembly(tools)` builder method for one-line setup of the default prompt assembly.
+- Automatic fallback: `AgentSession::run_turn` / `run_turn_stream` now builds the default prompt assembly when neither `prompt_assembly` nor `base_system_prompt` is configured.
+- `examples/kimi_tool_loop.rs` now demonstrates `AgentConfig::with_default_prompt_assembly`.
+
 ### Changed
 - Replaced hand-rolled `AnthropicProvider` and `OpenAIProvider` with `async-openai`-based `KimiProvider` and `DeepSeekProvider`.
 

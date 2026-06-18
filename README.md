@@ -54,7 +54,7 @@
 ### Prompt 与 Skills
 
 - `PromptAssembly` / `PromptSection` 在 turn 时组装 system prompt，支持静态片段缓存。
-- 内置 prompt section：`IdentitySection`、`ToolsSection`、`DateSection`、`CwdSection`、`SkillsSection`、`GitStatusSection`。
+- 内置 prompt section：`IdentitySection`、`ToneStyleSection`、`TaskGuidanceSection`、`SafetySection`、`ToolUsageSection`、`ToolsSection`、`DateSection`、`CwdSection`、`SkillsSection`、`GitStatusSection`、`MemorySection`、`ProfileSection`、`McpSection`。
 - Skills 系统：Markdown + YAML frontmatter 形式的 slash-command，注入到 prompt 并可通过 `SkillTool` 调用。
 - `SkillRegistry` / `SkillLoader` 负责 skill 的加载、解析和注册。
 
@@ -245,17 +245,59 @@ export MOONSHOT_API_KEY=...
 cargo run --example kimi_tool_loop -- "Use the echo_json tool once, then summarize."
 ```
 
+## 构建与运行 CLI
+
+项目根目录已配置为 Cargo workspace，包含 `telos_agent` 库和 `telos-cli` 可执行 crate。
+
+### 构建整个 workspace
+
+```bash
+cd /home/alin/codework/tiny_agent
+cargo build
+```
+
+### 安装 CLI
+
+```bash
+cd /home/alin/codework/tiny_agent/tiny_agent_core/telos-cli
+cargo install --path .
+```
+
+安装后可直接使用 `telos` 命令。
+
+### CLI 用法
+
+```bash
+# 单次 prompt（需要设置对应 provider 的 API key）
+export KIMI_API_KEY=...
+telos "给 src/lib.rs 添加错误处理"
+
+# 指定 provider 和模型
+telos --provider kimi --model kimi-k2-0711-preview "Review src/lib.rs"
+
+# 使用 mock provider 做快速测试
+telos --provider mock "hello"
+
+# 生成 shell 补全
+telos completion bash > /usr/share/bash-completion/completions/telos
+telos completion zsh  > /usr/local/share/zsh/site-functions/_telos
+```
+
+CLI 完整说明见 [telos-cli/README.md](telos-cli/README.md)。
+
 ## 测试
 
 ```bash
-cargo test
+cd /home/alin/codework/tiny_agent
+cargo test --workspace
+cargo clippy --workspace --all-targets
 ```
 
 ## 暂不包含
 
 以下能力在 `telos-agent` 当前范围之外：
 
-- UI / TUI / Web 层（只提供运行时内核）。
+- TUI / Web 层（CLI 已提供基础命令行入口，但还不是全功能 TUI）。
 - Plugin / swarm / coordinator 等多 agent 编排协议。
 - 多模态输入输出。
 - 跨 provider fallback（当前仅支持单 provider 内的重试）。

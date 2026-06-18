@@ -555,6 +555,20 @@ impl AgentSession {
             let turn_id = self.next_turn_id;
             self.next_turn_id += 1;
             let user_input = user_input.into();
+
+            // If no system prompt source was configured, build the default modular
+            // prompt assembly from the tool registry so the model gets the full
+            // Claude Code-style identity, style, task guidance, safety, and tool
+            // usage instructions.
+            if self.config.prompt_assembly.is_none() && self.config.base_system_prompt.is_none() {
+                self.config.prompt_assembly = Some(Arc::new(
+                    crate::prompt::default_coding_assembly(
+                        Arc::new(tools.clone()),
+                        self.config.cwd.clone(),
+                    ),
+                ));
+            }
+
             let user_message = Message::user(user_input.clone());
             self.messages.push(user_message.clone());
 

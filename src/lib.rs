@@ -87,7 +87,11 @@ pub use tasks::{Task, TaskManager, TaskStatus};
 // MCP — stdio-based Model Context Protocol client + manager + bridge.
 pub use mcp::{McpClient, McpManager, McpTool, McpToolBridge};
 // Prompt system — modular, cache-aware construction of the system prompt.
-pub use prompt::{PromptAssembly, PromptSection, PromptStability};
+pub use prompt::{
+    CwdSection, DateSection, GitStatusSection, IdentitySection, McpSection, MemorySection,
+    ProfileSection, PromptAssembly, PromptSection, PromptStability, SafetySection, SkillsSection,
+    TaskGuidanceSection, ToneStyleSection, ToolUsageSection, ToolsSection,
+};
 // Tool abstraction — the trait every callable capability implements, plus its registry.
 pub use tool::validate::{ValidationError, ValidationResult, validate_arguments};
 pub use tool::{

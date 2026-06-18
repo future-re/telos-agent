@@ -1,0 +1,27 @@
+[package]
+name = "telos-cli"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Terminal interface for telos-agent"
+
+[[bin]]
+name = "telos"
+path = "src/main.rs"
+
+[lib]
+name = "telos_cli"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env", "wrap_help"] }
+clap_complete = "4"
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+telos_agent = { path = ".." }
+tracing = "0.1"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"

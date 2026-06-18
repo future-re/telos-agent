@@ -133,10 +133,8 @@ mod tests {
 
     #[test]
     fn load_config_valid_json() {
-        let dir = std::env::temp_dir().join(format!("mcp-mgr-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let config_path = dir.join("mcp.json");
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let config_path = dir.path().join("mcp.json");
         let json = r#"{
             "mcpServers": {
                 "fs": {
@@ -164,16 +162,12 @@ mod tests {
         let noargs = servers.get("noargs").expect("noargs server should exist");
         assert_eq!(noargs.config.command, "echo");
         assert!(!noargs.config.auto_connect);
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn load_config_invalid_json_returns_error() {
-        let dir = std::env::temp_dir().join(format!("mcp-mgr-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let config_path = dir.join("bad.json");
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let config_path = dir.path().join("bad.json");
         std::fs::write(&config_path, "not json").unwrap();
 
         let result = McpManager::load_config(&config_path);
@@ -182,8 +176,6 @@ mod tests {
             Err(e) => panic!("expected AgentError::Config, got: {e}"),
             Ok(_) => panic!("expected error, got Ok"),
         }
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

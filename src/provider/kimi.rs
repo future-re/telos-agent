@@ -32,6 +32,15 @@ impl std::fmt::Debug for KimiConfig {
 }
 
 impl KimiConfig {
+    /// Build a config from an explicit API key and model.
+    pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            api_key: api_key.into(),
+            model: model.into(),
+            base_url: "https://api.moonshot.cn".into(),
+        }
+    }
+
     /// Build a config from `MOONSHOT_API_KEY` and the given model.
     ///
     /// Reads the API key directly from the process environment. Callers that
@@ -41,7 +50,7 @@ impl KimiConfig {
         let api_key = std::env::var("MOONSHOT_API_KEY")
             .map_err(|_| AgentError::Config("missing MOONSHOT_API_KEY".into()))?;
 
-        Ok(Self { api_key, model: model.into(), base_url: "https://api.moonshot.cn".into() })
+        Ok(Self::new(api_key, model))
     }
 }
 

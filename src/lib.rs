@@ -88,7 +88,7 @@ pub use tasks::{Task, TaskManager, TaskStatus};
 // MCP — stdio-based Model Context Protocol client + manager + bridge.
 pub use mcp::{McpClient, McpManager, McpTool, McpToolBridge};
 // Plugin — marketplace-based plugin system for extensibility.
-pub use plugin::{BUILTIN_MARKETPLACE, PluginError, PluginId};
+pub use plugin::{BUILTIN_MARKETPLACE, PluginError, PluginId, PluginPromptSection};
 // Prompt system — modular, cache-aware construction of the system prompt.
 pub use prompt::{
     CwdSection, DateSection, GitStatusSection, IdentitySection, McpSection, MemorySection,

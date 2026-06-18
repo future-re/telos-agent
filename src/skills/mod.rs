@@ -36,4 +36,8 @@ pub enum SkillSource {
     Managed,
     Project,
     User,
+    /// Loaded from an installed plugin.
+    Plugin {
+        plugin_id: crate::plugin::PluginId,
+    },
 }

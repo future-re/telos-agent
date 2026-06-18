@@ -376,6 +376,103 @@ impl PluginRegistry {
 
         Ok(())
     }
+
+    /// Apply all enabled plugins' components into the agent extension registries.
+    ///
+    /// # Namespacing
+    /// Plugin tools are registered as `plugin__<plugin_name>__<tool_name>` to
+    /// avoid conflicts with built-in tools.
+    ///
+    /// # Errors
+    /// Returns a list of per-plugin errors. Plugins that fail component loading
+    /// are marked Degraded; their successfully-loaded components remain active.
+    pub fn apply(
+        &self,
+        tools: &mut crate::tool::ToolRegistry,
+        _hooks: &mut crate::hooks::HookRegistry,
+        skills: &mut crate::skills::SkillRegistry,
+        _mcp: &mut crate::mcp::McpManager,
+        _prompt: &mut crate::prompt::PromptAssembly,
+    ) -> Result<(), Vec<PluginError>> {
+        let enabled = self.list_enabled();
+        let mut errors = Vec::new();
+
+        for entry in enabled {
+            let plugin = &entry.plugin;
+            let plugin_id_str = plugin.id.name.clone();
+            let mut component_count = 0;
+            let mut loaded_count = 0;
+
+            // --- Tools ---
+            for tool_path in &plugin.resolved_tools {
+                component_count += 1;
+                match crate::plugin::tool_loader::load_tool_spec(tool_path) {
+                    Ok(mut spec) => {
+                        spec.name = format!("plugin__{plugin_id_str}__{}", spec.name);
+                        let cmd_tool =
+                            crate::plugin::tool_loader::CommandTool::from_spec(spec, &plugin.path);
+                        tools.register(cmd_tool);
+                        loaded_count += 1;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            plugin = %plugin.id,
+                            tool = %tool_path.display(),
+                            error = %e,
+                            "failed to load plugin tool"
+                        );
+                    }
+                }
+            }
+
+            // --- Skills ---
+            // Resolve skill paths: each entry can be a .md file or a directory.
+            for skill_path in &plugin.resolved_skills {
+                component_count += 1;
+                let source = crate::skills::SkillSource::Plugin { plugin_id: plugin.id.clone() };
+                if skill_path.is_dir() {
+                    match skills.inject_skills_from_dir(skill_path, source) {
+                        Ok(()) => loaded_count += 1,
+                        Err(e) => {
+                            tracing::warn!(
+                                plugin = %plugin.id,
+                                path = %skill_path.display(),
+                                error = %e,
+                                "failed to load plugin skills from directory"
+                            );
+                        }
+                    }
+                } else if skill_path.is_file() && skill_path.extension().is_some_and(|e| e == "md")
+                {
+                    // For single .md files, load from the containing directory
+                    // (the SkillLoader scans all .md files in a directory)
+                    if let Some(parent) = skill_path.parent() {
+                        match skills.inject_skills_from_dir(parent, source) {
+                            Ok(()) => loaded_count += 1,
+                            Err(e) => {
+                                tracing::warn!(
+                                    plugin = %plugin.id,
+                                    path = %parent.display(),
+                                    error = %e,
+                                    "failed to load plugin skill file"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            if component_count > 0 && loaded_count < component_count {
+                errors.push(PluginError::Degraded {
+                    id: plugin.id.clone(),
+                    loaded: loaded_count,
+                    total: component_count,
+                });
+            }
+        }
+
+        if errors.is_empty() { Ok(()) } else { Err(errors) }
+    }
 }
 
 #[cfg(test)]
@@ -552,5 +649,57 @@ mod tests {
 
         registry.mark_error(&id, PluginError::Other("total failure".into()));
         assert_eq!(registry.get(&id).unwrap().status, PluginStatus::Error);
+    }
+
+    #[test]
+    fn apply_registers_plugin_tools_with_namespace() {
+        let tmp = TempDir::new().unwrap();
+        let plugin_dir = tmp.path().join("installed").join("test-plugin@mkt");
+        std::fs::create_dir_all(plugin_dir.join("tools")).unwrap();
+
+        // Write plugin.json
+        let manifest = serde_json::json!({
+            "name": "test-plugin",
+            "version": "1.0.0",
+            "tools": ["./tools/hello.json"]
+        });
+        std::fs::write(
+            plugin_dir.join("plugin.json"),
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        // Write a tool spec
+        let tool_spec = serde_json::json!({
+            "name": "hello",
+            "description": "Says hello",
+            "inputSchema": {"type": "object"},
+            "command": "echo",
+            "permission": "allow"
+        });
+        std::fs::write(
+            plugin_dir.join("tools").join("hello.json"),
+            serde_json::to_string_pretty(&tool_spec).unwrap(),
+        )
+        .unwrap();
+
+        let mut registry = PluginRegistry::new(tmp.path());
+        registry.discover_installed().unwrap();
+        let id = PluginId::parse("test-plugin@mkt").unwrap();
+        registry.enable(&id).unwrap();
+
+        let mut tools = crate::tool::ToolRegistry::new();
+        let mut hooks = crate::hooks::HookRegistry::new();
+        let mut skills = crate::skills::SkillRegistry::new();
+        let mut mcp_config = crate::mcp::McpManager::new(std::collections::HashMap::new());
+        let mut prompt = crate::prompt::PromptAssembly::new();
+
+        let result =
+            registry.apply(&mut tools, &mut hooks, &mut skills, &mut mcp_config, &mut prompt);
+        assert!(result.is_ok());
+
+        // Tool should be registered with namespace
+        let tool = tools.get("plugin__test-plugin__hello");
+        assert!(tool.is_ok(), "plugin tool should be registered with namespace prefix");
     }
 }

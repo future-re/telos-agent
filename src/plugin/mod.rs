@@ -44,6 +44,25 @@ pub struct PluginId {
 /// Sentinel marketplace name for built-in plugins that ship with the binary.
 pub const BUILTIN_MARKETPLACE: &str = "builtin";
 
+/// A prompt section backed by a static template string from a plugin.
+pub struct PluginPromptSection {
+    pub name: String,
+    pub template: String,
+}
+
+#[async_trait::async_trait]
+impl crate::prompt::PromptSection for PluginPromptSection {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn stability(&self) -> crate::prompt::PromptStability {
+        crate::prompt::PromptStability::Static
+    }
+    async fn render(&self, _ctx: &()) -> String {
+        self.template.clone()
+    }
+}
+
 impl PluginId {
     /// Parse a "name@marketplace" string into a PluginId.
     ///

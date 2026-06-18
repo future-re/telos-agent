@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use async_trait::async_trait;
 use telos_agent::{ApprovalDecision, ApprovalHandler, ApprovalRequest};
 use tokio::sync::mpsc;
@@ -11,11 +14,12 @@ pub struct PendingApproval {
 
 pub struct TuiApprovalHandler {
     tx: mpsc::UnboundedSender<PendingApproval>,
+    auto_mode: Arc<AtomicBool>,
 }
 
 impl TuiApprovalHandler {
-    pub fn new(tx: mpsc::UnboundedSender<PendingApproval>) -> Self {
-        Self { tx }
+    pub fn new(tx: mpsc::UnboundedSender<PendingApproval>, auto_mode: Arc<AtomicBool>) -> Self {
+        Self { tx, auto_mode }
     }
 }
 
@@ -28,6 +32,11 @@ impl std::fmt::Debug for TuiApprovalHandler {
 #[async_trait]
 impl ApprovalHandler for TuiApprovalHandler {
     async fn ask(&self, request: ApprovalRequest) -> ApprovalDecision {
+        // ── Auto mode: approve everything ─────────────────────────
+        if self.auto_mode.load(Ordering::Relaxed) {
+            return ApprovalDecision::Allow;
+        }
+
         let tool_lower = request.tool_name.to_lowercase();
 
         // ── Auto-allow safe Bash commands ───────────────────────────
@@ -57,18 +66,13 @@ impl ApprovalHandler for TuiApprovalHandler {
 
 /// Decide whether a shell command should run without explicit approval.
 fn is_auto_allowed(cmd: &str) -> bool {
-    // First check the security analyzer for clearly-safe commands.
     if telos_agent::bash_security::analyze(cmd).is_safe() {
         return true;
     }
 
-    // Allow common dev commands that are reversible or low-risk.
     let cmd_trimmed = cmd.trim();
     let first_word = cmd_trimmed.split_whitespace().next().unwrap_or("");
 
-    // All git operations (including push/pull/commit) — reversible via reflog.
-    // All cargo operations — builds/tests are safe.
-    // Common file & system inspection tools.
     match first_word {
         "git" | "cargo" | "make" | "just" | "npm" | "yarn" | "pnpm" | "pnpx" | "go" | "rustc"
         | "rustup" | "docker" | "podman" | "ls" | "cat" | "head" | "tail" | "less" | "find"
@@ -78,7 +82,6 @@ fn is_auto_allowed(cmd: &str) -> bool {
         | "clippy-driver" | "pgrep" | "ps" | "top" | "htop" | "free" | "uname" | "pip" | "pip3"
         | "python" | "python3" | "node" | "npx" => true,
         "apt" | "brew" | "dnf" | "pacman" | "snap" | "flatpak" => {
-            // Package managers: allow list/search/info, deny install/remove.
             let second = cmd_trimmed.split_whitespace().nth(1).unwrap_or("");
             matches!(second, "list" | "search" | "info" | "show" | "cache")
         }

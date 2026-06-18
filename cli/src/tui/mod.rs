@@ -37,6 +37,7 @@ pub async fn run(
     tools: ToolRegistry,
     status_text: String,
     project_root: Option<&std::path::Path>,
+    auto_mode: bool,
 ) -> Result<()> {
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = stdout();
@@ -46,7 +47,7 @@ pub async fn run(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(config, provider, tools, status_text, project_root)?;
+    let mut app = App::new(config, provider, tools, status_text, project_root, auto_mode)?;
     let tick_rate = Duration::from_millis(100);
     let mut reader = EventStream::new();
 

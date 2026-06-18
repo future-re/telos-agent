@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 use std::pin::pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 use telos_agent::TurnEvent;
 use tokio::sync::mpsc;
 
@@ -70,6 +71,13 @@ pub struct App {
     pub turn_active: bool,
     /// Shared cancellation flag — set by Ctrl+C and read by the background task.
     cancel_flag: Arc<AtomicBool>,
+    /// Auto-approve mode — toggle with Shift+Tab.
+    auto_mode: Arc<AtomicBool>,
+    /// When the current turn started (for elapsed display).
+    turn_started: Option<Instant>,
+    /// Tokens consumed in the current turn.
+    turn_input_tokens: u64,
+    turn_output_tokens: u64,
     /// Send prompts to the background agent task.
     turn_tx: mpsc::UnboundedSender<String>,
     /// Receive TurnEvents from the background agent task.
@@ -85,6 +93,7 @@ impl App {
         tools: telos_agent::ToolRegistry,
         status_text: String,
         project_root: Option<&std::path::Path>,
+        auto_mode_on: bool,
     ) -> Result<Self, telos_agent::AgentError> {
         // Wire up session storage before creating the AgentSession.
         let session_manager = crate::session::SessionManager::new(project_root);
@@ -96,14 +105,23 @@ impl App {
         // Extract the cancellation flag before moving config into the spawned task.
         let cancel_flag = Arc::clone(&config.cancelled);
 
+        // Auto-approve mode — shared between UI and approval handler.
+        let auto_mode = Arc::new(AtomicBool::new(auto_mode_on));
+        let auto_mode_bg = Arc::clone(&auto_mode);
+
+        // Seed status text with auto tag if starting in auto mode.
+        let status_text =
+            if auto_mode_on { format!("{status_text} ⏵⏵ auto") } else { status_text };
+
         let (prompt_tx, mut prompt_rx) = mpsc::unbounded_channel::<String>();
         let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
         let (approval_tx, approval_rx) = mpsc::unbounded_channel::<PendingApproval>();
 
         // Background task owns the AgentSession because run_turn_stream needs &mut self.
         tokio::spawn(async move {
-            let approval_handler: Option<Arc<dyn telos_agent::ApprovalHandler>> =
-                Some(Arc::new(crate::tui::approval::TuiApprovalHandler::new(approval_tx)));
+            let approval_handler: Option<Arc<dyn telos_agent::ApprovalHandler>> = Some(Arc::new(
+                crate::tui::approval::TuiApprovalHandler::new(approval_tx, auto_mode_bg),
+            ));
             let mut config = config;
             config.approval_handler = approval_handler;
 
@@ -149,6 +167,10 @@ impl App {
             pending_approvals: VecDeque::new(),
             turn_active: false,
             cancel_flag,
+            auto_mode,
+            turn_started: None,
+            turn_input_tokens: 0,
+            turn_output_tokens: 0,
             turn_tx: prompt_tx,
             turn_rx: event_rx,
             approval_rx,
@@ -175,6 +197,12 @@ impl App {
                     (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
                         self.messages.clear();
                         self.chat.scroll_to_bottom();
+                        return Ok(());
+                    }
+                    (KeyCode::BackTab, _) => {
+                        let on = !self.auto_mode.load(Ordering::Relaxed);
+                        self.auto_mode.store(on, Ordering::Relaxed);
+                        self.update_auto_mode_status();
                         return Ok(());
                     }
                     (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
@@ -266,10 +294,52 @@ impl App {
                 self.messages.push(UiMessage::TurnComplete);
                 self.mode = Mode::Normal;
                 self.turn_active = false;
+                self.turn_started = None;
+                self.turn_input_tokens = 0;
+                self.turn_output_tokens = 0;
             }
             Event::Mouse(_) => {}
         }
         Ok(())
+    }
+
+    fn format_elapsed(&self) -> String {
+        match self.turn_started {
+            Some(start) => {
+                let secs = start.elapsed().as_secs();
+                if secs < 60 {
+                    format!("{}s", secs)
+                } else {
+                    format!("{}m{}s", secs / 60, secs % 60)
+                }
+            }
+            None => String::new(),
+        }
+    }
+
+    fn format_token_usage(&self) -> String {
+        let total = self.turn_input_tokens + self.turn_output_tokens;
+        if total == 0 {
+            return String::new();
+        }
+        let up_k = self.turn_input_tokens as f64 / 1000.0;
+        let down_k = self.turn_output_tokens as f64 / 1000.0;
+        format!("↑{:.1}k ↓{:.1}k", up_k, down_k)
+    }
+
+    /// Update status bar to reflect auto-mode state.
+    fn update_auto_mode_status(&mut self) {
+        let on = self.auto_mode.load(Ordering::Relaxed);
+        let tag = " ⏵⏵ auto";
+        let base = self.status_text.trim_end_matches(tag).trim_end();
+        let new = if on { format!("{base}{tag}") } else { base.to_string() };
+        self.status_text = new;
+
+        // Persist to config.
+        if let Some(base) = dirs::config_dir() {
+            let path = base.join("telos").join("config.toml");
+            let _ = save_auto_mode(&path, on);
+        }
     }
 
     /// Send a user prompt to the background agent task.
@@ -306,9 +376,13 @@ impl App {
     fn handle_turn_event(&mut self, event: TurnEvent) {
         match event {
             TurnEvent::TurnStarted { .. } => {
-                // User message already pushed by send_prompt — skip the duplicate.
+                self.status_text = "thinking…".to_string();
+                self.turn_started = Some(Instant::now());
+                self.turn_input_tokens = 0;
+                self.turn_output_tokens = 0;
             }
             TurnEvent::AssistantDelta { text } => {
+                self.status_text = "streaming…".to_string();
                 self.messages.push(UiMessage::AssistantDelta(text));
                 self.chat.scroll_to_bottom();
             }
@@ -316,11 +390,14 @@ impl App {
                 self.messages.push(UiMessage::ThinkingDelta(text));
             }
             TurnEvent::ToolCall { tool_call_id, name, detail } => {
-                self.status_text = format!("{}: {}", name, detail);
+                let label = if detail.is_empty() { name.clone() } else { detail.clone() };
+                self.status_text = label;
                 self.messages.push(UiMessage::ToolCall { id: tool_call_id, name, detail });
             }
             TurnEvent::ToolProgress { tool_call_id, name, message, .. } => {
-                self.status_text = format!("{}: {}", name, message);
+                if !message.starts_with("running command with") {
+                    self.status_text = format!("{} | {}", name, message);
+                }
                 self.messages.push(UiMessage::ToolProgress { id: tool_call_id, name, message });
             }
             TurnEvent::ToolCompleted { tool_call_id, name, is_error } => {
@@ -363,8 +440,13 @@ impl App {
                 )));
             }
             TurnEvent::ProviderRetry { attempt, max_retries, delay_ms } => {
+                let elapsed = self.format_elapsed();
                 self.status_text =
-                    format!("retrying provider ({attempt}/{max_retries}, {delay_ms}ms)");
+                    format!("retrying ({attempt}/{max_retries}, {delay_ms}ms){elapsed}");
+            }
+            TurnEvent::ProviderUsage { input_tokens, output_tokens } => {
+                self.turn_input_tokens = input_tokens as u64;
+                self.turn_output_tokens = output_tokens as u64;
             }
             _ => {}
         }
@@ -395,21 +477,18 @@ impl App {
             None
         };
 
-        let mut constraints: Vec<Constraint> = vec![
-            Constraint::Length(1), // status bar
-            Constraint::Min(0),    // chat panel
-        ];
+        // Layout: chat | popup? | input | status
+        let mut constraints: Vec<Constraint> = vec![Constraint::Min(0)]; // chat
         if let Some(h) = popup_h {
             constraints.push(Constraint::Length(h + 1)); // popup + padding
         }
         constraints.push(Constraint::Length(5)); // input panel
+        constraints.push(Constraint::Length(1)); // status bar (bottom)
 
         let layout =
             Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
 
         let mut idx = 0;
-        status_bar::render(frame, layout[idx], &self.status_text);
-        idx += 1;
 
         self.chat.render(frame, layout[idx], &self.messages);
         idx += 1;
@@ -512,6 +591,22 @@ impl App {
         }
 
         self.input.render(frame, layout[idx], self.mode == Mode::Normal);
+        idx += 1;
+
+        // ── Status bar at the bottom ─────────────────────────────────
+        let status = if self.turn_active {
+            let elapsed = self.format_elapsed();
+            let tokens = self.format_token_usage();
+            if tokens.is_empty() {
+                format!("{} ({})", self.status_text, elapsed)
+            } else {
+                format!("{} ({} | {})", self.status_text, elapsed, tokens)
+            }
+        } else {
+            self.status_text.clone()
+        };
+
+        status_bar::render(frame, layout[idx], &status);
     }
 }
 
@@ -571,4 +666,24 @@ fn truncate_for_popup(s: &str, max_chars: usize) -> String {
     } else {
         format!("{}…", &s[..max_chars.saturating_sub(1)])
     }
+}
+
+fn save_auto_mode(path: &std::path::Path, on: bool) -> anyhow::Result<()> {
+    let contents = if path.exists() {
+        std::fs::read_to_string(path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let mut config: toml::Value = if contents.is_empty() {
+        toml::Value::Table(toml::Table::new())
+    } else {
+        toml::from_str(&contents).unwrap_or(toml::Value::Table(toml::Table::new()))
+    };
+    // Set auto_mode at the top level.
+    config.as_table_mut().and_then(|t| t.insert("auto_mode".into(), toml::Value::Boolean(on)));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, toml::to_string_pretty(&config)?)?;
+    Ok(())
 }

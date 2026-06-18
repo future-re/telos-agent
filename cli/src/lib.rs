@@ -119,14 +119,20 @@ pub async fn run() -> Result<()> {
                 let mut tui_config = config;
                 tui_config.prompt_assembly = Some(Arc::new(assembly));
 
-                let status = crate::context::build_status_text(
-                    cli.shared.model.as_deref(),
-                    project_root.as_deref(),
-                    &ctx,
-                );
+                let model_display =
+                    cli.shared.model.as_deref().or_else(|| merged.agent.as_ref()?.model.as_deref());
+                let status =
+                    crate::context::build_status_text(model_display, project_root.as_deref(), &ctx);
 
-                return tui::run(tui_config, provider, tools, status, project_root.as_deref())
-                    .await;
+                return tui::run(
+                    tui_config,
+                    provider,
+                    tools,
+                    status,
+                    project_root.as_deref(),
+                    merged.auto_mode.unwrap_or(false),
+                )
+                .await;
             }
             let onboarding = match check_onboarding(&cli.shared, &merged) {
                 Ok(o) => o,

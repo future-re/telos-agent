@@ -79,7 +79,8 @@ pub async fn run_chat(
     let status =
         crate::context::build_status_text(options.model.as_deref(), project_root.as_deref(), &ctx);
 
-    crate::tui::run(agent_config, provider, tools, status, project_root.as_deref()).await
+    let auto_mode = config.auto_mode.unwrap_or(false);
+    crate::tui::run(agent_config, provider, tools, status, project_root.as_deref(), auto_mode).await
 }
 
 async fn run_with_provider<P: telos_agent::ModelProvider>(

@@ -158,7 +158,9 @@ impl InputPanel {
         // Hint line at the bottom of the block.
         let hint = match self.history_pos {
             Some(i) => format!(" history [{}/{}] ", i + 1, self.history.len()),
-            None => String::from(" enter·send  alt+enter·newline  ctrl+↑↓·history "),
+            None => {
+                String::from(" enter·send  alt+enter·newline  ctrl+↑↓·history  shift+tab·auto ")
+            }
         };
         let hint_widget = Paragraph::new(hint)
             .style(Style::default().fg(theme.thinking_fg).add_modifier(Modifier::DIM));

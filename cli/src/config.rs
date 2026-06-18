@@ -19,6 +19,8 @@ pub struct FileConfig {
     pub agent: Option<AgentSection>,
     pub approval: Option<ApprovalSection>,
     pub env: Option<HashMap<String, String>>,
+    /// Whether to auto-approve tool calls by default.
+    pub auto_mode: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -77,6 +79,10 @@ pub fn merge_configs(user: Option<FileConfig>, project: Option<FileConfig>) -> F
         user.as_ref().and_then(|c| c.approval.as_ref()),
         project.as_ref().and_then(|c| c.approval.as_ref()),
     );
+    let auto_mode = project
+        .as_ref()
+        .and_then(|c| c.auto_mode)
+        .or_else(|| user.as_ref().and_then(|c| c.auto_mode));
     let env = match (user.and_then(|c| c.env), project.and_then(|c| c.env)) {
         (Some(mut u), Some(p)) => {
             u.extend(p);
@@ -87,7 +93,7 @@ pub fn merge_configs(user: Option<FileConfig>, project: Option<FileConfig>) -> F
         (None, None) => None,
     };
 
-    FileConfig { agent, approval, env }
+    FileConfig { agent, approval, env, auto_mode }
 }
 
 fn merge_agent(

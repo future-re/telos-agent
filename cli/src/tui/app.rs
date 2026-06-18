@@ -120,17 +120,75 @@ impl App {
         match event {
             Event::Key(key) => {
                 use crossterm::event::{KeyCode, KeyModifiers};
-                if key.code == KeyCode::Char('d')
-                    && key.modifiers.contains(KeyModifiers::CONTROL)
-                    && self.input.is_empty()
-                {
-                    self.should_quit = true;
-                    return Ok(());
+
+                // Global shortcuts.
+                match (key.code, key.modifiers) {
+                    (KeyCode::Char('d'), KeyModifiers::CONTROL) if self.input.is_empty() => {
+                        self.should_quit = true;
+                        return Ok(());
+                    }
+                    (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                        // TODO: signal cancellation to the background turn (Task 13).
+                        return Ok(());
+                    }
+                    (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
+                        self.messages.clear();
+                        self.chat.scroll_to_bottom();
+                        return Ok(());
+                    }
+                    _ => {}
                 }
-                if self.mode == Mode::Normal
-                    && let Some(prompt) = self.input.handle_key(key)
-                {
-                    self.send_prompt(prompt);
+
+                match self.mode {
+                    Mode::Approving => {
+                        match key.code {
+                            KeyCode::Char('a') | KeyCode::Char('y') => self.approve_current(),
+                            KeyCode::Char('d') | KeyCode::Char('n') => {
+                                self.deny_current("denied by user");
+                            }
+                            KeyCode::Char('e') => {
+                                // Future: open editor to modify arguments.
+                                self.deny_current("edit requested");
+                            }
+                            _ => {}
+                        }
+                        return Ok(());
+                    }
+                    Mode::Normal => {
+                        // Scroll keys.
+                        match key.code {
+                            KeyCode::PageUp => {
+                                self.chat.scroll_up(10);
+                                return Ok(());
+                            }
+                            KeyCode::PageDown => {
+                                self.chat.scroll_down(10);
+                                return Ok(());
+                            }
+                            KeyCode::Up => {
+                                self.chat.scroll_up(1);
+                                return Ok(());
+                            }
+                            KeyCode::Down => {
+                                self.chat.scroll_down(1);
+                                return Ok(());
+                            }
+                            _ => {}
+                        }
+
+                        // Input handling.
+                        if let Some(prompt) = self.input.handle_key(key) {
+                            self.send_prompt(prompt);
+                        }
+                    }
+                    Mode::Streaming => {
+                        // During streaming, only scroll keys are handled.
+                        match key.code {
+                            KeyCode::PageUp => self.chat.scroll_up(10),
+                            KeyCode::PageDown => self.chat.scroll_down(10),
+                            _ => {}
+                        }
+                    }
                 }
             }
             Event::Tick => {
@@ -158,6 +216,28 @@ impl App {
         self.messages.push(UiMessage::User(prompt.clone()));
         let _ = self.turn_tx.send(prompt);
         self.mode = Mode::Streaming;
+    }
+
+    /// Approve the current pending approval request.
+    pub fn approve_current(&mut self) {
+        if let Some(pending) = self.pending_approvals.pop_front() {
+            let _ = pending.respond.send(telos_agent::ApprovalDecision::Allow);
+        }
+        if self.pending_approvals.is_empty() && !matches!(self.mode, Mode::Streaming) {
+            self.mode = Mode::Streaming;
+        }
+    }
+
+    /// Deny the current pending approval request with a reason.
+    pub fn deny_current(&mut self, reason: &str) {
+        if let Some(pending) = self.pending_approvals.pop_front() {
+            let _ = pending
+                .respond
+                .send(telos_agent::ApprovalDecision::Deny { reason: reason.to_string() });
+        }
+        if self.pending_approvals.is_empty() && !matches!(self.mode, Mode::Streaming) {
+            self.mode = Mode::Streaming;
+        }
     }
 
     /// Convert an agent `TurnEvent` into a `UiMessage`.

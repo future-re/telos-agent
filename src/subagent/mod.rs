@@ -148,6 +148,13 @@ impl Tool for SubagentTool {
         }
     }
 
+    fn prompt_text(&self) -> Option<&'static str> {
+        Some(
+            "Use the Subagent tool to delegate self-contained tasks, run parallel explore lenses, or protect the main context window. \
+Provide a clear prompt and optional system_prompt. Do not duplicate work already being performed in the parent session.",
+        )
+    }
+
     async fn validate(&self, arguments: &Value, _context: &ToolContext) -> Result<(), AgentError> {
         arguments
             .get("prompt")

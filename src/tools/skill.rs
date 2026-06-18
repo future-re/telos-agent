@@ -39,6 +39,13 @@ impl Tool for SkillTool {
         &["skill"]
     }
 
+    fn prompt_text(&self) -> Option<&'static str> {
+        Some(
+            "Use the Skill tool to invoke loaded skills by name. Only invoke skills listed as available; do not guess. \
+Pass `args` when the skill expects arguments. The skill returns its prompt and body for you to follow.",
+        )
+    }
+
     async fn check_permission(
         &self,
         _arguments: &Value,

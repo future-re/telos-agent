@@ -39,6 +39,13 @@ impl Tool for GrepTool {
         &["grep"]
     }
 
+    fn prompt_text(&self) -> Option<&'static str> {
+        Some(
+            "Use Grep to search UTF-8 files for a literal text pattern. Searches are substring matches, not regex. \
+Results include path, 1-indexed line number, and matched line. Use `glob` to scope the search; default is `**/*`.",
+        )
+    }
+
     async fn validate(&self, arguments: &Value, _context: &ToolContext) -> Result<(), AgentError> {
         required_string(arguments, "pattern").map(|_| ())
     }

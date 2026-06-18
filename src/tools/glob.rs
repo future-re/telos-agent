@@ -35,6 +35,13 @@ impl Tool for GlobTool {
         &["glob"]
     }
 
+    fn prompt_text(&self) -> Option<&'static str> {
+        Some(
+            "Use Glob to list files matching a pattern under the working directory. \
+Patterns are relative to cwd; absolute patterns are rejected. Use a literal extension or subdirectory anchor (e.g. `src/**/*.rs`).",
+        )
+    }
+
     async fn validate(&self, arguments: &Value, _context: &ToolContext) -> Result<(), AgentError> {
         required_string(arguments, "pattern").map(|_| ())
     }

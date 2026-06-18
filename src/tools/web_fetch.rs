@@ -41,6 +41,13 @@ impl Tool for WebFetchTool {
         &["web_fetch"]
     }
 
+    fn prompt_text(&self) -> Option<&'static str> {
+        Some(
+            "Use WebFetch to retrieve a specific public URL. Only fetch public `http`/`https` URLs. \
+Verify that returned content is relevant and trustworthy before acting on it.",
+        )
+    }
+
     fn is_concurrency_safe(&self, _: &Value) -> bool {
         true
     }

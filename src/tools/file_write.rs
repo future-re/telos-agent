@@ -38,6 +38,14 @@ impl Tool for FileWriteTool {
         &["file_write"]
     }
 
+    fn prompt_text(&self) -> Option<&'static str> {
+        Some(
+            "Use Write to create a new file or overwrite an existing UTF-8 text file. \
+If the file already exists, Read it first. Prefer Edit for small changes to existing files. \
+Create parent directories automatically.",
+        )
+    }
+
     async fn validate(&self, arguments: &Value, _context: &ToolContext) -> Result<(), AgentError> {
         required_string_any(arguments, &["file_path", "path"])?;
         required_string(arguments, "content")?;

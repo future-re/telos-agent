@@ -77,6 +77,13 @@ impl Tool for AskUserQuestionTool {
         &["ask_user"]
     }
 
+    fn prompt_text(&self) -> Option<&'static str> {
+        Some(
+            "Use AskUserQuestion to collect user preferences or disambiguate requirements when multiple valid choices exist. \
+Provide 2-4 concrete options with concise descriptions. Do not ask questions you can infer from context or project conventions.",
+        )
+    }
+
     fn is_concurrency_safe(&self, _: &Value) -> bool {
         true
     }

@@ -24,6 +24,13 @@ impl Tool for WebSearchTool {
         &["web_search"]
     }
 
+    fn prompt_text(&self) -> Option<&'static str> {
+        Some(
+            "Use WebSearch when you need up-to-date information not present in the codebase or conversation. \
+Summarize findings and cite sources. Prefer WebFetch when you already know the exact URL.",
+        )
+    }
+
     fn is_concurrency_safe(&self, _: &Value) -> bool {
         true
     }

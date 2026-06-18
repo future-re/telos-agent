@@ -42,6 +42,14 @@ impl Tool for FileEditTool {
         &["file_edit"]
     }
 
+    fn prompt_text(&self) -> Option<&'static str> {
+        Some(
+            "Use Edit to make precise, exact-match replacements in a UTF-8 text file. The file must have been Read first. \
+`old_string` must match exactly once unless `replace_all` is true. Include enough surrounding context to make `old_string` unique. \
+Use an empty `old_string` only to create a new file. Do not use Edit on binary files or Jupyter notebooks.",
+        )
+    }
+
     async fn validate(&self, arguments: &Value, _context: &ToolContext) -> Result<(), AgentError> {
         required_string_any(arguments, &["file_path", "path"])?;
         required_string_any(arguments, &["old_string", "old"])?;

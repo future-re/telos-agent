@@ -2095,3 +2095,22 @@ fn subagent_fork_mode_runs_multiple_lenses() {
         );
     });
 }
+
+#[test]
+fn tool_prompt_text_defaults_to_none() {
+    struct NoPromptTool;
+    #[async_trait::async_trait]
+    impl Tool for NoPromptTool {
+        fn definition(&self) -> ToolDefinition {
+            ToolDefinition {
+                name: "no_prompt".into(),
+                description: "x".into(),
+                input_schema: serde_json::json!({ "type": "object" }),
+            }
+        }
+        async fn invoke(&self, _args: Value, _ctx: ToolContext) -> Result<ToolOutput, AgentError> {
+            Ok(ToolOutput::text("ok"))
+        }
+    }
+    assert!(NoPromptTool.prompt_text().is_none());
+}

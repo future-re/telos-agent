@@ -135,6 +135,12 @@ pub trait Tool: Send + Sync {
     /// Describe the tool's name, prose description, and JSON-schema input.
     fn definition(&self) -> ToolDefinition;
 
+    /// Optional detailed usage instructions injected into the system prompt.
+    /// Return `None` if the tool has no extra behavioral guidance.
+    fn prompt_text(&self) -> Option<&'static str> {
+        None
+    }
+
     /// Backwards-compatible alternate names accepted by the runtime.
     ///
     /// Aliases are *not* sent to the model; they only let older transcripts or

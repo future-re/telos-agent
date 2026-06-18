@@ -20,6 +20,9 @@ pub async fn run_single(options: &SharedOptions, prompt: String) -> Result<()> {
         ResolvedProvider::Kimi(p) => {
             run_with_provider(&mut session, &p, &tools, prompt).await?;
         }
+        ResolvedProvider::DeepSeek(p) => {
+            run_with_provider(&mut session, &p, &tools, prompt).await?;
+        }
         ResolvedProvider::Mock(_) => {
             eprintln!("Note: using mock provider; no real model call is made.");
             let mock = MockProvider::new(vec![CompletionResponse {

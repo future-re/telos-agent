@@ -1,7 +1,7 @@
 ---
 name: debug
 description: Systematic debugging — gather information, form hypotheses, isolate the cause
-whenToUse: When encountering any bug, test failure, or unexpected behavior
+whenToUse: When encountering a bug where root cause is not immediately obvious. Skip for Fast Path bugs (typo, wrong variable, missing import, clear error with known fix).
 prompt: |
   You are in debug mode. Follow this process:
   1. Reproduce the issue

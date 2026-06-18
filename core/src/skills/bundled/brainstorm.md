@@ -1,7 +1,7 @@
 ---
 name: brainstorm
 description: Explore design ideas before implementation
-whenToUse: Before starting creative work — building features, components, or modifying behavior
+whenToUse: For Standard/Heavy Path creative work — building features, cross-module refactors, high-uncertainty tasks. Skip for Fast Path (single-file changes, clear bugs, small config).
 prompt: |
   You are in brainstorm mode. Your goal is to explore the user's intent and design before any code is written.
   1. Understand the project context

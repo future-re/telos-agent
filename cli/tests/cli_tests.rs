@@ -6,8 +6,6 @@ use predicates::prelude::*;
 #[test]
 fn new_dependencies_compile() {
     // Verify all Phase 1 crates are importable and basic types construct.
-    // rustyline
-    let _ = rustyline::Editor::<(), rustyline::history::FileHistory>::new();
     // toml
     let _ = toml::Table::new();
     // dirs
@@ -222,22 +220,4 @@ fn sessions_dir_without_project() {
     // Should be under the user's data directory
     assert!(sessions.to_string_lossy().contains("telos"));
     assert!(sessions.ends_with("sessions"));
-}
-
-// ── Task 8: Rustyline REPL ─────────────────────────────────────────────────
-
-#[test]
-fn repl_editor_creates() {
-    // Verify the editor builds successfully (no readline interaction).
-    let _editor = telos_cli::repl::build_editor().expect("build_editor should succeed");
-}
-
-#[test]
-fn repl_completion_returns_commands() {
-    let results = telos_cli::repl::complete_command("/", "");
-    assert!(!results.is_empty(), "should return at least one command");
-    let names: Vec<&str> = results.iter().map(|(cmd, _)| cmd.as_str()).collect();
-    assert!(names.contains(&"/exit"));
-    assert!(names.contains(&"/help"));
-    assert!(names.contains(&"/model"));
 }

@@ -7,7 +7,6 @@ pub mod terminal;
 pub mod tui;
 
 pub mod approval;
-pub mod repl;
 pub mod session;
 
 pub use project::find_project_root;

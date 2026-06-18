@@ -70,6 +70,9 @@ pub struct AgentConfig {
     /// Optional skill registry. When set, the Skill tool and the default prompt
     /// assembly can use registered skills (including bundled Superpowers skills).
     pub skill_registry: Option<Arc<crate::skills::SkillRegistry>>,
+    /// Optional plugin registry. When set, enabled plugins' components are
+    /// applied to tool/hook/skill registries at session startup.
+    pub plugin_registry: Option<Arc<crate::plugin::PluginRegistry>>,
 }
 
 impl std::fmt::Debug for AgentConfig {
@@ -97,6 +100,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("tool_timeout_ms", &self.tool_timeout_ms)
             .field("max_file_read_bytes", &self.max_file_read_bytes)
             .field("skill_registry", &self.skill_registry.as_ref().map(|_| "<set>"))
+            .field("plugin_registry", &self.plugin_registry.as_ref().map(|_| "<set>"))
             .finish()
     }
 }
@@ -127,6 +131,7 @@ impl Default for AgentConfig {
             tool_timeout_ms: None,
             max_file_read_bytes: 50 * 1024 * 1024,
             skill_registry: None,
+            plugin_registry: None,
         }
     }
 }
@@ -259,6 +264,35 @@ impl AgentConfig {
         registry.load_bundled_skills();
         self.skill_registry = Some(Arc::new(registry));
         self
+    }
+
+    /// Apply plugin components into the agent registries.
+    ///
+    /// Call this before creating an [`AgentSession`](crate::AgentSession) to
+    /// populate tools/hooks/skills/mcp/prompt with the content of any enabled
+    /// plugins. Returns the populated registries so they can be passed into
+    /// the session and its config.
+    pub fn apply_plugins(
+        &self,
+        mut tools: crate::tool::ToolRegistry,
+        mut hooks: crate::hooks::HookRegistry,
+        mut skills: crate::skills::SkillRegistry,
+        mut mcp: crate::mcp::McpManager,
+        mut prompt: crate::prompt::PromptAssembly,
+    ) -> Result<
+        (
+            crate::tool::ToolRegistry,
+            crate::hooks::HookRegistry,
+            crate::skills::SkillRegistry,
+            crate::mcp::McpManager,
+            crate::prompt::PromptAssembly,
+        ),
+        Vec<crate::plugin::PluginError>,
+    > {
+        if let Some(registry) = &self.plugin_registry {
+            registry.apply(&mut tools, &mut hooks, &mut skills, &mut mcp, &mut prompt)?;
+        }
+        Ok((tools, hooks, skills, mcp, prompt))
     }
 }
 

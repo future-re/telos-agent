@@ -2283,3 +2283,78 @@ async fn prompt_assembly_build_blocks_preserves_stability() {
     assert_eq!(blocks[1].name, "dynamic");
     assert_eq!(blocks[1].stability, PromptStability::Dynamic);
 }
+
+#[tokio::test]
+async fn plugin_tool_integration() {
+    use telos_agent::{
+        AgentConfig,
+        hooks::HookRegistry,
+        mcp::McpManager,
+        plugin::{PluginId, PluginRegistry},
+        prompt::PromptAssembly,
+        skills::SkillRegistry,
+        tool::ToolRegistry,
+    };
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let plugin_dir = tmp.path().join("installed").join("mytool@test");
+    std::fs::create_dir_all(plugin_dir.join("tools")).unwrap();
+
+    // Write plugin.json
+    let manifest = serde_json::json!({
+        "name": "mytool",
+        "version": "1.0.0",
+        "tools": ["./tools/uppercase.json"]
+    });
+    std::fs::write(
+        plugin_dir.join("plugin.json"),
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+
+    // Write a tool spec
+    let tool_spec = serde_json::json!({
+        "name": "uppercase",
+        "description": "Converts text to uppercase using tr",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"]
+        },
+        "command": "tr",
+        "args": ["[:lower:]", "[:upper:]"],
+        "permission": "allow",
+        "isConcurrencySafe": true
+    });
+    std::fs::write(
+        plugin_dir.join("tools").join("uppercase.json"),
+        serde_json::to_string_pretty(&tool_spec).unwrap(),
+    )
+    .unwrap();
+
+    // Register and enable the plugin
+    let mut registry = PluginRegistry::new(tmp.path());
+    registry.discover_installed().unwrap();
+    let id = PluginId::parse("mytool@test").unwrap();
+    registry.enable(&id).unwrap();
+
+    // Apply plugins via AgentConfig
+    let tools = ToolRegistry::new();
+    let hooks = HookRegistry::new();
+    let skills = SkillRegistry::new();
+    let mcp = McpManager::new(std::collections::HashMap::new());
+    let prompt = PromptAssembly::new();
+
+    let config = AgentConfig {
+        plugin_registry: Some(std::sync::Arc::new(registry)),
+        ..AgentConfig::default()
+    };
+
+    let (tools, _hooks, _skills, _mcp, _prompt) =
+        config.apply_plugins(tools, hooks, skills, mcp, prompt).unwrap();
+
+    // Verify the tool is registered with namespace
+    let tool = tools.get("plugin__mytool__uppercase");
+    assert!(tool.is_ok(), "plugin tool should be registered: {:?}", tool.err());
+}

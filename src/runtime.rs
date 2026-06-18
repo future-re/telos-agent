@@ -177,6 +177,10 @@ impl AgentSession {
         self.read_file_state = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     }
 
+    fn push_system_reminder(&mut self, reminder: crate::message::SystemReminder) {
+        self.messages.push(crate::message::Message::user(reminder.render()));
+    }
+
     /// Persist the conversation and session metadata if a [`Storage`] backend is configured.
     pub async fn save(&self) -> Result<(), AgentError> {
         if let Some(storage) = &self.config.storage {
@@ -303,6 +307,9 @@ impl AgentSession {
                 events.push(TurnEvent::CompactionCompleted { reason: "token_budget".into() });
                 if did_compact {
                     compactions += 1;
+                    self.push_system_reminder(crate::message::SystemReminder::Compaction {
+                        reason: "token_budget".into(),
+                    });
                     info!(iteration, "token-budget compaction applied");
                 }
             }
@@ -314,6 +321,9 @@ impl AgentSession {
             events.push(TurnEvent::CompactionCompleted { reason: "char_budget".into() });
             if did_compact {
                 compactions += 1;
+                self.push_system_reminder(crate::message::SystemReminder::Compaction {
+                    reason: "char_budget".into(),
+                });
                 info!(iteration, "char-budget compaction applied");
             }
         }
@@ -461,6 +471,12 @@ impl AgentSession {
             if let Some(message) = maybe_message {
                 self.messages.push(message.clone());
                 events.push(TurnEvent::Assistant(message));
+            }
+            if emitted {
+                self.push_system_reminder(crate::message::SystemReminder::HookInterception {
+                    phase: phase_name.clone(),
+                    name: hook.name().to_string(),
+                });
             }
             events.push(TurnEvent::HookCompleted {
                 phase: phase_name.clone(),

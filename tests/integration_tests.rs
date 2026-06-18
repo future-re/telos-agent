@@ -293,7 +293,9 @@ fn run_turn_stream_emits_deltas_and_hooks() {
         assert!(events.iter().any(|event| {
             matches!(event, TurnEvent::HookStarted { phase, .. } if *phase == "stop")
         }));
-        assert_eq!(session.messages().last().unwrap().text_content(), "hook-ran");
+        let last_assistant =
+            session.messages().iter().rfind(|m| m.role == telos_agent::Role::Assistant);
+        assert_eq!(last_assistant.unwrap().text_content(), "hook-ran");
     });
 }
 
@@ -315,9 +317,12 @@ fn stop_hook_does_not_hijack_final_message() {
                 .unwrap();
 
         let result = session.run_turn(&provider, &tools, "hi").await.unwrap();
-        // The last session message is the hook output, but the turn result
-        // should still expose the model's own final answer.
-        assert_eq!(session.messages().last().unwrap().text_content(), "hook-ran");
+        // The hook output is appended as an assistant message, followed by a
+        // system-reminder user message. The turn result should still expose
+        // the model's own final answer.
+        let last_assistant =
+            session.messages().iter().rfind(|m| m.role == telos_agent::Role::Assistant);
+        assert_eq!(last_assistant.unwrap().text_content(), "hook-ran");
         assert_eq!(result.final_message.text_content(), "model answer");
     });
 }
@@ -2184,4 +2189,43 @@ fn system_reminder_renders_with_tags() {
     assert!(text.contains("<system-reminder>"));
     assert!(text.contains("token_budget"));
     assert!(text.contains("</system-reminder>"));
+}
+
+#[test]
+fn compaction_emits_system_reminder() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        // Provide extra responses so the compaction summary calls (which use
+        // `provider.complete`) do not starve the actual turn completion.
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message::assistant("summary"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("summary"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("hi"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+        let tools = ToolRegistry::new();
+        let mut session = AgentSession::new(AgentConfig {
+            token_budget: Some(TokenBudget { max_tokens: 1_000_000, compact_at_tokens: 1 }),
+            compaction: Some(Arc::new(SummaryCompaction { max_tokens: 1, keep_recent: 0 })),
+            ..AgentConfig::default()
+        })
+        .unwrap();
+
+        let _ = session.run_turn(&provider, &tools, "hello").await.unwrap();
+        let has_reminder = session.messages().iter().any(|m| {
+            m.role == telos_agent::Role::User && m.text_content().contains("<system-reminder>")
+        });
+        assert!(has_reminder);
+    });
 }

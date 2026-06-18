@@ -9,10 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Expanded prompt system with new built-in sections (`ToneStyleSection`, `TaskGuidanceSection`, `SafetySection`, `ToolUsageSection`) and richer `IdentitySection` content adapted from publicly exposed Claude Code system prompts.
-- `telos_agent::prompt::default_coding_assembly(tools, cwd)` helper to build a standard coding-agent prompt assembly without manual section wiring.
+- `telos_agent::prompt::default_coding_assembly(tools, cwd, skills)` helper to build a standard coding-agent prompt assembly without manual section wiring; optionally includes a `SkillsSection`.
 - `AgentConfig::with_default_prompt_assembly(tools)` builder method for one-line setup of the default prompt assembly.
 - Automatic fallback: `AgentSession::run_turn` / `run_turn_stream` now builds the default prompt assembly when neither `prompt_assembly` nor `base_system_prompt` is configured.
 - `examples/kimi_tool_loop.rs` now demonstrates `AgentConfig::with_default_prompt_assembly`.
+- Tool-specific prompt guidance: `Tool::prompt_text()` lets each tool inject detailed usage instructions into the system prompt; core tools (`Bash`, `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Subagent`, `Skill`, `WebSearch`, `WebFetch`, `AskUserQuestion`) now include adapted guidance.
+- `ToolPromptsSection` renders all registered tool prompts under `## Tool-specific guidance` in the default assembly.
+- `SystemReminder` enum and runtime injection of `<system-reminder>` user messages after compaction and hook interception.
+- Prompt cache boundary: `PromptAssembly::build_blocks()` returns `Vec<PromptBlock>` with stability metadata; `CompletionRequest` gains `system_prompt_blocks` so future providers can apply per-block cache controls.
+- Bundled `explore` skill for deep codebase research; `AgentConfig::with_bundled_skills()` loads bundled skills and exposes them through the default prompt assembly.
 
 ### Changed
 - Replaced hand-rolled `AnthropicProvider` and `OpenAIProvider` with `async-openai`-based `KimiProvider` and `DeepSeekProvider`.

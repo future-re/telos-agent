@@ -40,6 +40,12 @@ impl Tool for ShellTool {
         &["shell"]
     }
 
+    fn prompt_text(&self) -> Option<&'static str> {
+        Some(
+            "Use Bash for shell commands and terminal operations. Prefer Read/Edit/Write/Glob/Grep for file operations.",
+        )
+    }
+
     async fn validate(&self, arguments: &Value, _context: &ToolContext) -> Result<(), AgentError> {
         required_string(arguments, "command").map(|_| ())
     }

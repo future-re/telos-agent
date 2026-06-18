@@ -37,7 +37,8 @@ pub fn default_coding_assembly(tools: Arc<ToolRegistry>, cwd: PathBuf) -> Prompt
     assembly.add_static(TaskGuidanceSection);
     assembly.add_static(SafetySection);
     assembly.add_static(ToolUsageSection);
-    assembly.add_static(ToolsSection::new(tools));
+    assembly.add_static(ToolsSection::new(Arc::clone(&tools)));
+    assembly.add_static(ToolPromptsSection::new(Arc::clone(&tools)));
     assembly.add_dynamic(DateSection);
     assembly.add_dynamic(CwdSection::new(cwd));
     assembly

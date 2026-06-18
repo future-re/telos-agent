@@ -40,6 +40,12 @@ provide the original file text (without line-number prefixes) to `Edit` when edi
         &["file_read"]
     }
 
+    fn prompt_text(&self) -> Option<&'static str> {
+        Some(
+            "Read a file before editing it. The returned content includes line numbers; omit them when providing text to Edit.",
+        )
+    }
+
     async fn validate(&self, arguments: &Value, _context: &ToolContext) -> Result<(), AgentError> {
         required_string_any(arguments, &["file_path", "path"]).map(|_| ())
     }

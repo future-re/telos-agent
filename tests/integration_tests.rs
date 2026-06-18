@@ -2158,3 +2158,20 @@ async fn tool_prompts_section_renders_registered_prompts() {
     assert!(text.contains("Always run this tool first."));
     assert_eq!(section.stability(), PromptStability::Static);
 }
+
+#[test]
+fn default_assembly_includes_tool_prompts() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let mut tools = ToolRegistry::new();
+        register_core_tools(&mut tools);
+        let assembly = telos_agent::prompt::default_coding_assembly(
+            Arc::new(tools),
+            std::env::current_dir().unwrap(),
+        );
+        let text = assembly.build().await;
+        assert!(text.contains("## Tool-specific guidance"));
+        assert!(text.contains("### Bash"));
+        assert!(text.contains("### Read"));
+    });
+}

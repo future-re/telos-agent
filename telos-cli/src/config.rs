@@ -2,8 +2,10 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::PathBuf;
+use std::sync::Arc;
 use telos_agent::{
-    AgentConfig, DeepSeekConfig, DeepSeekProvider, KimiConfig, KimiProvider, MockProvider,
+    AgentConfig, ApprovalHandler, DeepSeekConfig, DeepSeekProvider, KimiConfig, KimiProvider,
+    MockProvider,
 };
 
 use crate::cli::{ProviderArg, SharedOptions};
@@ -14,7 +16,10 @@ pub enum ResolvedProvider {
     Mock(MockProvider),
 }
 
-pub fn build_agent_config(options: &SharedOptions) -> Result<AgentConfig> {
+pub fn build_agent_config(
+    options: &SharedOptions,
+    approval_handler: Option<Arc<dyn ApprovalHandler>>,
+) -> Result<AgentConfig> {
     let mut config = AgentConfig::default();
 
     if let Some(cwd) = &options.cwd {
@@ -23,6 +28,7 @@ pub fn build_agent_config(options: &SharedOptions) -> Result<AgentConfig> {
 
     config.max_iterations = options.max_iterations;
     config.auto_validate_schema = !options.no_validate_schema;
+    config.approval_handler = approval_handler;
 
     // Inherit a safe subset of the process environment (PATH, HOME).
     let mut env = HashMap::new();

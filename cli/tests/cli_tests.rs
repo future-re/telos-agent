@@ -1,6 +1,22 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 
+// ── Task 15: TUI smoke tests ────────────────────────────────────────────────
+
+#[test]
+fn telos_help_still_works() {
+    let mut cmd = Command::cargo_bin("telos").unwrap();
+    cmd.arg("--help");
+    cmd.assert().success().stdout(predicates::str::contains("Terminal interface for telos-agent"));
+}
+
+#[test]
+fn telos_completion_subcommand_exists() {
+    let mut cmd = Command::cargo_bin("telos").unwrap();
+    cmd.arg("completion").arg("bash");
+    cmd.assert().success();
+}
+
 // ── Task 1: Dependency compile check ────────────────────────────────────────
 
 #[test]

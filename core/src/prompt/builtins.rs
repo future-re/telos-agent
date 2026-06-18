@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use crate::config::TaskPath;
 use crate::mcp::manager::McpManager;
 use crate::memory::index::MemoryStore;
 use crate::memory::profile::ProfileManager;
@@ -162,6 +163,67 @@ impl PromptSection for SafetySection {
             "When you encounter an obstacle, do not use destructive actions as a shortcut to simply make it go away. For instance, try to identify root causes and fix underlying issues rather than bypassing safety checks (e.g. --no-verify). If you discover unexpected state like unfamiliar files, branches, or configuration, investigate before deleting or overwriting, as it may represent the user's in-progress work. For example, typically resolve merge conflicts rather than discarding changes; similarly, if a lock file exists, investigate what process holds it rather than deleting it. In short: only take risky actions carefully, and when in doubt, ask before acting. Follow both the spirit and letter of these instructions - measure twice, cut once.",
         ]
         .join("\n")
+    }
+}
+
+// ── Task Path ──────────────────────────────────────────────
+
+/// Injects path-appropriate behavioural guidance based on the configured
+/// [`TaskPath`]. Fast = work directly, Standard = map context + verify,
+/// Heavy = design → plan → phased execution.
+pub struct PathSection {
+    path: TaskPath,
+}
+
+impl PathSection {
+    pub fn new(path: TaskPath) -> Self {
+        Self { path }
+    }
+}
+
+#[async_trait]
+impl PromptSection for PathSection {
+    fn name(&self) -> &str {
+        "task_path"
+    }
+    fn stability(&self) -> PromptStability {
+        PromptStability::Static
+    }
+
+    async fn render(&self, _ctx: &()) -> String {
+        match self.path {
+            TaskPath::Fast => [
+                "# Task Path: Fast",
+                "You are in Fast Path. Work directly and efficiently:",
+                "- Execute the change without heavy planning, design documents, or long context-mapping phases",
+                "- Use targeted verification: run the relevant test, confirm the fix works",
+                "- Ask at most one truly critical question; if existing context is sufficient, don't re-ask",
+                "- The shortest correct solution is the best one — don't over-engineer",
+                "- Do NOT invoke brainstorming, writing-plans, or systematic-debugging skills unless the task unexpectedly expands in scope",
+            ]
+            .join("\n"),
+            TaskPath::Standard => [
+                "# Task Path: Standard",
+                "You are in Standard Path. Map context, then execute incrementally:",
+                "- Understand the current code and change boundaries before making edits",
+                "- Use planning-with-files to track progress across multiple files",
+                "- Verify each step before moving to the next",
+                "- Write a plan document only if the task evolves beyond its initial scope",
+                "- Prefer lightweight context-mapping over heavy upfront design",
+            ]
+            .join("\n"),
+            TaskPath::Heavy => [
+                "# Task Path: Heavy",
+                "You are in Heavy Path. Design first, plan thoroughly, execute in phases:",
+                "- Explore the problem space and present a design before writing implementation code",
+                "- Write an implementation plan with clear verification gates and rollback boundaries",
+                "- Break the work into independent, testable phases with defined artifacts",
+                "- Get user approval at each major milestone before proceeding",
+                "- Do not proceed past a gate without verification evidence",
+                "- Invoke brainstorming to explore the design, then writing-plans to create the implementation plan",
+            ]
+            .join("\n"),
+        }
     }
 }
 

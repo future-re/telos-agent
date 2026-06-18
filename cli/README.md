@@ -1,16 +1,15 @@
 # telos-cli
 
-Terminal interface for [tiny_agent_core](../..).
+Codex-style interactive terminal interface for [telos-agent](..).
 
 ## Features
 
-- **Single-prompt mode:** `telos "refactor lib.rs to use anyhow"` — one-shot agent invocation
-- **Interactive REPL:** `telos chat` — multi-turn session with rustyline (history, tab completion, Emacs/Vi keybindings)
-- **Slash commands:** `/exit`, `/help`, `/clear`, `/reset`, `/tools`, `/add`, `/drop`, `/model` inside the REPL
-- **Approval policies:** Configurable per-tool approval (AlwaysAllow, AlwaysAsk, AlwaysDeny) with interactive fallback
-- **Config files:** User-level `~/.config/telos/config.toml` and project-level `.telos.toml` with layered merging
-- **Session persistence:** Chat sessions auto-saved to `~/.local/share/telos/sessions/` or `<project>/.telos/sessions/`
-- **Project detection:** Auto-discovers project root via `.git` or `.telos.toml` markers
+- **Full-screen TUI:** Launch with `telos` for an immersive agent experience
+- **Single-prompt mode:** `telos "refactor lib.rs"` for one-shot tasks
+- **Context-aware:** Auto-discovers `CLAUDE.md`, `AGENTS.md`, git status
+- **Streaming output:** Real-time markdown rendering with tool-call cards
+- **Interactive approval:** Approve/deny tool calls inline
+- **Session persistence:** Auto-saved to `.telos/sessions/`
 - **Shell completions:** `telos completion bash|zsh`
 
 ## Build
@@ -31,40 +30,16 @@ cargo install --path .
 
 ## Usage
 
+### Full TUI (default)
+
+```bash
+telos --provider deepseek --api-key $DEEPSEEK_API_KEY
+```
+
 ### Single prompt
 
 ```bash
-# DeepSeek
-telos --provider deepseek --api-key $DEEPSEEK_API_KEY "Refactor src/lib.rs to use anyhow"
-
-# Kimi
-telos --provider kimi --api-key $MOONSHOT_API_KEY "Review src/lib.rs"
-
-# Mock (for testing)
-telos --provider mock "hello"
-```
-
-### Interactive chat
-
-```bash
-telos --provider deepseek chat
-```
-
-Inside the REPL:
-
-```
-telos> /help
-Available commands:
-  /exit, /quit  Exit the REPL
-  /reset        Reset the conversation
-  /clear        Clear the screen
-  /tools        List available tools
-  /help         Show this help
-  /add <glob>   Add files matching a glob pattern
-  /drop <glob>  Remove files matching a glob pattern
-  /model <name> Change the active model
-
-telos> Refactor the error handling in main.rs
+telos --provider deepseek --api-key $DEEPSEEK_API_KEY "Refactor error handling"
 ```
 
 ### Environment variables
@@ -126,6 +101,20 @@ telos completion zsh  > /usr/local/share/zsh/site-functions/_telos
 ```
 
 Run `telos --help` for all options.
+
+## Keyboard shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send message |
+| `Alt+Enter` | Insert newline in input |
+| `Ctrl+D` | Quit when input is empty |
+| `Ctrl+C` | Cancel current turn |
+| `Ctrl+L` | Clear chat |
+| `PgUp` / `PgDn` | Scroll chat |
+| `a` / `y` | Approve pending tool call |
+| `d` / `n` | Deny pending tool call |
+| `e` | Request edit of pending tool call |
 
 ## License
 

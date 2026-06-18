@@ -1705,7 +1705,12 @@ async fn default_coding_assembly_renders_claude_style_sections() {
     use telos_agent::tool::ToolRegistry;
 
     let tools = std::sync::Arc::new(ToolRegistry::new());
-    let assembly = default_coding_assembly(tools, std::env::current_dir().unwrap(), None);
+    let assembly = default_coding_assembly(
+        tools,
+        std::env::current_dir().unwrap(),
+        None,
+        telos_agent::TaskPath::default(),
+    );
     let result = assembly.build().await;
 
     assert!(result.contains("You are telos-agent"));
@@ -2184,6 +2189,7 @@ fn default_assembly_includes_tool_prompts() {
             Arc::new(tools),
             std::env::current_dir().unwrap(),
             None,
+            telos_agent::TaskPath::default(),
         );
         let text = assembly.build().await;
         assert!(text.contains("## Tool-specific guidance"));

@@ -15,12 +15,39 @@ use crate::error::AgentError;
 use crate::hooks::HookRegistry;
 use crate::storage::Storage;
 
+/// Workflow path — the agent tailors its runtime behaviour and prompt guidance
+/// to match the expected scope and risk of the task.
+///
+/// | Path      | Typical task                                     |
+/// |-----------|--------------------------------------------------|
+/// | `Fast`    | Single-file fix, clear bug, small config change  |
+/// | `Standard`| Multi-file change, local restructure             |
+/// | `Heavy`   | New feature, cross-module refactor, 3+ steps     |
+///
+/// The path adjusts iteration caps, timeouts, and concurrency defaults. It
+/// also injects matching behavioural guidance into the system prompt so the
+/// model knows whether to work directly or follow a fuller plan cycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TaskPath {
+    /// Single-file changes, clear bugs, small config — execute directly.
+    Fast,
+    /// Multi-file changes, local restructures — map context, verify incrementally.
+    #[default]
+    Standard,
+    /// New features, cross-module refactors — design, plan, execute in phases.
+    Heavy,
+}
+
 /// Configuration for an [`AgentSession`](crate::AgentSession).
 ///
 /// Build with [`Default::default`] and override fields as needed. All fields
 /// are public so callers don't need a builder for simple cases.
 #[derive(Clone)]
 pub struct AgentConfig {
+    /// Workflow path classification for the current task. Influences iteration
+    /// budget, timeout, concurrency, and the system-prompt guidance injected at
+    /// turn time.
+    pub path: TaskPath,
     /// Optional base instruction appended to the identity section of the
     /// system prompt. For full control, use `prompt_assembly` instead.
     pub base_system_prompt: Option<String>,
@@ -81,6 +108,7 @@ impl std::fmt::Debug for AgentConfig {
         // for debugging. Other fields are considered non-sensitive.
         let env_keys: Vec<&String> = self.env.keys().collect();
         f.debug_struct("AgentConfig")
+            .field("path", &self.path)
             .field("base_system_prompt", &self.base_system_prompt)
             .field("prompt_assembly", &self.prompt_assembly.as_ref().map(|_| "<set>"))
             .field("max_iterations", &self.max_iterations)
@@ -108,6 +136,7 @@ impl std::fmt::Debug for AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
+            path: TaskPath::default(),
             base_system_prompt: None,
             prompt_assembly: None,
             max_iterations: 8,
@@ -252,10 +281,45 @@ impl AgentConfig {
             tools,
             self.cwd.clone(),
             self.skill_registry.clone(),
+            self.path,
         );
         self.base_system_prompt = None;
         self.prompt_assembly = Some(Arc::new(assembly));
         Ok(self)
+    }
+
+    /// Apply path-appropriate defaults for iteration budget, timeouts, and
+    /// concurrency. Call after setting custom values if you want the path to
+    /// override them.
+    ///
+    /// | Knob                   | Fast      | Standard  | Heavy     |
+    /// |------------------------|-----------|-----------|-----------|
+    /// | `max_iterations`       | 4         | 8         | 16        |
+    /// | `tool_concurrency_limit`| 10       | 10        | 5         |
+    /// | `token_budget`         | None      | None      | 128k      |
+    /// | `tool_timeout_ms`      | 30_000    | None      | 60_000    |
+    pub fn with_path(mut self, path: TaskPath) -> Self {
+        self.path = path;
+        match path {
+            TaskPath::Fast => {
+                self.max_iterations = 4;
+                self.tool_timeout_ms = Some(30_000);
+                // Fast tasks shouldn't need compaction — keep budget off.
+                self.token_budget = None;
+            }
+            TaskPath::Standard => {
+                self.max_iterations = 8;
+                self.tool_timeout_ms = None;
+                self.token_budget = None;
+            }
+            TaskPath::Heavy => {
+                self.max_iterations = 16;
+                self.tool_timeout_ms = Some(60_000);
+                self.token_budget = Some(TokenBudget::new(128_000));
+                self.tool_concurrency_limit = 5;
+            }
+        }
+        self
     }
 
     /// Load bundled skills into a fresh skill registry attached to this config.

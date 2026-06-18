@@ -14,11 +14,12 @@ use std::sync::Arc;
 pub use assembly::PromptAssembly;
 pub use builtins::{
     CwdSection, DateSection, GitStatusSection, IdentitySection, McpSection, MemorySection,
-    ProfileSection, SafetySection, SkillsSection, TaskGuidanceSection, ToneStyleSection,
-    ToolPromptsSection, ToolUsageSection, ToolsSection,
+    PathSection, ProfileSection, SafetySection, SkillsSection, TaskGuidanceSection,
+    ToneStyleSection, ToolPromptsSection, ToolUsageSection, ToolsSection,
 };
 pub use section::{CacheHint, PromptBlock, PromptSection, PromptStability};
 
+use crate::config::TaskPath;
 use crate::tool::ToolRegistry;
 
 /// Build a standard coding-agent prompt assembly.
@@ -34,12 +35,14 @@ pub fn default_coding_assembly(
     tools: Arc<ToolRegistry>,
     cwd: PathBuf,
     skills: Option<Arc<crate::skills::SkillRegistry>>,
+    path: TaskPath,
 ) -> PromptAssembly {
     let mut assembly = PromptAssembly::new();
     assembly.add(IdentitySection::new(None));
     assembly.add(ToneStyleSection);
     assembly.add(TaskGuidanceSection);
     assembly.add(SafetySection);
+    assembly.add(PathSection::new(path));
     assembly.add(ToolUsageSection);
     assembly.add(ToolsSection::new(Arc::clone(&tools)));
     assembly.add(ToolPromptsSection::new(Arc::clone(&tools)));

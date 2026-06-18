@@ -48,8 +48,8 @@ pub use approval::{
 };
 // Compaction — history- and message-level shrinking strategies.
 pub use compaction::{CompactionStrategy, SummaryCompaction};
-// Configuration — the session config aggregate and the token-budget knob.
-pub use config::{AgentConfig, TokenBudget};
+// Configuration — the session config aggregate, task path, and token-budget knob.
+pub use config::{AgentConfig, TaskPath, TokenBudget};
 // Errors — the single failure type used across the crate.
 pub use error::{AgentError, ProviderError};
 // Tool executor — direct entry points for callers that bypass the turn loop.

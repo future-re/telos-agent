@@ -251,7 +251,7 @@ cargo run --example kimi_tool_loop -- "Use the echo_json tool once, then summari
 
 ## CLI
 
-项目包含 `telos-cli` 终端接口，提供单次调用和交互式 REPL 两种模式。
+项目包含 `telos-cli` 终端接口，提供全屏 TUI（默认）、单次调用两种模式。
 
 ### 构建与安装
 
@@ -267,14 +267,14 @@ cargo install --path .
 ### 基本用法
 
 ```bash
-# DeepSeek
+# 全屏 TUI（默认）
+telos --provider deepseek --api-key $DEEPSEEK_API_KEY
+
+# DeepSeek 单次调用
 telos --provider deepseek --api-key $DEEPSEEK_API_KEY "Review src/lib.rs"
 
-# Kimi
+# Kimi 单次调用
 telos --provider kimi --api-key $MOONSHOT_API_KEY "Refactor error handling"
-
-# 交互式 REPL
-telos --provider deepseek chat
 
 # Mock（快速测试）
 telos --provider mock "hello"
@@ -316,7 +316,7 @@ cargo clippy --workspace --all-targets
 
 以下能力在 `telos_agent` 当前范围之外：
 
-- TUI / Web 层（CLI 已提供基础命令行入口，但还不是全功能 TUI）。
+- TUI / Web 层（CLI 已提供全功能 TUI，见 [cli/README.md](cli/README.md)）。
 - Plugin / swarm / coordinator 等多 agent 编排协议。
 - 多模态输入输出。
 - 跨 provider fallback（当前仅支持单 provider 内的重试）。

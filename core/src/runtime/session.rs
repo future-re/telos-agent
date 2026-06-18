@@ -512,6 +512,7 @@ impl AgentSession {
                         Arc::new(tools.clone()),
                         self.config.cwd.clone(),
                         self.config.skill_registry.clone(),
+                        self.config.path,
                     ),
                 ));
             }

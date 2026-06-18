@@ -1,4 +1,5 @@
-use crate::prompt::{PromptSection, PromptStability};
+use crate::prompt::PromptSection;
+use crate::prompt::section::{PromptBlock, PromptStability};
 use std::collections::HashMap;
 use tokio::sync::Mutex;
 
@@ -35,23 +36,43 @@ impl PromptAssembly {
     pub async fn build(&self) -> String {
         let mut parts = Vec::new();
         for section in &self.sections {
-            let text = match section.stability() {
-                PromptStability::Static => {
-                    let mut cache = self.static_cache.lock().await;
-                    if let Some(cached) = cache.get(section.name()) {
-                        cached.clone()
-                    } else {
-                        let rendered = section.render(&()).await;
-                        cache.insert(section.name().to_string(), rendered.clone());
-                        rendered
-                    }
-                }
-                PromptStability::Dynamic => section.render(&()).await,
-            };
+            let text = self.render_section(section).await;
             if !text.is_empty() {
                 parts.push(text);
             }
         }
         parts.join("\n\n")
+    }
+
+    /// Render the assembly into structured blocks.
+    pub async fn build_blocks(&self) -> Vec<PromptBlock> {
+        let mut blocks = Vec::new();
+        for section in &self.sections {
+            let text = self.render_section(section).await;
+            if !text.is_empty() {
+                blocks.push(PromptBlock {
+                    name: section.name().to_string(),
+                    text,
+                    stability: section.stability(),
+                });
+            }
+        }
+        blocks
+    }
+
+    async fn render_section(&self, section: &dyn PromptSection) -> String {
+        match section.stability() {
+            PromptStability::Static => {
+                let mut cache = self.static_cache.lock().await;
+                if let Some(cached) = cache.get(section.name()) {
+                    cached.clone()
+                } else {
+                    let rendered = section.render(&()).await;
+                    cache.insert(section.name().to_string(), rendered.clone());
+                    rendered
+                }
+            }
+            PromptStability::Dynamic => section.render(&()).await,
+        }
     }
 }

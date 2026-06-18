@@ -2229,3 +2229,46 @@ fn compaction_emits_system_reminder() {
         assert!(has_reminder);
     });
 }
+
+#[tokio::test]
+async fn prompt_assembly_build_blocks_preserves_stability() {
+    use telos_agent::prompt::{PromptAssembly, PromptSection, PromptStability};
+
+    struct StaticSection;
+    #[async_trait::async_trait]
+    impl PromptSection for StaticSection {
+        fn name(&self) -> &str {
+            "static"
+        }
+        fn stability(&self) -> PromptStability {
+            PromptStability::Static
+        }
+        async fn render(&self, _ctx: &()) -> String {
+            "static text".into()
+        }
+    }
+
+    struct DynamicSection;
+    #[async_trait::async_trait]
+    impl PromptSection for DynamicSection {
+        fn name(&self) -> &str {
+            "dynamic"
+        }
+        fn stability(&self) -> PromptStability {
+            PromptStability::Dynamic
+        }
+        async fn render(&self, _ctx: &()) -> String {
+            "dynamic text".into()
+        }
+    }
+
+    let mut assembly = PromptAssembly::new();
+    assembly.add_static(StaticSection);
+    assembly.add_dynamic(DynamicSection);
+    let blocks = assembly.build_blocks().await;
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0].name, "static");
+    assert_eq!(blocks[0].stability, PromptStability::Static);
+    assert_eq!(blocks[1].name, "dynamic");
+    assert_eq!(blocks[1].stability, PromptStability::Dynamic);
+}

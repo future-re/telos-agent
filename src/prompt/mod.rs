@@ -17,7 +17,7 @@ pub use builtins::{
     ProfileSection, SafetySection, SkillsSection, TaskGuidanceSection, ToneStyleSection,
     ToolPromptsSection, ToolUsageSection, ToolsSection,
 };
-pub use section::{PromptSection, PromptStability};
+pub use section::{CacheHint, PromptBlock, PromptSection, PromptStability};
 
 use crate::tool::ToolRegistry;
 

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
-use tiny_agent_core::{
+use telos_agent::{
     AgentConfig, AgentError, AgentSession, KimiConfig, KimiProvider, Tool, ToolContext,
     ToolDefinition, ToolOutput, ToolRegistry,
 };

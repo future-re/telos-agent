@@ -1,13 +1,13 @@
-# tiny_agent_core
+# telos-agent
 
-`tiny_agent_core` 是一个用 Rust 编写的轻量级 agent runtime，重点覆盖会话管理、模型调用、工具执行和结果回注这一条核心链路。它把一次「用户输入 → 模型采样 → 工具执行 → 结果回注」的完整 turn 封装成可扩展、可观测、可持久化的运行时单元。
+`telos-agent` 是一个用 Rust 编写的意图驱动 agent runtime，重点覆盖会话管理、模型调用、工具执行和结果回注这一条核心链路。它把一次「用户输入 → 模型采样 → 工具执行 → 结果回注」的完整 turn 封装成可扩展、可观测、可持久化的运行时单元。
 
 ## 定位与使用场景
 
 它主要面向两类使用场景：
 
 - **作为实验底座**，用于验证 agent loop、tool use、provider adapter、权限审批、memory、skills 等设计。
-- **作为运行时内核**，供 TUI、HTTP 服务、任务系统或其他编排层集成；上层只需实现交互界面，核心链路由 `tiny_agent_core` 提供。
+- **作为运行时内核**，供 TUI、HTTP 服务、任务系统或其他编排层集成；上层只需实现交互界面，核心链路由 `telos-agent` 提供。
 
 ## 功能特性
 
@@ -179,7 +179,7 @@
 ```rust
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tiny_agent_core::{
+use telos_agent::{
     AgentConfig, AgentError, AgentSession, CompletionResponse, Message,
     MockProvider, StopReason, Tool, ToolContext, ToolDefinition,
     ToolOutput, ToolRegistry,
@@ -253,7 +253,7 @@ cargo test
 
 ## 暂不包含
 
-以下能力在 `tiny_agent_core` 当前范围之外：
+以下能力在 `telos-agent` 当前范围之外：
 
 - UI / TUI / Web 层（只提供运行时内核）。
 - Plugin / swarm / coordinator 等多 agent 编排协议。

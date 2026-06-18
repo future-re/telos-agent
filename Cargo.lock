@@ -1853,6 +1853,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "telos_agent"
+version = "0.1.0"
+dependencies = [
+ "async-openai",
+ "async-stream",
+ "async-trait",
+ "dotenvy",
+ "futures-core",
+ "futures-util",
+ "glob",
+ "jsonschema",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror",
+ "tiktoken-rs",
+ "tokio",
+ "tracing",
+ "tree-sitter",
+ "tree-sitter-bash",
+ "wiremock",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1898,31 +1923,6 @@ dependencies = [
  "lazy_static",
  "regex",
  "rustc-hash",
-]
-
-[[package]]
-name = "tiny_agent_core"
-version = "0.1.0"
-dependencies = [
- "async-openai",
- "async-stream",
- "async-trait",
- "dotenvy",
- "futures-core",
- "futures-util",
- "glob",
- "jsonschema",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror",
- "tiktoken-rs",
- "tokio",
- "tracing",
- "tree-sitter",
- "tree-sitter-bash",
- "wiremock",
 ]
 
 [[package]]

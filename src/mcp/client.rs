@@ -98,7 +98,7 @@ impl McpClient {
                 json!({
                     "protocolVersion": "2024-11-05",
                     "capabilities": {},
-                    "clientInfo": { "name": "tiny-agent-core", "version": "0.1.0" },
+                    "clientInfo": { "name": "telos-agent", "version": "0.1.0" },
                 }),
             )
             .await?;

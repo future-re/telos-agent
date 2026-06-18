@@ -3,16 +3,16 @@ use futures_util::StreamExt;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-use tiny_agent_core::AgentError;
-use tiny_agent_core::MockProvider;
-use tiny_agent_core::register_core_tools;
-use tiny_agent_core::{AgentConfig, AgentSession, TurnEvent};
-use tiny_agent_core::{ApprovalDecision, FixedDecisionHandler, SubagentTool, TokenBudget};
-use tiny_agent_core::{CompletionResponse, StopReason};
-use tiny_agent_core::{ContentBlock, Message, ToolCall};
-use tiny_agent_core::{Hook, HookContext, HookPhase, HookRegistry};
-use tiny_agent_core::{JsonlStorage, PermissionEngine, PermissionRule, Storage, SummaryCompaction};
-use tiny_agent_core::{
+use telos_agent::AgentError;
+use telos_agent::MockProvider;
+use telos_agent::register_core_tools;
+use telos_agent::{AgentConfig, AgentSession, TurnEvent};
+use telos_agent::{ApprovalDecision, FixedDecisionHandler, SubagentTool, TokenBudget};
+use telos_agent::{CompletionResponse, StopReason};
+use telos_agent::{ContentBlock, Message, ToolCall};
+use telos_agent::{Hook, HookContext, HookPhase, HookRegistry};
+use telos_agent::{JsonlStorage, PermissionEngine, PermissionRule, Storage, SummaryCompaction};
+use telos_agent::{
     PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
 };
 
@@ -64,9 +64,9 @@ fn multi_step_tool_loop_completes() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![
-                        ContentBlock::Text(tiny_agent_core::TextBlock {
+                        ContentBlock::Text(telos_agent::TextBlock {
                             text: "Let me calculate that.".into(),
                         }),
                         ContentBlock::ToolCall(ToolCall {
@@ -111,7 +111,7 @@ fn tool_calls_continue_even_when_stop_reason_is_end_turn() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "add".into(),
@@ -147,7 +147,7 @@ fn missing_tool_returns_error_result_message() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "missing".into(),
@@ -212,7 +212,7 @@ fn permission_denial_returns_structured_tool_error() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "deny".into(),
@@ -361,7 +361,7 @@ impl Tool for ProgressTool {
         context: ToolContext,
     ) -> Result<ToolOutput, AgentError> {
         if let Some(tx) = &context.progress {
-            let _ = tx.send(tiny_agent_core::ToolProgress {
+            let _ = tx.send(telos_agent::ToolProgress {
                 tool_call_id: None,
                 message: "halfway".into(),
                 data: None,
@@ -378,7 +378,7 @@ fn tool_result_budget_compacts_large_output() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "big".into(),
@@ -495,7 +495,7 @@ fn permission_engine_denies_tool() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "add".into(),
@@ -537,7 +537,7 @@ fn permission_engine_allows_tool() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "add".into(),
@@ -579,7 +579,7 @@ fn permission_engine_matches_tool_aliases_with_last_rule_wins() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "add".into(),
@@ -618,7 +618,7 @@ fn summary_compaction_triggers_when_over_budget() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "big".into(),
@@ -707,7 +707,7 @@ fn builtin_file_read_tool_returns_file_contents() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "file_read".into(),
@@ -756,7 +756,7 @@ fn file_read_rejects_symlink_escape() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "Read".into(),
@@ -821,7 +821,7 @@ fn edit_requires_prior_full_read() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "Edit".into(),
@@ -884,7 +884,7 @@ fn edit_rejects_stale_file_after_read() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "Read".into(),
@@ -896,7 +896,7 @@ fn edit_rejects_stale_file_after_read() {
             },
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-2".into(),
                         name: "Edit".into(),
@@ -962,7 +962,7 @@ fn permission_engine_allows_shell_by_command_prefix() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "shell".into(),
@@ -1000,7 +1000,7 @@ fn shell_requires_approval_by_default() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "shell".into(),
@@ -1037,7 +1037,7 @@ fn tool_progress_streams_before_tool_result() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "progress".into(),
@@ -1089,7 +1089,7 @@ fn token_budget_triggers_auto_compaction() {
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
-                usage: Some(tiny_agent_core::TokenUsage { input_tokens: 10, output_tokens: 2 }),
+                usage: Some(telos_agent::TokenUsage { input_tokens: 10, output_tokens: 2 }),
             },
         ]);
         let tools = ToolRegistry::new();
@@ -1118,7 +1118,7 @@ fn subagent_tool_runs_in_process_agent() {
         let outer_provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "subagent".into(),
@@ -1166,16 +1166,14 @@ fn thinking_blocks_are_separate_from_final_text() {
     runtime.block_on(async {
         let provider = MockProvider::new(vec![CompletionResponse {
             message: Message {
-                role: tiny_agent_core::Role::Assistant,
+                role: telos_agent::Role::Assistant,
                 blocks: vec![
-                    ContentBlock::Thinking(tiny_agent_core::ThinkingBlock {
+                    ContentBlock::Thinking(telos_agent::ThinkingBlock {
                         text: "I need to reason about this.".into(),
                         signature: None,
                         is_redacted: false,
                     }),
-                    ContentBlock::Text(tiny_agent_core::TextBlock {
-                        text: "The answer is 7.".into(),
-                    }),
+                    ContentBlock::Text(telos_agent::TextBlock { text: "The answer is 7.".into() }),
                 ],
             },
             stop_reason: StopReason::EndTurn,
@@ -1204,7 +1202,7 @@ fn schema_validation_rejects_invalid_tool_arguments() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "add".into(),
@@ -1240,7 +1238,7 @@ fn schema_validation_can_be_disabled() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "add".into(),
@@ -1283,7 +1281,7 @@ fn approval_handler_allows_asked_tool_call() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "add".into(),
@@ -1305,8 +1303,8 @@ fn approval_handler_allows_asked_tool_call() {
 
         let mut session = AgentSession::new(AgentConfig {
             permission_engine: Some(engine),
-            approval_handler: Some(Arc::new(tiny_agent_core::FixedDecisionHandler {
-                decision: tiny_agent_core::ApprovalDecision::Allow,
+            approval_handler: Some(Arc::new(telos_agent::FixedDecisionHandler {
+                decision: telos_agent::ApprovalDecision::Allow,
             })),
             ..AgentConfig::default()
         })
@@ -1335,7 +1333,7 @@ fn approval_handler_denies_asked_tool_call() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "add".into(),
@@ -1357,8 +1355,8 @@ fn approval_handler_denies_asked_tool_call() {
 
         let mut session = AgentSession::new(AgentConfig {
             permission_engine: Some(engine),
-            approval_handler: Some(Arc::new(tiny_agent_core::FixedDecisionHandler {
-                decision: tiny_agent_core::ApprovalDecision::Deny { reason: "not today".into() },
+            approval_handler: Some(Arc::new(telos_agent::FixedDecisionHandler {
+                decision: telos_agent::ApprovalDecision::Deny { reason: "not today".into() },
             })),
             ..AgentConfig::default()
         })
@@ -1381,7 +1379,7 @@ fn approval_handler_modifies_asked_tool_call() {
         let provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "add".into(),
@@ -1403,8 +1401,8 @@ fn approval_handler_modifies_asked_tool_call() {
 
         let mut session = AgentSession::new(AgentConfig {
             permission_engine: Some(engine),
-            approval_handler: Some(Arc::new(tiny_agent_core::FixedDecisionHandler {
-                decision: tiny_agent_core::ApprovalDecision::Modify {
+            approval_handler: Some(Arc::new(telos_agent::FixedDecisionHandler {
+                decision: telos_agent::ApprovalDecision::Modify {
                     arguments: json!({ "a": 10, "b": 5 }),
                 },
             })),
@@ -1422,9 +1420,9 @@ fn approval_handler_modifies_asked_tool_call() {
 #[tokio::test]
 async fn skill_tool_invokes_and_returns_prompt() {
     use std::sync::Arc;
-    use tiny_agent_core::skills::{Skill, SkillArg, SkillRegistry, SkillSource};
-    use tiny_agent_core::tool::{Tool, ToolContext};
-    use tiny_agent_core::tools::SkillTool;
+    use telos_agent::skills::{Skill, SkillArg, SkillRegistry, SkillSource};
+    use telos_agent::tool::{Tool, ToolContext};
+    use telos_agent::tools::SkillTool;
 
     let mut reg = SkillRegistry::new();
     reg.register(Skill {
@@ -1467,7 +1465,7 @@ async fn skill_tool_invokes_and_returns_prompt() {
 
 #[tokio::test]
 async fn skill_loader_parses_valid_markdown() {
-    use tiny_agent_core::skills::{SkillLoader, SkillSource};
+    use telos_agent::skills::{SkillLoader, SkillSource};
 
     let dir = tempfile::tempdir().unwrap();
     let skill_content = r#"---
@@ -1499,7 +1497,7 @@ This is the body text.
 
 #[test]
 fn skill_loader_empty_directory_returns_empty() {
-    use tiny_agent_core::skills::SkillLoader;
+    use telos_agent::skills::SkillLoader;
 
     let dir = tempfile::tempdir().unwrap();
     let skills = SkillLoader::load_from_dir(dir.path()).unwrap();
@@ -1508,7 +1506,7 @@ fn skill_loader_empty_directory_returns_empty() {
 
 #[test]
 fn skill_loader_skips_non_md_files() {
-    use tiny_agent_core::skills::SkillLoader;
+    use telos_agent::skills::SkillLoader;
 
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("notes.txt"), "not a skill").unwrap();
@@ -1518,7 +1516,7 @@ fn skill_loader_skips_non_md_files() {
 
 #[test]
 fn skill_loader_skips_malformed_yaml() {
-    use tiny_agent_core::skills::SkillLoader;
+    use telos_agent::skills::SkillLoader;
 
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("bad.md"), "---\nname: bad\nnot: valid:\n---\nbody").unwrap();
@@ -1529,7 +1527,7 @@ fn skill_loader_skips_malformed_yaml() {
 
 #[test]
 fn skill_registry_override_priority() {
-    use tiny_agent_core::skills::{Skill, SkillRegistry, SkillSource};
+    use telos_agent::skills::{Skill, SkillRegistry, SkillSource};
 
     let mut reg = SkillRegistry::new();
     reg.register(Skill {
@@ -1556,7 +1554,7 @@ fn skill_registry_override_priority() {
 
 #[test]
 fn skill_registry_render_for_prompt() {
-    use tiny_agent_core::skills::{Skill, SkillArg, SkillRegistry, SkillSource};
+    use telos_agent::skills::{Skill, SkillArg, SkillRegistry, SkillSource};
 
     let mut reg = SkillRegistry::new();
     reg.register(Skill {
@@ -1580,28 +1578,28 @@ fn skill_registry_render_for_prompt() {
 
 #[test]
 fn skill_registry_empty_renders_empty_string() {
-    use tiny_agent_core::skills::SkillRegistry;
+    use telos_agent::skills::SkillRegistry;
     let reg = SkillRegistry::new();
     assert_eq!(reg.render_for_prompt(), "");
 }
 
 #[test]
 fn skill_registry_get_missing_returns_none() {
-    use tiny_agent_core::skills::SkillRegistry;
+    use telos_agent::skills::SkillRegistry;
     let reg = SkillRegistry::new();
     assert!(reg.get("nonexistent").is_none());
 }
 
 #[test]
 fn bundled_skills_load_successfully() {
-    use tiny_agent_core::skills::SkillLoader;
+    use telos_agent::skills::SkillLoader;
     let skills = SkillLoader::load_bundled_skills();
     assert!(skills.len() >= 5, "expected >=5 bundled skills, got {}", skills.len());
     for s in &skills {
         assert!(!s.name.is_empty(), "skill has empty name");
         assert!(!s.description.is_empty(), "skill '{}' has empty description", s.name);
         assert!(!s.prompt.is_empty(), "skill '{}' has empty prompt", s.name);
-        assert_eq!(s.source, tiny_agent_core::skills::SkillSource::Bundled);
+        assert_eq!(s.source, telos_agent::skills::SkillSource::Bundled);
     }
 }
 
@@ -1609,7 +1607,7 @@ fn bundled_skills_load_successfully() {
 async fn prompt_assembly_caches_static_sections() {
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use tiny_agent_core::prompt::{PromptAssembly, PromptSection, PromptStability};
+    use telos_agent::prompt::{PromptAssembly, PromptSection, PromptStability};
 
     static CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -1661,9 +1659,9 @@ async fn prompt_assembly_caches_static_sections() {
 
 #[tokio::test]
 async fn builtin_prompt_sections_render_without_error() {
-    use tiny_agent_core::prompt::PromptAssembly;
-    use tiny_agent_core::prompt::builtins::*;
-    use tiny_agent_core::tool::ToolRegistry;
+    use telos_agent::prompt::PromptAssembly;
+    use telos_agent::prompt::builtins::*;
+    use telos_agent::tool::ToolRegistry;
 
     let mut assembly = PromptAssembly::new();
     assembly.add_static(IdentitySection::new(Some("Be helpful.".into())));
@@ -1673,7 +1671,7 @@ async fn builtin_prompt_sections_render_without_error() {
     assembly.add_dynamic(GitStatusSection);
 
     let result = assembly.build().await;
-    assert!(result.contains("tiny-agent"));
+    assert!(result.contains("telos-agent"));
     assert!(result.contains("Today's date"));
     assert!(result.contains("Working directory"));
 }
@@ -1681,7 +1679,7 @@ async fn builtin_prompt_sections_render_without_error() {
 #[test]
 fn prompt_assembly_integration_with_session() {
     use async_trait::async_trait;
-    use tiny_agent_core::prompt::{PromptAssembly, PromptSection, PromptStability};
+    use telos_agent::prompt::{PromptAssembly, PromptSection, PromptStability};
 
     struct TestSection;
     #[async_trait]
@@ -1712,8 +1710,8 @@ fn prompt_assembly_integration_with_session() {
 #[tokio::test]
 async fn memory_write_and_read_tools_roundtrip() {
     use std::sync::{Arc, Mutex};
-    use tiny_agent_core::memory::{MemoryReadTool, MemoryStore, MemoryWriteTool};
-    use tiny_agent_core::tool::{Tool, ToolContext};
+    use telos_agent::memory::{MemoryReadTool, MemoryStore, MemoryWriteTool};
+    use telos_agent::tool::{Tool, ToolContext};
 
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(Mutex::new(MemoryStore::new(dir.path().to_path_buf())));
@@ -1759,9 +1757,9 @@ async fn memory_write_and_read_tools_roundtrip() {
 #[tokio::test]
 async fn memory_section_renders_top_entries() {
     use std::sync::{Arc, Mutex};
-    use tiny_agent_core::memory::{MemoryCategory, MemoryEntry, MemoryStatus, MemoryStore};
-    use tiny_agent_core::prompt::PromptSection;
-    use tiny_agent_core::prompt::builtins::MemorySection;
+    use telos_agent::memory::{MemoryCategory, MemoryEntry, MemoryStatus, MemoryStore};
+    use telos_agent::prompt::PromptSection;
+    use telos_agent::prompt::builtins::MemorySection;
 
     let dir = tempfile::tempdir().unwrap();
     let mut store = MemoryStore::new(dir.path().to_path_buf());
@@ -1792,9 +1790,9 @@ async fn memory_section_renders_top_entries() {
 #[tokio::test]
 async fn memory_section_empty_when_no_memories() {
     use std::sync::{Arc, Mutex};
-    use tiny_agent_core::memory::MemoryStore;
-    use tiny_agent_core::prompt::PromptSection;
-    use tiny_agent_core::prompt::builtins::MemorySection;
+    use telos_agent::memory::MemoryStore;
+    use telos_agent::prompt::PromptSection;
+    use telos_agent::prompt::builtins::MemorySection;
 
     let dir = tempfile::tempdir().unwrap();
     let store = MemoryStore::new(dir.path().to_path_buf());
@@ -1806,9 +1804,9 @@ async fn memory_section_empty_when_no_memories() {
 #[tokio::test]
 async fn profile_section_renders_profiles() {
     use std::sync::Arc;
-    use tiny_agent_core::memory::ProfileManager;
-    use tiny_agent_core::prompt::PromptSection;
-    use tiny_agent_core::prompt::builtins::ProfileSection;
+    use telos_agent::memory::ProfileManager;
+    use telos_agent::prompt::PromptSection;
+    use telos_agent::prompt::builtins::ProfileSection;
 
     let dir = tempfile::tempdir().unwrap();
     let mgr =
@@ -1827,9 +1825,9 @@ async fn profile_section_renders_profiles() {
 #[tokio::test]
 async fn profile_section_rerenders_when_profiles_change() {
     use std::sync::Arc;
-    use tiny_agent_core::memory::ProfileManager;
-    use tiny_agent_core::prompt::PromptAssembly;
-    use tiny_agent_core::prompt::builtins::ProfileSection;
+    use telos_agent::memory::ProfileManager;
+    use telos_agent::prompt::PromptAssembly;
+    use telos_agent::prompt::builtins::ProfileSection;
 
     let dir = tempfile::tempdir().unwrap();
     let mgr =
@@ -1851,8 +1849,8 @@ async fn profile_section_rerenders_when_profiles_change() {
 #[tokio::test]
 async fn web_fetch_tool_returns_html_as_text() {
     use std::sync::Arc;
-    use tiny_agent_core::tool::{Tool, ToolContext};
-    use tiny_agent_core::tools::WebFetchTool;
+    use telos_agent::tool::{Tool, ToolContext};
+    use telos_agent::tools::WebFetchTool;
 
     let tool = WebFetchTool::new();
     let ctx = ToolContext {
@@ -1876,8 +1874,8 @@ async fn web_fetch_tool_returns_html_as_text() {
 #[tokio::test]
 async fn web_search_tool_returns_results() {
     use std::sync::Arc;
-    use tiny_agent_core::tool::{Tool, ToolContext};
-    use tiny_agent_core::tools::WebSearchTool;
+    use telos_agent::tool::{Tool, ToolContext};
+    use telos_agent::tools::WebSearchTool;
 
     let tool = WebSearchTool;
     let ctx = ToolContext {
@@ -1910,8 +1908,8 @@ async fn web_search_tool_returns_results() {
 #[tokio::test]
 async fn ask_user_question_validates_and_returns_questions() {
     use std::sync::Arc;
-    use tiny_agent_core::tool::{Tool, ToolContext};
-    use tiny_agent_core::tools::AskUserQuestionTool;
+    use telos_agent::tool::{Tool, ToolContext};
+    use telos_agent::tools::AskUserQuestionTool;
 
     let tool = AskUserQuestionTool;
     let ctx = ToolContext {
@@ -1951,8 +1949,8 @@ async fn ask_user_question_validates_and_returns_questions() {
 #[tokio::test]
 async fn ask_user_question_rejects_empty_questions() {
     use std::sync::Arc;
-    use tiny_agent_core::tool::{Tool, ToolContext};
-    use tiny_agent_core::tools::AskUserQuestionTool;
+    use telos_agent::tool::{Tool, ToolContext};
+    use telos_agent::tools::AskUserQuestionTool;
 
     let tool = AskUserQuestionTool;
     let ctx = ToolContext {
@@ -1978,7 +1976,7 @@ fn subagent_fork_mode_runs_multiple_lenses() {
         let outer_provider = MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
-                    role: tiny_agent_core::Role::Assistant,
+                    role: telos_agent::Role::Assistant,
                     blocks: vec![ContentBlock::ToolCall(ToolCall {
                         id: "call-1".into(),
                         name: "subagent".into(),

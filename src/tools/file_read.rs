@@ -78,9 +78,8 @@ provide the original file text (without line-number prefixes) to `Edit` when edi
         if bytes.contains(&0) {
             return Err(AgentError::ToolExecution {
                 tool: "Read".into(),
-                message:
-                    "file appears to be binary; Read only supports UTF-8 text in tiny_agent_core"
-                        .into(),
+                message: "file appears to be binary; Read only supports UTF-8 text in telos_agent"
+                    .into(),
             });
         }
         let content = String::from_utf8(bytes).map_err(|_| AgentError::ToolExecution {

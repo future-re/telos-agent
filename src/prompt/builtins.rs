@@ -32,7 +32,7 @@ impl PromptSection for IdentitySection {
 
     async fn render(&self, _ctx: &()) -> String {
         let mut parts = vec![
-            "You are tiny-agent, a CLI coding assistant.".to_string(),
+            "You are telos-agent, a CLI coding assistant.".to_string(),
             "You have access to tools for reading/writing files, running shell commands, searching code, and more.".to_string(),
         ];
         if let Some(base) = &self.base {

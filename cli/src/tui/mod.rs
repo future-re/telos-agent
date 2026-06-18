@@ -31,7 +31,6 @@ impl Drop for TuiGuard {
 }
 
 /// Launch the ratatui full-screen TUI.
-#[allow(unused_variables)]
 pub async fn run(
     config: AgentConfig,
     provider: Arc<dyn ModelProvider>,
@@ -46,7 +45,7 @@ pub async fn run(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(status_text);
+    let mut app = App::new(config, provider, tools, status_text)?;
     let tick_rate = Duration::from_millis(100);
     let mut reader = EventStream::new();
 

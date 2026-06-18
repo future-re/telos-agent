@@ -1,8 +1,12 @@
+use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::widgets::Paragraph;
 use std::collections::VecDeque;
+use std::pin::pin;
+use std::sync::Arc;
 use telos_agent::TurnEvent;
+use tokio::sync::mpsc;
 
 use crate::tui::approval::PendingApproval;
 use crate::tui::chat_panel::ChatPanel;
@@ -54,11 +58,51 @@ pub struct App {
     pub input: InputPanel,
     /// Approval requests waiting for user decision.
     pub pending_approvals: VecDeque<PendingApproval>,
+    /// Send prompts to the background agent task.
+    turn_tx: mpsc::UnboundedSender<String>,
+    /// Receive TurnEvents from the background agent task.
+    turn_rx: mpsc::UnboundedReceiver<Event>,
+    /// Receive pending approvals from the TuiApprovalHandler.
+    approval_rx: mpsc::UnboundedReceiver<PendingApproval>,
 }
 
 impl App {
-    pub fn new(status_text: String) -> Self {
-        Self {
+    pub fn new(
+        config: telos_agent::AgentConfig,
+        provider: Arc<dyn telos_agent::ModelProvider>,
+        tools: telos_agent::ToolRegistry,
+        status_text: String,
+    ) -> Result<Self, telos_agent::AgentError> {
+        let (prompt_tx, mut prompt_rx) = mpsc::unbounded_channel::<String>();
+        let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
+        let (approval_tx, approval_rx) = mpsc::unbounded_channel::<PendingApproval>();
+
+        // Background task owns the AgentSession because run_turn_stream needs &mut self.
+        tokio::spawn(async move {
+            let approval_handler: Option<Arc<dyn telos_agent::ApprovalHandler>> =
+                Some(Arc::new(crate::tui::approval::TuiApprovalHandler::new(approval_tx)));
+            let mut config = config;
+            config.approval_handler = approval_handler;
+
+            let mut session =
+                telos_agent::AgentSession::new(config).expect("failed to create agent session");
+
+            while let Some(prompt) = prompt_rx.recv().await {
+                let erased = telos_agent::ErasedProvider(provider.as_ref());
+                let mut stream = pin!(session.run_turn_stream(&erased, &tools, prompt,));
+                while let Some(event) = stream.next().await {
+                    match event {
+                        Ok(te) => {
+                            let _ = event_tx.send(Event::Turn(te));
+                        }
+                        Err(_e) => break,
+                    }
+                }
+                let _ = event_tx.send(Event::TurnComplete);
+            }
+        });
+
+        Ok(Self {
             mode: Mode::Normal,
             should_quit: false,
             status_text,
@@ -66,7 +110,10 @@ impl App {
             chat: ChatPanel::new(),
             input: InputPanel::new(),
             pending_approvals: VecDeque::new(),
-        }
+            turn_tx: prompt_tx,
+            turn_rx: event_rx,
+            approval_rx,
+        })
     }
 
     /// Process a single event.
@@ -87,7 +134,15 @@ impl App {
                     self.send_prompt(prompt);
                 }
             }
-            Event::Tick => {}
+            Event::Tick => {
+                while let Ok(event) = self.turn_rx.try_recv() {
+                    self.handle_event(event)?;
+                }
+                while let Ok(pending) = self.approval_rx.try_recv() {
+                    self.pending_approvals.push_back(pending);
+                    self.mode = Mode::Approving;
+                }
+            }
             Event::Resize { .. } => {}
             Event::Turn(turn_event) => self.handle_turn_event(turn_event),
             Event::TurnComplete => {
@@ -99,9 +154,10 @@ impl App {
         Ok(())
     }
 
-    /// Queue a user prompt as a new UI message.
+    /// Send a user prompt to the background agent task.
     pub fn send_prompt(&mut self, prompt: String) {
-        self.messages.push(UiMessage::User(prompt));
+        self.messages.push(UiMessage::User(prompt.clone()));
+        let _ = self.turn_tx.send(prompt);
         self.mode = Mode::Streaming;
     }
 

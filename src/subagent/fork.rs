@@ -14,6 +14,7 @@ use tokio::sync::Semaphore;
 use crate::config::AgentConfig;
 use crate::message::Message;
 use crate::provider::{CompletionRequest, ModelProvider};
+use crate::tasks::{Task, TaskManager, TaskStatus};
 use crate::tool::ToolRegistry;
 
 /// Shared state across all fork lenses — cheap to clone.
@@ -49,6 +50,7 @@ pub enum ForkResult {
 /// Result of a complete fork execution.
 pub struct ForkExecution {
     pub results: Vec<Option<ForkResult>>,
+    pub task_ids: Vec<String>,
 }
 
 /// Lightweight concurrency limiter for fork lens execution.
@@ -63,7 +65,36 @@ impl Synapse {
 
     /// Run all lenses concurrently, respecting the concurrency limit.
     /// Each lens gets a single provider call (not a full turn loop).
-    pub async fn run_all(&self, shared: &ForkShared, lenses: Vec<ForkLens>) -> ForkExecution {
+    /// If a `TaskManager` is provided, one task is created per lens and
+    /// updated on completion.
+    pub async fn run_all(
+        &self,
+        shared: &ForkShared,
+        lenses: Vec<ForkLens>,
+        task_manager: Option<&TaskManager>,
+    ) -> ForkExecution {
+        let task_ids: Vec<String> = if let Some(tm) = &task_manager {
+            lenses
+                .iter()
+                .map(|lens| {
+                    let id = uuid_v4();
+                    let task = Task {
+                        id: id.clone(),
+                        subject: format!("fork lens: {}", lens.lens),
+                        description: lens.task.clone(),
+                        status: TaskStatus::InProgress,
+                        blocked_by: vec![],
+                        blocks: vec![],
+                        output: None,
+                    };
+                    tm.create(task);
+                    id
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+
         let results = join_all(lenses.into_iter().map(|lens| {
             let sem = self.semaphore.clone();
             let shared = shared.clone();
@@ -74,8 +105,25 @@ impl Synapse {
         }))
         .await;
 
-        ForkExecution { results }
+        // Update task status based on execution results
+        if let Some(tm) = &task_manager {
+            for (i, _result) in results.iter().enumerate() {
+                let status = TaskStatus::Completed;
+                if let Some(task_id) = task_ids.get(i) {
+                    tm.update(task_id, status);
+                }
+            }
+        }
+
+        ForkExecution { results, task_ids }
     }
+}
+
+/// Generate a unique task ID using the current timestamp.
+fn uuid_v4() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    format!("task_{:x}", now.as_nanos())
 }
 
 impl Clone for ForkShared {
@@ -201,7 +249,7 @@ mod tests {
         ];
 
         let synapse = Synapse::new(2);
-        let execution = synapse.run_all(&shared, lenses).await;
+        let execution = synapse.run_all(&shared, lenses, None).await;
         assert_eq!(execution.results.len(), 2);
         // Both lenses should fail gracefully (no mock responses)
         assert!(execution.results.iter().all(|r| r.is_none()));

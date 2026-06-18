@@ -14,6 +14,9 @@
 //! - [`HookPhase::SessionStart`] — when a new session is created
 //! - [`HookPhase::UserPromptSubmit`] — when the user submits a prompt
 
+pub mod http;
+pub mod prompt;
+
 use async_trait::async_trait;
 use std::sync::Arc;
 

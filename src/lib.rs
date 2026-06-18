@@ -36,6 +36,7 @@ pub mod runtime;
 pub mod skills;
 pub mod storage;
 pub mod subagent;
+pub mod tasks;
 pub mod tokens;
 pub mod tool;
 pub mod tools;
@@ -81,6 +82,8 @@ pub use skills::{Skill, SkillArg, SkillLoader, SkillRegistry, SkillSource};
 pub use storage::{JsonlStorage, NoopStorage, Storage};
 // Subagent — nested agent run exposed as a tool and Fork concurrent-execution engine.
 pub use subagent::{ForkExecution, ForkLens, ForkResult, ForkShared, SubagentTool, Synapse};
+// Tasks — task management system with tracking, persistence, and tool integration.
+pub use tasks::{Task, TaskManager, TaskStatus};
 // MCP — stdio-based Model Context Protocol client + manager + bridge.
 pub use mcp::{McpClient, McpManager, McpTool, McpToolBridge};
 // Prompt system — modular, cache-aware construction of the system prompt.
@@ -94,5 +97,6 @@ pub use tool::{
 // Built-in tools — filesystem, shell, search, web, user interaction.
 pub use tools::{
     AskUserQuestionTool, FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ShellTool,
-    SkillTool, WebFetchTool, WebSearchTool, register_core_tools,
+    SkillTool, TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool, WebFetchTool,
+    WebSearchTool, register_core_tools, register_task_tools,
 };

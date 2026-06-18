@@ -84,7 +84,7 @@ impl SubagentTool {
         };
 
         let synapse = Synapse::new(4); // reasonable default concurrency
-        let execution = synapse.run_all(&fork_shared, lenses).await;
+        let execution = synapse.run_all(&fork_shared, lenses, None).await;
 
         let results: Vec<Value> = execution
             .results

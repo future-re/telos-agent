@@ -432,8 +432,8 @@ impl AgentSession {
             match item {
                 ToolExecutionStreamItem::Event(event) => {
                     let turn_event = match event {
-                        ToolExecutionEvent::ToolStarted { tool_call_id, name } => {
-                            TurnEvent::ToolCall { tool_call_id, name }
+                        ToolExecutionEvent::ToolStarted { tool_call_id, name, detail } => {
+                            TurnEvent::ToolCall { tool_call_id, name, detail }
                         }
                         ToolExecutionEvent::ToolProgress { tool_call_id, name, message, data } => {
                             TurnEvent::ToolProgress { tool_call_id, name, message, data }

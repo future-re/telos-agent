@@ -202,11 +202,13 @@ async fn run_live_tool_inner(
     tx: tokio::sync::mpsc::UnboundedSender<(usize, ToolExecutionStreamItem)>,
 ) {
     let index = prepared.index;
+    let detail = tool_detail(&prepared.call.name, &prepared.call.arguments);
     let _ = tx.send((
         index,
         ToolExecutionStreamItem::Event(ToolExecutionEvent::ToolStarted {
             tool_call_id: prepared.call.id.clone(),
             name: prepared.call.name.clone(),
+            detail,
         }),
     ));
 
@@ -279,4 +281,58 @@ async fn run_live_tool_inner(
         }),
     ));
     let _ = tx.send((index, ToolExecutionStreamItem::Result(result)));
+}
+
+/// Extract a human-readable detail from a tool's arguments.
+pub(crate) fn tool_detail(name: &str, args: &serde_json::Value) -> String {
+    let name_lower = name.to_lowercase();
+    match name_lower.as_str() {
+        "bash" | "shell" => {
+            args.get("command").and_then(|v| v.as_str()).map(truncate_cmd).unwrap_or_default()
+        }
+        "read" | "write" | "edit" => args
+            .get("file_path")
+            .or_else(|| args.get("path"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
+        "grep" | "glob" => {
+            args.get("pattern").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default()
+        }
+        "websearch" => {
+            args.get("query").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default()
+        }
+        "webfetch" => args
+            .get("url")
+            .or_else(|| args.get("urls"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
+        "task" | "agent" => args
+            .get("description")
+            .or_else(|| args.get("prompt"))
+            .and_then(|v| v.as_str())
+            .map(truncate_cmd)
+            .unwrap_or_default(),
+        _ => args
+            .get("command")
+            .or_else(|| args.get("file_path"))
+            .or_else(|| args.get("path"))
+            .or_else(|| args.get("pattern"))
+            .or_else(|| args.get("query"))
+            .or_else(|| args.get("url"))
+            .or_else(|| args.get("description"))
+            .and_then(|v| v.as_str())
+            .map(truncate_cmd)
+            .unwrap_or_default(),
+    }
+}
+
+fn truncate_cmd(cmd: &str) -> String {
+    let first_line = cmd.lines().next().unwrap_or(cmd);
+    if first_line.len() > 120 {
+        format!("{}…", &first_line[..117])
+    } else {
+        first_line.to_string()
+    }
 }

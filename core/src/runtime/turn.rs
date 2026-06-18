@@ -30,7 +30,7 @@ pub enum TurnEvent {
     /// A completed assistant message (either model output or hook-emitted).
     Assistant(Message),
     /// A tool call has begun executing.
-    ToolCall { tool_call_id: String, name: String },
+    ToolCall { tool_call_id: String, name: String, detail: String },
     /// Progress update emitted from inside a long-running tool.
     ToolProgress {
         tool_call_id: Option<String>,
@@ -109,8 +109,12 @@ impl TurnEvent {
             }
             TurnEvent::AssistantDelta { text } => format!("assistant_delta:{text}"),
             TurnEvent::ThinkingDelta { text } => format!("thinking_delta:{text}"),
-            TurnEvent::ToolCall { tool_call_id, name } => {
-                format!("tool_call:{}#{}", name, tool_call_id)
+            TurnEvent::ToolCall { tool_call_id, name, detail } => {
+                if detail.is_empty() {
+                    format!("tool_call:{}#{}", name, tool_call_id)
+                } else {
+                    format!("tool_call:{}#{} {}", name, tool_call_id, detail)
+                }
             }
             TurnEvent::ToolProgress { tool_call_id, name, message, .. } => format!(
                 "tool_progress:{}#{}:{}",

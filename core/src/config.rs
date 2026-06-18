@@ -139,7 +139,7 @@ impl Default for AgentConfig {
             path: TaskPath::default(),
             base_system_prompt: None,
             prompt_assembly: None,
-            max_iterations: 8,
+            max_iterations: 30,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             // Start with a minimal environment for shell tools. Callers that need
             // specific variables can add them explicitly; inheriting the entire
@@ -294,9 +294,9 @@ impl AgentConfig {
     ///
     /// | Knob                   | Fast      | Standard  | Heavy     |
     /// |------------------------|-----------|-----------|-----------|
-    /// | `max_iterations`       | 4         | 8         | 16        |
+    /// | `max_iterations`       | 4         | 30        | 16        |
     /// | `tool_concurrency_limit`| 10       | 10        | 5         |
-    /// | `token_budget`         | None      | None      | 128k      |
+    /// | `token_budget`         | None      | None      | 308k      |
     /// | `tool_timeout_ms`      | 30_000    | None      | 60_000    |
     pub fn with_path(mut self, path: TaskPath) -> Self {
         self.path = path;
@@ -308,14 +308,14 @@ impl AgentConfig {
                 self.token_budget = None;
             }
             TaskPath::Standard => {
-                self.max_iterations = 8;
+                self.max_iterations = 30;
                 self.tool_timeout_ms = None;
                 self.token_budget = None;
             }
             TaskPath::Heavy => {
                 self.max_iterations = 16;
                 self.tool_timeout_ms = Some(60_000);
-                self.token_budget = Some(TokenBudget::new(128_000));
+                self.token_budget = Some(TokenBudget::new(308_000));
                 self.tool_concurrency_limit = 5;
             }
         }

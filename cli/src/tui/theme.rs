@@ -18,17 +18,17 @@ pub struct Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            status_bg: Color::DarkGray,
-            status_fg: Color::White,
-            user_fg: Color::Cyan,
-            assistant_fg: Color::Gray,
-            tool_pending_fg: Color::Yellow,
-            tool_ok_fg: Color::Green,
-            tool_error_fg: Color::Red,
-            thinking_fg: Color::DarkGray,
-            border_active: Color::Cyan,
-            border_inactive: Color::DarkGray,
-            input_placeholder: Color::DarkGray,
+            status_bg: Color::Rgb(30, 40, 60),
+            status_fg: Color::Rgb(200, 210, 230),
+            user_fg: Color::Rgb(100, 200, 255),
+            assistant_fg: Color::Rgb(220, 220, 230),
+            tool_pending_fg: Color::Rgb(255, 200, 80),
+            tool_ok_fg: Color::Rgb(100, 220, 120),
+            tool_error_fg: Color::Rgb(255, 100, 100),
+            thinking_fg: Color::Rgb(100, 100, 120),
+            border_active: Color::Rgb(100, 200, 255),
+            border_inactive: Color::Rgb(60, 60, 80),
+            input_placeholder: Color::Rgb(80, 80, 100),
         }
     }
 }

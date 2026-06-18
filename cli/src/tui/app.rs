@@ -3,7 +3,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use std::collections::VecDeque;
 use std::pin::pin;
 use std::sync::Arc;
@@ -39,9 +39,11 @@ pub enum UiMessage {
     /// Incremental reasoning/thinking fragment.
     ThinkingDelta(String),
     /// Tool call started.
-    ToolCall { id: String, name: String },
+    ToolCall { id: String, name: String, detail: String },
+    /// Tool progress update (detail shown inline under the tool).
+    ToolProgress { id: Option<String>, name: String, message: String },
     /// Tool call finished.
-    ToolCompleted { id: String, name: String, is_error: bool },
+    ToolCompleted { id: String, name: String, detail: String, is_error: bool },
     /// Marks the end of a turn.
     TurnComplete,
     /// An error message (turn stream failure, session error, etc.).
@@ -203,37 +205,42 @@ impl App {
                         return Ok(());
                     }
                     Mode::Normal => {
-                        // Scroll keys.
-                        match key.code {
-                            KeyCode::PageUp => {
+                        // Scroll keys: plain arrow keys scroll chat.
+                        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                        match (key.code, ctrl) {
+                            (KeyCode::PageUp, _) => {
                                 self.chat.scroll_up(10);
                                 return Ok(());
                             }
-                            KeyCode::PageDown => {
+                            (KeyCode::PageDown, _) => {
                                 self.chat.scroll_down(10);
                                 return Ok(());
                             }
-                            KeyCode::Up => {
+                            (KeyCode::Up, false) => {
                                 self.chat.scroll_up(1);
                                 return Ok(());
                             }
-                            KeyCode::Down => {
+                            (KeyCode::Down, false) => {
                                 self.chat.scroll_down(1);
                                 return Ok(());
                             }
+                            // Ctrl+Up/Down → input history (handled below).
                             _ => {}
                         }
 
-                        // Input handling.
+                        // Input handling (Ctrl+Up/Down → history, other keys → typing).
                         if let Some(prompt) = self.input.handle_key(key) {
                             self.send_prompt(prompt);
                         }
                     }
                     Mode::Streaming => {
                         // During streaming, only scroll keys are handled.
-                        match key.code {
-                            KeyCode::PageUp => self.chat.scroll_up(10),
-                            KeyCode::PageDown => self.chat.scroll_down(10),
+                        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+                        match (key.code, ctrl) {
+                            (KeyCode::PageUp, _) => self.chat.scroll_up(10),
+                            (KeyCode::PageDown, _) => self.chat.scroll_down(10),
+                            (KeyCode::Up, false) => self.chat.scroll_up(1),
+                            (KeyCode::Down, false) => self.chat.scroll_down(1),
                             _ => {}
                         }
                     }
@@ -308,14 +315,42 @@ impl App {
             TurnEvent::ThinkingDelta { text } => {
                 self.messages.push(UiMessage::ThinkingDelta(text));
             }
-            TurnEvent::ToolCall { tool_call_id, name } => {
-                self.messages.push(UiMessage::ToolCall { id: tool_call_id, name });
+            TurnEvent::ToolCall { tool_call_id, name, detail } => {
+                self.status_text = format!("{}: {}", name, detail);
+                self.messages.push(UiMessage::ToolCall { id: tool_call_id, name, detail });
+            }
+            TurnEvent::ToolProgress { tool_call_id, name, message, .. } => {
+                self.status_text = format!("{}: {}", name, message);
+                self.messages.push(UiMessage::ToolProgress { id: tool_call_id, name, message });
             }
             TurnEvent::ToolCompleted { tool_call_id, name, is_error } => {
-                self.messages.push(UiMessage::ToolCompleted { id: tool_call_id, name, is_error });
-            }
-            TurnEvent::ToolProgress { name, message, .. } => {
-                self.status_text = format!("{}: {}", name, message);
+                // Grab the detail from the pending ToolCall before removing it.
+                let detail = self
+                    .messages
+                    .iter()
+                    .find_map(|m| match m {
+                        UiMessage::ToolCall { id, detail, .. } if id == &tool_call_id => {
+                            Some(detail.clone())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                // Remove pending + progress, replace with completed.
+                // Also remove any id-less ToolProgress (they're stale once the tool completes).
+                self.messages.retain(|m| match m {
+                    UiMessage::ToolCall { id, .. } => id != &tool_call_id,
+                    UiMessage::ToolProgress { id, .. } => {
+                        // Remove if the id matches, OR if id is None (stale).
+                        id.is_some() && id.as_deref() != Some(&tool_call_id)
+                    }
+                    _ => true,
+                });
+                self.messages.push(UiMessage::ToolCompleted {
+                    id: tool_call_id,
+                    name,
+                    detail,
+                    is_error,
+                });
             }
             TurnEvent::TurnFinished { final_text, .. } => {
                 if !final_text.is_empty() {
@@ -338,64 +373,202 @@ impl App {
     /// Draw the entire UI.
     pub fn draw(&self, frame: &mut Frame) {
         let area = frame.area();
-        let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1), // status bar
-                Constraint::Min(0),    // chat panel
-                Constraint::Length(3), // input panel
-            ])
-            .split(area);
+        let theme = Theme::default();
 
-        status_bar::render(frame, layout[0], &self.status_text);
-
-        self.chat.render(frame, layout[1], &self.messages);
-
-        self.input.render(frame, layout[2], self.mode == Mode::Normal);
-
-        if self.mode == Mode::Approving
+        // ── Build constraints dynamically ─────────────────────────────
+        let popup_h = if self.mode == Mode::Approving
             && let Some(pending) = self.pending_approvals.front()
         {
-            let area = frame.area();
-            let block_area = ratatui::layout::Rect {
-                x: area.x + 4,
-                y: area.y + area.height / 3,
-                width: area.width.saturating_sub(8),
-                height: 12.min(area.height.saturating_sub(4)),
-            };
-            let theme = Theme::default();
-            // Solid background to obscure content underneath.
-            let bg = Block::default().style(Style::default().bg(Color::Black));
+            let max_w = area.width.saturating_sub(10);
+            let inner_w = (max_w.saturating_sub(2)).max(40) as usize;
+            // Count content lines for height.
+            let content_lines = approval_content_lines(
+                &pending.request.tool_name,
+                &pending.request.arguments,
+                inner_w,
+            );
+            // Title(1) + content + hints(1) + border(2)
+            let h = 1 + content_lines + 1 + 2;
+            let max_h = ((area.height as f32) * 0.5) as u16;
+            Some(h.min(max_h as usize).max(8) as u16)
+        } else {
+            None
+        };
+
+        let mut constraints: Vec<Constraint> = vec![
+            Constraint::Length(1), // status bar
+            Constraint::Min(0),    // chat panel
+        ];
+        if let Some(h) = popup_h {
+            constraints.push(Constraint::Length(h + 1)); // popup + padding
+        }
+        constraints.push(Constraint::Length(5)); // input panel
+
+        let layout =
+            Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
+
+        let mut idx = 0;
+        status_bar::render(frame, layout[idx], &self.status_text);
+        idx += 1;
+
+        self.chat.render(frame, layout[idx], &self.messages);
+        idx += 1;
+
+        // ── Render approval popup in its own layout slot ──────────────
+        if let Some(_h) = popup_h
+            && let Some(pending) = self.pending_approvals.front()
+        {
+            let popup_area = layout[idx];
+            idx += 1;
+
+            let args = &pending.request.arguments;
+            let tool_name = &pending.request.tool_name;
+
             let block = Block::default()
                 .title(" Approval required ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.tool_pending_fg))
-                .style(Style::default().bg(Color::Rgb(24, 24, 32)));
-            let args = serde_json::to_string_pretty(&pending.request.arguments)
-                .unwrap_or_else(|_| pending.request.arguments.to_string());
-            let text = Text::from(vec![
-                Line::from(vec![
-                    Span::styled("Tool:   ", Style::default().fg(Color::White)),
-                    Span::styled(
-                        pending.request.tool_name.clone(),
-                        Style::default().fg(theme.tool_pending_fg).add_modifier(Modifier::BOLD),
-                    ),
-                ]),
-                Line::from(vec![
-                    Span::styled("Reason: ", Style::default().fg(Color::White)),
-                    Span::styled(&pending.request.reason, Style::default().fg(Color::Gray)),
-                ]),
-                Line::from(""),
-                Line::from(Span::styled(&args, Style::default().fg(Color::Gray))),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "  [a/y] approve  [d/n] deny  [e] edit-request  ",
-                    Style::default().fg(Color::White),
-                )),
-            ]);
+                .style(Style::default().bg(Color::Rgb(20, 22, 30)));
+
+            let mut text_lines: Vec<Line> = Vec::new();
+
+            // Tool name line.
+            text_lines.push(Line::from(vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    tool_name.clone(),
+                    Style::default().fg(theme.tool_pending_fg).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+
+            // ── Tool-specific content ────────────────────────────
+            let tool_lower = tool_name.to_lowercase();
+            if tool_lower == "bash" || tool_lower == "shell" {
+                if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
+                    text_lines.push(Line::from(""));
+                    text_lines.push(Line::from(Span::styled(
+                        format!("  $ {}", truncate_for_popup(cmd, 200)),
+                        Style::default().fg(Color::Rgb(180, 220, 180)),
+                    )));
+                }
+            } else if tool_lower == "edit" {
+                let file = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                let old = args.get("old_string").and_then(|v| v.as_str()).unwrap_or("");
+                let new = args.get("new_string").and_then(|v| v.as_str()).unwrap_or("");
+                text_lines.push(Line::from(Span::styled(
+                    format!("  File: {}", truncate_for_popup(file, 120)),
+                    Style::default().fg(Color::Gray),
+                )));
+                text_lines.push(Line::from(""));
+                text_lines.push(Line::from(Span::styled(
+                    format!("  - {}", truncate_for_popup(old, 150)),
+                    Style::default().fg(Color::Rgb(220, 120, 120)),
+                )));
+                text_lines.push(Line::from(Span::styled(
+                    format!("  + {}", truncate_for_popup(new, 150)),
+                    Style::default().fg(Color::Rgb(120, 220, 120)),
+                )));
+            } else if tool_lower == "write" {
+                let file = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
+                let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                text_lines.push(Line::from(Span::styled(
+                    format!("  File: {}", truncate_for_popup(file, 120)),
+                    Style::default().fg(Color::Gray),
+                )));
+                let preview = truncate_for_popup(content, 300);
+                if !preview.is_empty() {
+                    text_lines.push(Line::from(""));
+                    for pline in preview.lines().take(6) {
+                        text_lines.push(Line::from(Span::styled(
+                            format!("  | {}", pline),
+                            Style::default().fg(Color::DarkGray),
+                        )));
+                    }
+                }
+            } else {
+                // Generic: show pretty JSON.
+                let args_str =
+                    serde_json::to_string_pretty(args).unwrap_or_else(|_| args.to_string());
+                text_lines.push(Line::from(""));
+                for aline in args_str.lines().take(20) {
+                    text_lines.push(Line::from(Span::styled(
+                        format!("  {}", aline),
+                        Style::default().fg(Color::Gray),
+                    )));
+                }
+            }
+
+            text_lines.push(Line::from(""));
+            text_lines.push(Line::from(Span::styled(
+                "  [a/y] approve  [d/n] deny  [e] edit-request  ",
+                Style::default().fg(Color::White),
+            )));
+
+            let text = Text::from(text_lines);
             let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
-            frame.render_widget(bg, block_area);
-            frame.render_widget(paragraph, block_area);
+
+            frame.render_widget(Clear, popup_area);
+            frame.render_widget(paragraph, popup_area);
         }
+
+        self.input.render(frame, layout[idx], self.mode == Mode::Normal);
+    }
+}
+
+/// Count how many lines `text` will occupy when wrapped at `width` columns.
+fn count_wrapped_lines(text: &str, width: usize) -> usize {
+    text.lines()
+        .map(|line| {
+            let chars = line.chars().count();
+            if chars == 0 { 1 } else { (chars + width.saturating_sub(1)) / width }
+        })
+        .sum::<usize>()
+        .max(1)
+}
+
+fn approval_content_lines(tool_name: &str, args: &serde_json::Value, width: usize) -> usize {
+    let tool_lower = tool_name.to_lowercase();
+    let mut lines = 1usize; // tool name line
+
+    if tool_lower == "bash" || tool_lower == "shell" {
+        if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
+            lines += 1; // blank
+            lines += count_wrapped_lines(&format!("  $ {}", truncate_for_popup(cmd, 200)), width);
+        }
+    } else if tool_lower == "edit" {
+        let file = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+        let old = args.get("old_string").and_then(|v| v.as_str()).unwrap_or("");
+        let new = args.get("new_string").and_then(|v| v.as_str()).unwrap_or("");
+        lines += count_wrapped_lines(&format!("  File: {}", truncate_for_popup(file, 120)), width);
+        lines += 1;
+        lines += count_wrapped_lines(&format!("  - {}", truncate_for_popup(old, 150)), width);
+        lines += count_wrapped_lines(&format!("  + {}", truncate_for_popup(new, 150)), width);
+    } else if tool_lower == "write" {
+        let file = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+        let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+        lines += count_wrapped_lines(&format!("  File: {}", truncate_for_popup(file, 120)), width);
+        let preview = truncate_for_popup(content, 300);
+        if !preview.is_empty() {
+            lines += 1;
+            for pline in preview.lines().take(6) {
+                lines += count_wrapped_lines(&format!("  | {}", pline), width);
+            }
+        }
+    } else {
+        let args_str = serde_json::to_string_pretty(args).unwrap_or_else(|_| args.to_string());
+        lines += 1;
+        for aline in args_str.lines().take(20) {
+            lines += count_wrapped_lines(&format!("  {}", aline), width);
+        }
+    }
+    lines
+}
+
+fn truncate_for_popup(s: &str, max_chars: usize) -> String {
+    let s = s.trim();
+    if s.len() <= max_chars {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max_chars.saturating_sub(1)])
     }
 }

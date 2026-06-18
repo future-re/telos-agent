@@ -98,6 +98,7 @@ pub(crate) async fn run_one_tool(
                 ToolExecutionEvent::ToolStarted {
                     tool_call_id: tool_call_id.clone(),
                     name: name.clone(),
+                    detail: String::new(),
                 },
                 ToolExecutionEvent::ToolCompleted {
                     tool_call_id: tool_call_id.clone(),
@@ -127,9 +128,11 @@ async fn run_one_tool_inner(
     tools: &ToolRegistry,
     config: &AgentConfig,
 ) -> (usize, Vec<ToolExecutionEvent>, ToolResult) {
+    let detail = super::stream::tool_detail(&prepared.call.name, &prepared.call.arguments);
     let mut events = vec![ToolExecutionEvent::ToolStarted {
         tool_call_id: prepared.call.id.clone(),
         name: prepared.call.name.clone(),
+        detail,
     }];
 
     let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<ToolProgress>();

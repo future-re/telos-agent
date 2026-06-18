@@ -154,7 +154,7 @@ pub fn build_agent_config(
 
     // Priority: CLI --max-iterations > config file > default 8
     agent_config.max_iterations =
-        options.max_iterations.or_else(|| config.agent.as_ref()?.max_iterations).unwrap_or(8);
+        options.max_iterations.or_else(|| config.agent.as_ref()?.max_iterations).unwrap_or(30);
 
     agent_config.auto_validate_schema = !options.no_validate_schema;
     agent_config.approval_handler = approval_handler;
@@ -369,11 +369,11 @@ mod tests {
     }
 
     #[test]
-    fn build_agent_config_defaults_max_iterations_to_8() {
+    fn build_agent_config_defaults_max_iterations_to_30() {
         let options = SharedOptions::default();
         let config = FileConfig::default();
         let agent = build_agent_config(&options, &config, None).unwrap();
-        assert_eq!(agent.max_iterations, 8);
+        assert_eq!(agent.max_iterations, 30);
     }
 
     #[test]

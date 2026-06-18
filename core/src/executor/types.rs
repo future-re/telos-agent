@@ -8,7 +8,7 @@ use serde_json::Value;
 #[derive(Debug, Clone)]
 pub enum ToolExecutionEvent {
     /// Emitted once when the tool starts (after permission, before `invoke`).
-    ToolStarted { tool_call_id: String, name: String },
+    ToolStarted { tool_call_id: String, name: String, detail: String },
     /// Streaming progress update from inside the tool.
     ToolProgress {
         tool_call_id: Option<String>,

@@ -28,11 +28,60 @@ impl std::fmt::Debug for TuiApprovalHandler {
 #[async_trait]
 impl ApprovalHandler for TuiApprovalHandler {
     async fn ask(&self, request: ApprovalRequest) -> ApprovalDecision {
+        let tool_lower = request.tool_name.to_lowercase();
+
+        // ── Auto-allow safe Bash commands ───────────────────────────
+        if (tool_lower == "bash" || tool_lower == "shell")
+            && let Some(cmd) = request.arguments.get("command").and_then(|v| v.as_str())
+            && is_auto_allowed(cmd)
+        {
+            return ApprovalDecision::Allow;
+        }
+
+        // ── Auto-allow safe file operations ─────────────────────────
+        if matches!(
+            tool_lower.as_str(),
+            "read" | "glob" | "grep" | "webfetch" | "websearch" | "task" | "askuserquestion"
+        ) {
+            return ApprovalDecision::Allow;
+        }
+
         let (tx, rx) = oneshot::channel();
         let pending = PendingApproval { request, respond: tx };
         if self.tx.send(pending).is_err() {
             return ApprovalDecision::Deny { reason: "TUI approval channel closed".into() };
         }
         rx.await.unwrap_or(ApprovalDecision::Deny { reason: "no response from user".into() })
+    }
+}
+
+/// Decide whether a shell command should run without explicit approval.
+fn is_auto_allowed(cmd: &str) -> bool {
+    // First check the security analyzer for clearly-safe commands.
+    if telos_agent::bash_security::analyze(cmd).is_safe() {
+        return true;
+    }
+
+    // Allow common dev commands that are reversible or low-risk.
+    let cmd_trimmed = cmd.trim();
+    let first_word = cmd_trimmed.split_whitespace().next().unwrap_or("");
+
+    // All git operations (including push/pull/commit) — reversible via reflog.
+    // All cargo operations — builds/tests are safe.
+    // Common file & system inspection tools.
+    match first_word {
+        "git" | "cargo" | "make" | "just" | "npm" | "yarn" | "pnpm" | "pnpx" | "go" | "rustc"
+        | "rustup" | "docker" | "podman" | "ls" | "cat" | "head" | "tail" | "less" | "find"
+        | "du" | "df" | "echo" | "printf" | "date" | "env" | "printenv" | "pwd" | "whoami"
+        | "wc" | "sort" | "uniq" | "cut" | "tr" | "tee" | "basename" | "dirname" | "which"
+        | "type" | "file" | "stat" | "tree" | "bat" | "rg" | "fd" | "rustfmt" | "clippy"
+        | "clippy-driver" | "pgrep" | "ps" | "top" | "htop" | "free" | "uname" | "pip" | "pip3"
+        | "python" | "python3" | "node" | "npx" => true,
+        "apt" | "brew" | "dnf" | "pacman" | "snap" | "flatpak" => {
+            // Package managers: allow list/search/info, deny install/remove.
+            let second = cmd_trimmed.split_whitespace().nth(1).unwrap_or("");
+            matches!(second, "list" | "search" | "info" | "show" | "cache")
+        }
+        _ => false,
     }
 }

@@ -8,16 +8,12 @@ fn new_dependencies_compile() {
     // Verify all Phase 1 crates are importable and basic types construct.
     // rustyline
     let _ = rustyline::Editor::<(), rustyline::history::FileHistory>::new();
-    // termimad
-    let _ = termimad::MadSkin::default();
     // toml
     let _ = toml::Table::new();
     // dirs
     let _ = dirs::config_dir();
     // glob
     let _ = glob::glob("*.rs");
-    // dissimilar
-    let _ = dissimilar::diff("a", "b");
 }
 
 // ── Existing integration tests ──────────────────────────────────────────────
@@ -45,18 +41,12 @@ fn parses_telos_toml() {
 model = "deepseek-chat"
 max_iterations = 16
 
-[display]
-theme = "dark"
-render_markdown = true
-
 [approval]
 default_policy = "ask"
 "#;
     let cfg: telos_cli::config::FileConfig = toml::from_str(toml_str).unwrap();
     assert_eq!(cfg.agent.as_ref().unwrap().model.as_deref(), Some("deepseek-chat"));
     assert_eq!(cfg.agent.as_ref().unwrap().max_iterations, Some(16));
-    assert_eq!(cfg.display.as_ref().unwrap().theme.as_deref(), Some("dark"));
-    assert!(cfg.display.as_ref().unwrap().render_markdown.unwrap());
     assert_eq!(cfg.approval.as_ref().unwrap().default_policy.as_deref(), Some("ask"));
 }
 
@@ -71,9 +61,6 @@ fn load_user_config_from_test_file() {
 model = "gpt-4"
 max_iterations = 32
 
-[display]
-theme = "light"
-
 [approval]
 default_policy = "deny"
 "#,
@@ -86,7 +73,6 @@ default_policy = "deny"
 
     assert_eq!(cfg.agent.as_ref().unwrap().model.as_deref(), Some("gpt-4"));
     assert_eq!(cfg.agent.as_ref().unwrap().max_iterations, Some(32));
-    assert_eq!(cfg.display.as_ref().unwrap().theme.as_deref(), Some("light"));
     assert_eq!(cfg.approval.as_ref().unwrap().default_policy.as_deref(), Some("deny"));
 }
 
@@ -189,35 +175,7 @@ fn policy_per_tool_lookup() {
     assert!(!config.policy_for("bash").is_allow()); // falls to default (AlwaysAsk)
 }
 
-// ── Task 6: Markdown display ────────────────────────────────────────────────
-
-#[test]
-fn termimad_renders_markdown() {
-    let rendered = telos_cli::display::render("# Hello\n\n**bold** and `code`", true);
-    assert!(!rendered.is_empty());
-    assert!(rendered.contains("\x1b["));
-}
-
-#[test]
-fn display_render_disabled_returns_plain() {
-    let text = "plain text\nno formatting";
-    let rendered = telos_cli::display::render(text, false);
-    assert_eq!(rendered, text);
-}
-
-#[test]
-fn render_diff_colors_additions_green() {
-    let result = telos_cli::display::render_diff("a", "a\nb");
-    assert!(result.contains("\x1b[32m")); // green for insertions
-}
-
-#[test]
-fn render_diff_colors_removals_red() {
-    let result = telos_cli::display::render_diff("a\nb", "a");
-    assert!(result.contains("\x1b[31m")); // red for deletions
-}
-
-// ── Task 7: Session persistence ─────────────────────────────────────────────
+// ── Task 6: Session persistence ─────────────────────────────────────────────
 
 use telos_cli::session::ChatHistory;
 

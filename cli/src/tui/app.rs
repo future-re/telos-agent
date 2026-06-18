@@ -61,6 +61,8 @@ pub struct App {
     pub input: InputPanel,
     /// Approval requests waiting for user decision.
     pub pending_approvals: VecDeque<PendingApproval>,
+    /// Whether a background turn is currently running.
+    pub turn_active: bool,
     /// Send prompts to the background agent task.
     turn_tx: mpsc::UnboundedSender<String>,
     /// Receive TurnEvents from the background agent task.
@@ -124,6 +126,7 @@ impl App {
             chat: ChatPanel::new(),
             input: InputPanel::new(),
             pending_approvals: VecDeque::new(),
+            turn_active: false,
             turn_tx: prompt_tx,
             turn_rx: event_rx,
             approval_rx,
@@ -229,6 +232,7 @@ impl App {
             Event::TurnComplete => {
                 self.messages.push(UiMessage::TurnComplete);
                 self.mode = Mode::Normal;
+                self.turn_active = false;
             }
             Event::Mouse(_) => {}
         }
@@ -240,6 +244,7 @@ impl App {
         self.messages.push(UiMessage::User(prompt.clone()));
         let _ = self.turn_tx.send(prompt);
         self.mode = Mode::Streaming;
+        self.turn_active = true;
     }
 
     /// Approve the current pending approval request.
@@ -247,8 +252,8 @@ impl App {
         if let Some(pending) = self.pending_approvals.pop_front() {
             let _ = pending.respond.send(telos_agent::ApprovalDecision::Allow);
         }
-        if self.pending_approvals.is_empty() && !matches!(self.mode, Mode::Streaming) {
-            self.mode = Mode::Streaming;
+        if self.pending_approvals.is_empty() {
+            self.mode = if self.turn_active { Mode::Streaming } else { Mode::Normal };
         }
     }
 
@@ -259,8 +264,8 @@ impl App {
                 .respond
                 .send(telos_agent::ApprovalDecision::Deny { reason: reason.to_string() });
         }
-        if self.pending_approvals.is_empty() && !matches!(self.mode, Mode::Streaming) {
-            self.mode = Mode::Streaming;
+        if self.pending_approvals.is_empty() {
+            self.mode = if self.turn_active { Mode::Streaming } else { Mode::Normal };
         }
     }
 

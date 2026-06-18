@@ -7,6 +7,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use std::collections::VecDeque;
 use std::pin::pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use telos_agent::TurnEvent;
 use tokio::sync::mpsc;
 
@@ -65,6 +66,8 @@ pub struct App {
     pub pending_approvals: VecDeque<PendingApproval>,
     /// Whether a background turn is currently running.
     pub turn_active: bool,
+    /// Shared cancellation flag — set by Ctrl+C and read by the background task.
+    cancel_flag: Arc<AtomicBool>,
     /// Send prompts to the background agent task.
     turn_tx: mpsc::UnboundedSender<String>,
     /// Receive TurnEvents from the background agent task.
@@ -87,6 +90,9 @@ impl App {
         let storage =
             Arc::new(telos_agent::JsonlStorage::new(session_manager.sessions_dir().to_path_buf())?);
         config.storage = Some(storage);
+
+        // Extract the cancellation flag before moving config into the spawned task.
+        let cancel_flag = Arc::clone(&config.cancelled);
 
         let (prompt_tx, mut prompt_rx) = mpsc::unbounded_channel::<String>();
         let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
@@ -140,6 +146,7 @@ impl App {
             input: InputPanel::new(),
             pending_approvals: VecDeque::new(),
             turn_active: false,
+            cancel_flag,
             turn_tx: prompt_tx,
             turn_rx: event_rx,
             approval_rx,
@@ -159,7 +166,8 @@ impl App {
                         return Ok(());
                     }
                     (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                        // TODO: signal cancellation to the background turn (Task 13).
+                        self.cancel_flag.store(true, Ordering::Relaxed);
+                        self.status_text = "telos · cancelling...".to_string();
                         return Ok(());
                     }
                     (KeyCode::Char('l'), KeyModifiers::CONTROL) => {

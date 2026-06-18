@@ -2,3 +2,4 @@
 .vscode
 .env
 cobertura.xml
+.worktrees/

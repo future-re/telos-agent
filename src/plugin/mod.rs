@@ -8,11 +8,17 @@
 //! GitHub, git URLs, npm, pip, or local directories.
 
 pub mod errors;
+pub mod manifest;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub use errors::{DependencyReason, PluginError};
+pub use manifest::{
+    ConfigOptionType, DependencyRef, HookDef, HookMatcher, HooksConfig, LspServerEntry,
+    LspServersConfig, MarketplaceEntry, McpServerEntry, McpServersConfig, PartialPluginManifest,
+    PluginAuthor, PluginManifest, PluginSource, UserConfigOption,
+};
 
 /// Universal plugin identifier: `name@marketplace`.
 ///

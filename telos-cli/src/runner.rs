@@ -152,7 +152,7 @@ pub async fn run_chat(
         }
     }
 
-    // Save history on exit (best-effort).
+    // Save REPL history on exit (best-effort).
     if let Some(path) = history_path {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -160,7 +160,24 @@ pub async fn run_chat(
         let _ = editor.save_history(&path);
     }
 
+    // Save session metadata on exit (best-effort).
+    save_session_metadata(options);
+
     Ok(())
+}
+
+/// Save minimal session metadata so we can track which sessions happened.
+fn save_session_metadata(options: &SharedOptions) {
+    let default_cwd = std::env::current_dir().unwrap_or_default();
+    let cwd = options.cwd.as_deref().unwrap_or(&default_cwd);
+    let project_root = crate::project::find_project_root(cwd).ok();
+    let sessions_dir = crate::session::sessions_dir(project_root.as_deref());
+    let name = crate::session::next_session_name(&sessions_dir, "chat");
+    let path = sessions_dir.join(&name);
+
+    // Save a minimal session marker.
+    let history = crate::session::ChatHistory::default();
+    let _ = history.save_to(&path);
 }
 
 /// Represents a parsed slash command or chat input.

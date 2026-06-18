@@ -41,5 +41,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Integration test suite (22 tests)
 - GitHub Actions CI (build + test on push/PR to main)
 
-[Unreleased]: https://github.com/tiny-agent/tiny_agent_core/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/tiny-agent/tiny_agent_core/releases/tag/v0.1.0
+[Unreleased]: https://github.com/future-re/tiny_agent_core/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/future-re/tiny_agent_core/releases/tag/v0.1.0

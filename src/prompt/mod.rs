@@ -36,17 +36,17 @@ pub fn default_coding_assembly(
     skills: Option<Arc<crate::skills::SkillRegistry>>,
 ) -> PromptAssembly {
     let mut assembly = PromptAssembly::new();
-    assembly.add_static(IdentitySection::new(None));
-    assembly.add_static(ToneStyleSection);
-    assembly.add_static(TaskGuidanceSection);
-    assembly.add_static(SafetySection);
-    assembly.add_static(ToolUsageSection);
-    assembly.add_static(ToolsSection::new(Arc::clone(&tools)));
-    assembly.add_static(ToolPromptsSection::new(Arc::clone(&tools)));
-    assembly.add_dynamic(DateSection);
-    assembly.add_dynamic(CwdSection::new(cwd));
+    assembly.add(IdentitySection::new(None));
+    assembly.add(ToneStyleSection);
+    assembly.add(TaskGuidanceSection);
+    assembly.add(SafetySection);
+    assembly.add(ToolUsageSection);
+    assembly.add(ToolsSection::new(Arc::clone(&tools)));
+    assembly.add(ToolPromptsSection::new(Arc::clone(&tools)));
+    assembly.add(DateSection);
+    assembly.add(CwdSection::new(cwd));
     if let Some(skills) = skills {
-        assembly.add_dynamic(SkillsSection::new(skills));
+        assembly.add(SkillsSection::new(skills));
     }
     assembly
 }

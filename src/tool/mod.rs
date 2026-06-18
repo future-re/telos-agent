@@ -222,8 +222,10 @@ impl ToolRegistry {
         let name = definition.name.clone();
         let aliases = tool.aliases();
         let tool = Arc::new(tool);
-        self.tools.insert(name.clone(), tool.clone());
-        self.canonical_names.push(name.clone());
+        let is_override = self.tools.insert(name.clone(), tool.clone()).is_some();
+        if !is_override {
+            self.canonical_names.push(name.clone());
+        }
         // Pre-compile the JSON Schema validator so every invocation does not
         // pay the compilation cost again. Invalid schemas are treated as a
         // programming error and fail fast.

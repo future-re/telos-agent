@@ -1657,8 +1657,8 @@ async fn prompt_assembly_caches_static_sections() {
     }
 
     let mut assembly = PromptAssembly::new();
-    assembly.add_static(StaticSection);
-    assembly.add_dynamic(DynamicSection);
+    assembly.add(StaticSection);
+    assembly.add(DynamicSection);
 
     let result1 = assembly.build().await;
     assert!(result1.contains("static content"));
@@ -1679,15 +1679,15 @@ async fn builtin_prompt_sections_render_without_error() {
     use telos_agent::tool::ToolRegistry;
 
     let mut assembly = PromptAssembly::new();
-    assembly.add_static(IdentitySection::new(Some("Be helpful.".into())));
-    assembly.add_static(ToneStyleSection);
-    assembly.add_static(TaskGuidanceSection);
-    assembly.add_static(SafetySection);
-    assembly.add_static(ToolUsageSection);
-    assembly.add_static(ToolsSection::new(std::sync::Arc::new(ToolRegistry::new())));
-    assembly.add_dynamic(DateSection);
-    assembly.add_dynamic(CwdSection::new(std::env::current_dir().unwrap()));
-    assembly.add_dynamic(GitStatusSection);
+    assembly.add(IdentitySection::new(Some("Be helpful.".into())));
+    assembly.add(ToneStyleSection);
+    assembly.add(TaskGuidanceSection);
+    assembly.add(SafetySection);
+    assembly.add(ToolUsageSection);
+    assembly.add(ToolsSection::new(std::sync::Arc::new(ToolRegistry::new())));
+    assembly.add(DateSection);
+    assembly.add(CwdSection::new(std::env::current_dir().unwrap()));
+    assembly.add(GitStatusSection);
 
     let result = assembly.build().await;
     assert!(result.contains("telos-agent"));
@@ -1762,7 +1762,7 @@ fn prompt_assembly_integration_with_session() {
     }
 
     let mut assembly = PromptAssembly::new();
-    assembly.add_static(TestSection);
+    assembly.add(TestSection);
 
     let config = AgentConfig {
         prompt_assembly: Some(std::sync::Arc::new(assembly)),
@@ -1901,7 +1901,7 @@ async fn profile_section_rerenders_when_profiles_change() {
     mgr.set_user_profile("Before").unwrap();
 
     let mut assembly = PromptAssembly::new();
-    assembly.add_dynamic(ProfileSection::new(mgr.clone()));
+    assembly.add(ProfileSection::new(mgr.clone()));
 
     let first = assembly.build().await;
     assert!(first.contains("Before"));
@@ -2274,8 +2274,8 @@ async fn prompt_assembly_build_blocks_preserves_stability() {
     }
 
     let mut assembly = PromptAssembly::new();
-    assembly.add_static(StaticSection);
-    assembly.add_dynamic(DynamicSection);
+    assembly.add(StaticSection);
+    assembly.add(DynamicSection);
     let blocks = assembly.build_blocks().await;
     assert_eq!(blocks.len(), 2);
     assert_eq!(blocks[0].name, "static");

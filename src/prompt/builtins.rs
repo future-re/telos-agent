@@ -295,26 +295,8 @@ impl PromptSection for DateSection {
     }
 
     async fn render(&self, _ctx: &()) -> String {
-        // Approximate date calculation without chrono dependency
-        let now =
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-        let secs = now.as_secs();
-        // Days since Jan 1, 2024 (epoch 1704067200)
-        let days_since_2024 = secs.saturating_sub(1704067200) / 86400;
-        let year = 2024 + (days_since_2024 / 365);
-        let day_of_year = days_since_2024 % 365;
-        let month_lengths = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-        let mut remaining = day_of_year;
-        let mut month = 1;
-        for &ml in &month_lengths {
-            if remaining < ml {
-                break;
-            }
-            remaining -= ml;
-            month += 1;
-        }
-        let day = remaining + 1;
-        format!("Today's date is {year}-{month:02}-{day:02}.")
+        let date = time::OffsetDateTime::now_utc().date();
+        format!("Today's date is {}.", date)
     }
 }
 
@@ -362,7 +344,7 @@ impl PromptSection for SkillsSection {
         "skills"
     }
     fn stability(&self) -> PromptStability {
-        PromptStability::Dynamic
+        PromptStability::Static
     }
 
     async fn render(&self, _ctx: &()) -> String {

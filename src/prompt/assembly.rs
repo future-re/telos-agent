@@ -21,16 +21,10 @@ impl PromptAssembly {
         Self { sections: Vec::new(), static_cache: Mutex::new(HashMap::new()) }
     }
 
-    pub fn add_section(&mut self, section: Box<dyn PromptSection>) {
-        self.sections.push(section);
-    }
-
-    pub fn add_static(&mut self, section: impl PromptSection + 'static) {
-        self.add_section(Box::new(section));
-    }
-
-    pub fn add_dynamic(&mut self, section: impl PromptSection + 'static) {
-        self.add_section(Box::new(section));
+    /// Add a section whose stability is determined by its own
+    /// [`PromptSection::stability`] implementation.
+    pub fn add(&mut self, section: impl PromptSection + 'static) {
+        self.sections.push(Box::new(section));
     }
 
     pub async fn build(&self) -> String {

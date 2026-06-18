@@ -66,7 +66,9 @@ impl SkillRegistry {
         }
         let mut lines = vec!["## Available Skills".to_string()];
         lines.push("You can invoke skills via the Skill tool. Available skills:".to_string());
-        for skill in self.skills.values() {
+        let mut skills: Vec<&Skill> = self.skills.values().collect();
+        skills.sort_by(|a, b| a.name.cmp(&b.name));
+        for skill in skills {
             let when =
                 skill.when_to_use.as_ref().map(|w| format!(" — Use when: {w}")).unwrap_or_default();
             lines.push(format!("- **{}**: {}{}", skill.name, skill.description, when));

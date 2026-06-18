@@ -1,14 +1,12 @@
 # telos-cli
 
-Terminal interface for [telos-agent](..).
+Terminal interface for [tiny_agent_core](../..).
 
 ## Features
 
 - **Single-prompt mode:** `telos "refactor lib.rs to use anyhow"` — one-shot agent invocation
 - **Interactive REPL:** `telos chat` — multi-turn session with rustyline (history, tab completion, Emacs/Vi keybindings)
 - **Slash commands:** `/exit`, `/help`, `/clear`, `/reset`, `/tools`, `/add`, `/drop`, `/model` inside the REPL
-- **Markdown rendering:** Agent responses rendered through termimad for rich terminal output
-- **Diff display:** File diffs colored with green/red ANSI escapes
 - **Approval policies:** Configurable per-tool approval (AlwaysAllow, AlwaysAsk, AlwaysDeny) with interactive fallback
 - **Config files:** User-level `~/.config/telos/config.toml` and project-level `.telos.toml` with layered merging
 - **Session persistence:** Chat sessions auto-saved to `~/.local/share/telos/sessions/` or `<project>/.telos/sessions/`
@@ -20,14 +18,14 @@ Terminal interface for [telos-agent](..).
 From the workspace root:
 
 ```bash
-cd /home/alin/codework/tiny_agent
+cd /home/alin/codework/tiny_agent/tiny_agent_core
 cargo build -p telos-cli
 ```
 
 ## Install
 
 ```bash
-cd /home/alin/codework/tiny_agent/tiny_agent_core/telos-cli
+cd /home/alin/codework/tiny_agent/tiny_agent_core/cli
 cargo install --path .
 ```
 
@@ -88,10 +86,6 @@ telos> Refactor the error handling in main.rs
 model = "deepseek-chat"
 provider = "deepseek"
 max_iterations = 16
-
-[display]
-theme = "dark"
-render_markdown = true
 
 [approval]
 default_policy = "ask"

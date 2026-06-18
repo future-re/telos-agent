@@ -3,8 +3,8 @@ use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 
 use crate::error::AgentError;
-use crate::memory::format::MemoryEntry;
-use crate::memory::index::MemoryStore;
+use crate::memory::MemoryEntry;
+use crate::memory::MemoryStore;
 use crate::tool::{PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput};
 
 // ── MemoryRead ───────────────────────────────────────────

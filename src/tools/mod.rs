@@ -4,7 +4,7 @@
 //! host (typically a human approval prompt) keeps the final say. Read-only
 //! tools are marked concurrency-safe so they can run in parallel batches.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::skills::SkillRegistry;
 use crate::tasks::TaskManager;
@@ -16,6 +16,7 @@ mod file_read;
 mod file_write;
 mod glob;
 mod grep;
+mod memory;
 mod shared;
 mod shell;
 mod skill;
@@ -29,6 +30,9 @@ pub use file_read::FileReadTool;
 pub use file_write::FileWriteTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
+pub use memory::{
+    MemoryEditTool, MemoryGrepTool, MemoryReadTool, MemoryStatusTool, MemoryWriteTool,
+};
 pub use shell::ShellTool;
 pub use skill::SkillTool;
 pub use web_fetch::WebFetchTool;
@@ -52,6 +56,18 @@ pub fn register_task_tools(registry: &mut ToolRegistry, task_manager: Arc<TaskMa
     registry.register(TaskGetTool::new(task_manager.clone()));
     registry.register(TaskListTool::new(task_manager.clone()));
     registry.register(TaskUpdateTool::new(task_manager));
+}
+
+/// Register memory tools with the supplied registry.
+pub fn register_memory_tools(
+    registry: &mut ToolRegistry,
+    store: Arc<Mutex<crate::memory::MemoryStore>>,
+) {
+    registry.register(MemoryReadTool::new(store.clone()));
+    registry.register(MemoryWriteTool::new(store.clone()));
+    registry.register(MemoryGrepTool::new(store.clone()));
+    registry.register(MemoryEditTool::new(store.clone()));
+    registry.register(MemoryStatusTool::new(store));
 }
 
 /// Register the Skill tool if a skill registry is available.

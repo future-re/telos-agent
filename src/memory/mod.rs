@@ -8,5 +8,6 @@ pub use index::MemoryStore;
 pub mod profile;
 pub use profile::ProfileManager;
 
-pub mod tool;
-pub use tool::{MemoryEditTool, MemoryGrepTool, MemoryReadTool, MemoryStatusTool, MemoryWriteTool};
+pub use crate::tools::{
+    MemoryEditTool, MemoryGrepTool, MemoryReadTool, MemoryStatusTool, MemoryWriteTool,
+};

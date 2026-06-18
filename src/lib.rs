@@ -61,7 +61,7 @@ pub use message::{ContentBlock, Message, Role, TextBlock, ThinkingBlock, ToolCal
 // Memory — persistent cross-session agent memory.
 pub use memory::ProfileManager;
 pub use memory::{MemoryCategory, MemoryEntry, MemoryFormat, MemoryStatus, MemoryStore};
-pub use memory::{
+pub use tools::{
     MemoryEditTool, MemoryGrepTool, MemoryReadTool, MemoryStatusTool, MemoryWriteTool,
 };
 // Metrics — session-level counters accumulated by the runtime.

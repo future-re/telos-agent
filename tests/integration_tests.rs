@@ -2122,3 +2122,39 @@ fn tool_registry_iterates_tools() {
     let names: Vec<_> = registry.iter().map(|(n, _)| n.clone()).collect();
     assert!(names.contains(&"add".to_string()));
 }
+
+#[tokio::test]
+async fn tool_prompts_section_renders_registered_prompts() {
+    use async_trait::async_trait;
+    use serde_json::{Value, json};
+    use telos_agent::prompt::builtins::ToolPromptsSection;
+    use telos_agent::prompt::{PromptSection, PromptStability};
+    use telos_agent::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
+
+    struct PromptedTool;
+    #[async_trait]
+    impl Tool for PromptedTool {
+        fn definition(&self) -> ToolDefinition {
+            ToolDefinition {
+                name: "prompted".into(),
+                description: "d".into(),
+                input_schema: json!({ "type": "object" }),
+            }
+        }
+        fn prompt_text(&self) -> Option<&'static str> {
+            Some("Always run this tool first.")
+        }
+        async fn invoke(&self, _args: Value, _ctx: ToolContext) -> Result<ToolOutput, AgentError> {
+            Ok(ToolOutput::text("ok"))
+        }
+    }
+
+    let mut registry = ToolRegistry::new();
+    registry.register(PromptedTool);
+    let section = ToolPromptsSection::new(Arc::new(registry));
+    let text = section.render(&()).await;
+    assert!(text.contains("## Tool-specific guidance"));
+    assert!(text.contains("prompted"));
+    assert!(text.contains("Always run this tool first."));
+    assert_eq!(section.stability(), PromptStability::Static);
+}

@@ -15,7 +15,7 @@ pub use assembly::PromptAssembly;
 pub use builtins::{
     CwdSection, DateSection, GitStatusSection, IdentitySection, McpSection, MemorySection,
     ProfileSection, SafetySection, SkillsSection, TaskGuidanceSection, ToneStyleSection,
-    ToolUsageSection, ToolsSection,
+    ToolPromptsSection, ToolUsageSection, ToolsSection,
 };
 pub use section::{PromptSection, PromptStability};
 

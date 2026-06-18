@@ -236,6 +236,51 @@ impl PromptSection for ToolsSection {
     }
 }
 
+// ── Tool Prompts ──────────────────────────────────────────
+
+/// Per-tool behavioral guidance collected from `Tool::prompt_text()`.
+pub struct ToolPromptsSection {
+    tools: Arc<ToolRegistry>,
+}
+
+impl ToolPromptsSection {
+    pub fn new(tools: Arc<ToolRegistry>) -> Self {
+        Self { tools }
+    }
+}
+
+#[async_trait]
+impl PromptSection for ToolPromptsSection {
+    fn name(&self) -> &str {
+        "tool_prompts"
+    }
+    fn stability(&self) -> PromptStability {
+        PromptStability::Static
+    }
+
+    async fn render(&self, _ctx: &()) -> String {
+        let mut entries: Vec<(String, String)> = self
+            .tools
+            .iter()
+            .filter_map(|(name, tool)| {
+                tool.prompt_text().map(|text| (name.clone(), text.to_string()))
+            })
+            .collect();
+        if entries.is_empty() {
+            return String::new();
+        }
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut lines = vec!["## Tool-specific guidance".to_string()];
+        for (name, text) in entries {
+            lines.push(format!("### {name}"));
+            for line in text.lines() {
+                lines.push(line.to_string());
+            }
+        }
+        lines.join("\n")
+    }
+}
+
 // ── Date ──────────────────────────────────────────────────
 
 pub struct DateSection;

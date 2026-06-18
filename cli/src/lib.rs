@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod config;
+pub mod context;
 pub mod project;
 pub mod runner;
 pub mod terminal;
@@ -70,7 +71,26 @@ pub async fn run() -> Result<()> {
         None => {
             let prompt = cli.prompt.join(" ");
             if prompt.trim().is_empty() {
-                anyhow::bail!("Usage: telos [OPTIONS] <PROMPT>");
+                let config = config::build_agent_config(&cli.shared, approval_handler.clone())?;
+                let provider = build_erased_provider(&cli.shared)?;
+                let mut tools = telos_agent::ToolRegistry::new();
+                telos_agent::register_core_tools(&mut tools);
+
+                let current_dir = std::env::current_dir()?;
+                let cwd = cli.shared.cwd.as_deref().unwrap_or(&current_dir);
+                let project_root = project::find_project_root(cwd).ok();
+                let ctx = match &project_root {
+                    Some(root) => crate::context::load_project_context(root),
+                    None => crate::context::ProjectContext::empty(),
+                };
+
+                let status = crate::context::build_status_text(
+                    cli.shared.model.as_deref(),
+                    project_root.as_deref(),
+                    &ctx,
+                );
+
+                return tui::run(config, provider, tools, status).await;
             }
             runner::run_single(&cli.shared, prompt, approval_handler).await
         }
@@ -81,6 +101,16 @@ fn generate_completion(shell: clap_complete::Shell) {
     let mut cmd = <Cli as clap::CommandFactory>::command();
     let name = cmd.get_name().to_string();
     clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
+}
+
+fn build_erased_provider(
+    options: &cli::SharedOptions,
+) -> Result<Arc<dyn telos_agent::ModelProvider>> {
+    match config::build_provider(options)? {
+        config::ResolvedProvider::Kimi(p) => Ok(Arc::new(p)),
+        config::ResolvedProvider::DeepSeek(p) => Ok(Arc::new(p)),
+        config::ResolvedProvider::Mock(p) => Ok(Arc::new(p)),
+    }
 }
 
 /// Parse a policy string from config ("allow", "ask", "deny") into

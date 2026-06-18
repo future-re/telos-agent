@@ -47,137 +47,26 @@ pub async fn run_chat(
     options: &SharedOptions,
     approval_handler: Option<Arc<dyn ApprovalHandler>>,
 ) -> Result<()> {
-    let config = build_agent_config(options, approval_handler.clone())?;
-    let mut session = AgentSession::new(config).context("failed to create agent session")?;
+    let config = build_agent_config(options, approval_handler)?;
+    let provider = crate::build_erased_provider(options)?;
     let mut tools = ToolRegistry::new();
     telos_agent::register_core_tools(&mut tools);
 
-    let provider = build_provider(options)?;
-
-    eprintln!("telos chat — type /exit or /quit to leave");
-    eprintln!("Available commands: /exit, /quit, /reset, /clear, /tools, /help");
-    eprintln!();
-
-    let mut editor = crate::repl::build_editor()
-        .map_err(|e| anyhow::anyhow!("failed to create REPL editor: {e}"))?;
-
-    let history_path = dirs::data_dir().map(|d| d.join("telos").join("history.txt"));
-
-    loop {
-        let readline = editor.readline("telos> ");
-        match readline {
-            Ok(input) => {
-                let input = input.trim();
-                if input.is_empty() {
-                    continue;
-                }
-                let _ = editor.add_history_entry(input);
-
-                match parse_repl_command(input) {
-                    ReplCommand::Exit => break,
-                    ReplCommand::Reset => {
-                        let new_config = build_agent_config(options, approval_handler.clone())?;
-                        session =
-                            AgentSession::new(new_config).context("failed to reset session")?;
-                        eprintln!("Session reset.");
-                        continue;
-                    }
-                    ReplCommand::Tools => {
-                        eprintln!("Registered tools:");
-                        for def in tools.definitions() {
-                            eprintln!("  - {}", def.name);
-                        }
-                        continue;
-                    }
-                    ReplCommand::Clear => {
-                        print!("\x1b[2J\x1b[H");
-                        continue;
-                    }
-                    ReplCommand::Help => {
-                        eprintln!("Available commands:");
-                        eprintln!("  /exit, /quit  Exit the REPL");
-                        eprintln!("  /reset        Reset the conversation");
-                        eprintln!("  /clear        Clear the screen");
-                        eprintln!("  /tools        List available tools");
-                        eprintln!("  /help         Show this help");
-                        eprintln!("  /add <glob>   Add files matching a glob pattern");
-                        eprintln!("  /drop <glob>  Remove files matching a glob pattern");
-                        eprintln!("  /model <name> Change the active model");
-                        eprintln!();
-                        eprintln!("Anything else is sent as a chat prompt to the agent.");
-                        continue;
-                    }
-                    ReplCommand::Add(pattern) => {
-                        eprintln!("Added files matching: {pattern}");
-                        continue;
-                    }
-                    ReplCommand::Drop(pattern) => {
-                        eprintln!("Dropped: {pattern}");
-                        continue;
-                    }
-                    ReplCommand::Model(name) => {
-                        eprintln!("Model changed to: {name}");
-                        continue;
-                    }
-                    ReplCommand::Chat(prompt) => match &provider {
-                        ResolvedProvider::Kimi(p) => {
-                            run_with_provider(&mut session, p, &tools, prompt).await?;
-                        }
-                        ResolvedProvider::DeepSeek(p) => {
-                            run_with_provider(&mut session, p, &tools, prompt).await?;
-                        }
-                        ResolvedProvider::Mock(_) => {
-                            eprintln!("Note: using mock provider; no real model call is made.");
-                            let mock = MockProvider::new(vec![CompletionResponse {
-                                message: Message::assistant(
-                                    "Mock provider has no real response configured.",
-                                ),
-                                stop_reason: StopReason::EndTurn,
-                                usage: None,
-                            }]);
-                            run_with_provider(&mut session, &mock, &tools, prompt).await?;
-                        }
-                    },
-                }
-            }
-            Err(rustyline::error::ReadlineError::Interrupted)
-            | Err(rustyline::error::ReadlineError::Eof) => {
-                // Ctrl-C or Ctrl-D — exit the REPL.
-                break;
-            }
-            Err(e) => {
-                eprintln!("Readline error: {e}");
-                break;
-            }
-        }
-    }
-
-    // Save REPL history on exit (best-effort).
-    if let Some(path) = history_path {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = editor.save_history(&path);
-    }
-
-    // Save session metadata on exit (best-effort).
-    save_session_metadata(options);
-
-    Ok(())
-}
-
-/// Save minimal session metadata so we can track which sessions happened.
-fn save_session_metadata(options: &SharedOptions) {
-    let default_cwd = std::env::current_dir().unwrap_or_default();
-    let cwd = options.cwd.as_deref().unwrap_or(&default_cwd);
+    let current_dir = std::env::current_dir()?;
+    let cwd = options.cwd.as_deref().unwrap_or(&current_dir);
     let project_root = crate::project::find_project_root(cwd).ok();
-    let sessions_dir = crate::session::sessions_dir(project_root.as_deref());
-    let name = crate::session::next_session_name(&sessions_dir, "chat");
-    let path = sessions_dir.join(&name);
+    let ctx = match &project_root {
+        Some(root) => crate::context::load_project_context(root),
+        None => crate::context::ProjectContext::empty(),
+    };
 
-    // Save a minimal session marker.
-    let history = crate::session::ChatHistory::default();
-    let _ = history.save_to(&path);
+    let status = crate::context::build_status_text(
+        options.model.as_deref(),
+        project_root.as_deref(),
+        &ctx,
+    );
+
+    crate::tui::run(config, provider, tools, status).await
 }
 
 /// Represents a parsed slash command or chat input.

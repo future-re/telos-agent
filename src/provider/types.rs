@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::message::{Message, ToolCall};
+use crate::prompt::PromptBlock;
 use crate::tool::ToolDefinition;
 
 /// All inputs a provider needs to generate a single completion.
@@ -12,6 +13,9 @@ use crate::tool::ToolDefinition;
 #[derive(Debug, Clone)]
 pub struct CompletionRequest {
     pub system_prompt: Option<String>,
+    /// Optional structured system prompt blocks for providers that support
+    /// per-block cache control (e.g., Anthropic prompt caching).
+    pub system_prompt_blocks: Option<Vec<PromptBlock>>,
     pub messages: Vec<Message>,
     pub tools: Vec<ToolDefinition>,
 }

@@ -147,6 +147,7 @@ mod tests {
         let provider = DeepSeekProvider::new(test_config(server.uri()));
         let request = CompletionRequest {
             system_prompt: None,
+            system_prompt_blocks: None,
             messages: vec![Message::user("Hi")],
             tools: vec![],
         };
@@ -178,6 +179,7 @@ mod tests {
         let provider = DeepSeekProvider::new(test_config(server.uri()));
         let request = CompletionRequest {
             system_prompt: None,
+            system_prompt_blocks: None,
             messages: vec![Message::user("Hi")],
             tools: vec![],
         };

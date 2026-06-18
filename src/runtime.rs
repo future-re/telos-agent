@@ -350,14 +350,17 @@ impl AgentSession {
                 return Err(AgentError::Cancelled);
             }
 
-            let system_prompt = if let Some(assembly) = &self.config.prompt_assembly {
-                Some(assembly.build().await)
-            } else {
-                self.config.base_system_prompt.clone()
-            };
+            let (system_prompt, system_prompt_blocks) =
+                if let Some(assembly) = &self.config.prompt_assembly {
+                    let blocks = assembly.build_blocks().await;
+                    (None, Some(blocks))
+                } else {
+                    (self.config.base_system_prompt.clone(), None)
+                };
 
             let request = CompletionRequest {
                 system_prompt,
+                system_prompt_blocks,
                 messages: self.messages.clone(),
                 tools: tool_definitions.to_vec(),
             };

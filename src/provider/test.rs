@@ -49,6 +49,7 @@ fn get_deepseek_config() -> Option<DeepSeekConfig> {
 fn simple_request() -> CompletionRequest {
     CompletionRequest {
         system_prompt: Some("Reply in one short sentence.".into()),
+        system_prompt_blocks: None,
         messages: vec![Message::user("What is the capital of France?")],
         tools: vec![],
     }

@@ -100,6 +100,7 @@ impl CompactionStrategy for SummaryCompaction {
             system_prompt: Some(
                 "Summarize the following conversation history concisely, preserving key facts, decisions, and context.".into(),
             ),
+            system_prompt_blocks: None,
             messages: to_summarize,
             tools: vec![],
         };

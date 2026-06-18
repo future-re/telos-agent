@@ -86,17 +86,20 @@ pub(crate) fn build_request(
     let mut messages: Vec<ChatCompletionRequestMessage> =
         request.messages.iter().flat_map(message_to_openai).collect();
 
-    // Prepend the configured system prompt only when the conversation does not
-    // already start with a system message. This preserves system messages that
-    // were added by hooks or loaded from storage while keeping config authoritative.
-    if let Some(system_prompt) = &request.system_prompt {
+    let system_prompt_text = request.system_prompt.or_else(|| {
+        request
+            .system_prompt_blocks
+            .map(|blocks| blocks.into_iter().map(|b| b.text).collect::<Vec<_>>().join("\n\n"))
+    });
+
+    if let Some(system_prompt) = system_prompt_text {
         let already_has_system =
             matches!(messages.first(), Some(ChatCompletionRequestMessage::System(_)));
         if !already_has_system {
             messages.insert(
                 0,
                 ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage {
-                    content: ChatCompletionRequestSystemMessageContent::Text(system_prompt.clone()),
+                    content: ChatCompletionRequestSystemMessageContent::Text(system_prompt),
                     name: None,
                 }),
             );

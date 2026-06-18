@@ -10,6 +10,7 @@ pub async fn exec_prompt_hook(
     let messages = vec![crate::message::Message::user(prompt)];
     let request = crate::provider::CompletionRequest {
         system_prompt: Some("You are a short assistant. Respond concisely.".into()),
+        system_prompt_blocks: None,
         messages,
         tools: vec![],
     };

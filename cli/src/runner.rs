@@ -47,7 +47,7 @@ pub async fn run_chat(
     options: &SharedOptions,
     approval_handler: Option<Arc<dyn ApprovalHandler>>,
 ) -> Result<()> {
-    let config = build_agent_config(options, approval_handler)?;
+    let mut config = build_agent_config(options, approval_handler)?;
     let provider = crate::build_erased_provider(options)?;
     let mut tools = ToolRegistry::new();
     telos_agent::register_core_tools(&mut tools);
@@ -59,6 +59,10 @@ pub async fn run_chat(
         Some(root) => crate::context::load_project_context(root),
         None => crate::context::ProjectContext::empty(),
     };
+
+    // Inject the loaded context into the agent's prompt assembly.
+    let assembly = crate::context::build_prompt_assembly(&ctx);
+    config.prompt_assembly = Some(Arc::new(assembly));
 
     let status =
         crate::context::build_status_text(options.model.as_deref(), project_root.as_deref(), &ctx);

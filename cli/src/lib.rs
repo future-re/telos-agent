@@ -71,7 +71,7 @@ pub async fn run() -> Result<()> {
         None => {
             let prompt = cli.prompt.join(" ");
             if prompt.trim().is_empty() {
-                let config = config::build_agent_config(&cli.shared, approval_handler.clone())?;
+                let mut config = config::build_agent_config(&cli.shared, approval_handler.clone())?;
                 let provider = build_erased_provider(&cli.shared)?;
                 let mut tools = telos_agent::ToolRegistry::new();
                 telos_agent::register_core_tools(&mut tools);
@@ -83,6 +83,10 @@ pub async fn run() -> Result<()> {
                     Some(root) => crate::context::load_project_context(root),
                     None => crate::context::ProjectContext::empty(),
                 };
+
+                // Inject the loaded context into the agent's prompt assembly.
+                let assembly = crate::context::build_prompt_assembly(&ctx);
+                config.prompt_assembly = Some(Arc::new(assembly));
 
                 let status = crate::context::build_status_text(
                     cli.shared.model.as_deref(),

@@ -21,12 +21,20 @@ cargo install --path .
 ## Usage
 
 ```bash
-# Single prompt with real provider
-export KIMI_API_KEY=...
-telos "Refactor src/lib.rs to use anyhow"
+# DeepSeek (recommended: pass --api-key explicitly)
+telos --provider deepseek --api-key $DEEPSEEK_API_KEY "Refactor src/lib.rs to use anyhow"
+
+# Or via environment variable
+telos --provider deepseek "Refactor src/lib.rs to use anyhow"
+
+# If neither is set, telos will interactively prompt for the API key when running in a terminal
+telos --provider deepseek "Review src/lib.rs"
 
 # Specify provider and model
-telos --provider kimi --model kimi-k2-0711-preview "Review src/lib.rs"
+telos --provider deepseek --model deepseek-chat --api-key $DEEPSEEK_API_KEY "Review src/lib.rs"
+
+# Kimi
+telos --provider kimi --api-key $MOONSHOT_API_KEY "Review src/lib.rs"
 
 # Use mock provider for testing
 telos --provider mock "hello"

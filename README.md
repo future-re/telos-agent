@@ -268,12 +268,20 @@ cargo install --path .
 ### CLI 用法
 
 ```bash
-# 单次 prompt（需要设置对应 provider 的 API key）
-export KIMI_API_KEY=...
-telos "给 src/lib.rs 添加错误处理"
+# DeepSeek（推荐：通过 --api-key 传入，避免污染全局环境）
+telos --provider deepseek --api-key $DEEPSEEK_API_KEY "给 src/lib.rs 添加错误处理"
+
+# 或者通过环境变量传入
+telos --provider deepseek "给 src/lib.rs 添加错误处理"
+
+# 如果都没有设置，在终端中运行时会交互式提示输入 API key
+telos --provider deepseek "Review src/lib.rs"
 
 # 指定 provider 和模型
-telos --provider kimi --model kimi-k2-0711-preview "Review src/lib.rs"
+telos --provider deepseek --model deepseek-chat --api-key $DEEPSEEK_API_KEY "Review src/lib.rs"
+
+# Kimi
+telos --provider kimi --api-key $MOONSHOT_API_KEY "Review src/lib.rs"
 
 # 使用 mock provider 做快速测试
 telos --provider mock "hello"

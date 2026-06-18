@@ -30,6 +30,7 @@ pub mod message;
 pub mod metrics;
 pub mod mock;
 pub mod permissions;
+pub mod plugin;
 pub mod prompt;
 pub mod provider;
 pub mod runtime;
@@ -86,6 +87,8 @@ pub use subagent::{ForkExecution, ForkLens, ForkResult, ForkShared, SubagentTool
 pub use tasks::{Task, TaskManager, TaskStatus};
 // MCP — stdio-based Model Context Protocol client + manager + bridge.
 pub use mcp::{McpClient, McpManager, McpTool, McpToolBridge};
+// Plugin — marketplace-based plugin system for extensibility.
+pub use plugin::{BUILTIN_MARKETPLACE, PluginError, PluginId};
 // Prompt system — modular, cache-aware construction of the system prompt.
 pub use prompt::{
     CwdSection, DateSection, GitStatusSection, IdentitySection, McpSection, MemorySection,

@@ -2175,3 +2175,13 @@ fn default_assembly_includes_tool_prompts() {
         assert!(text.contains("### Read"));
     });
 }
+
+#[test]
+fn system_reminder_renders_with_tags() {
+    use telos_agent::message::SystemReminder;
+    let reminder = SystemReminder::Compaction { reason: "token_budget".into() };
+    let text = reminder.render();
+    assert!(text.contains("<system-reminder>"));
+    assert!(text.contains("token_budget"));
+    assert!(text.contains("</system-reminder>"));
+}

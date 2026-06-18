@@ -184,6 +184,45 @@ pub struct ToolResult {
     pub is_error: bool,
 }
 
+/// A system-level note injected into the conversation as a user message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SystemReminder {
+    /// Entering plan mode; instructions may be restricted.
+    PlanMode,
+    /// Conversation was compacted; some prior context may have been summarized.
+    Compaction { reason: String },
+    /// Provider or model context changed mid-session.
+    ProviderContext,
+    /// A hook intercepted the assistant output and may have modified it.
+    HookInterception { phase: String, name: String },
+    /// A tool result contains a system-level note.
+    ToolResult { tool_name: String, note: String },
+}
+
+impl SystemReminder {
+    /// Render the reminder as a `<system-reminder>` XML block.
+    pub fn render(&self) -> String {
+        let body = match self {
+            SystemReminder::PlanMode => {
+                "You are entering plan mode. Follow the plan instructions and do not write implementation code until the plan is approved.".to_string()
+            }
+            SystemReminder::Compaction { reason } => {
+                format!("Prior messages were compacted (reason: {reason}). Some context may have been summarized.")
+            }
+            SystemReminder::ProviderContext => {
+                "The provider/model context has changed. Adjust to any new instructions or constraints.".to_string()
+            }
+            SystemReminder::HookInterception { phase, name } => {
+                format!("A hook intercepted this turn during the {phase} phase ({name}). Treat hook output as user feedback.")
+            }
+            SystemReminder::ToolResult { tool_name, note } => {
+                format!("Tool `{tool_name}` reported: {note}")
+            }
+        };
+        format!("<system-reminder>\n{}\n</system-reminder>", body)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -13,6 +13,7 @@ pub enum ProviderArg {
     name = "telos",
     about = "Terminal interface for telos-agent",
     version,
+    subcommand_negates_reqs = true,
     override_usage = "telos [OPTIONS] [PROMPT]\n       telos [OPTIONS] <COMMAND>"
 )]
 pub struct Cli {
@@ -41,35 +42,35 @@ pub enum Command {
 #[derive(Debug, Parser, Clone)]
 pub struct SharedOptions {
     /// Model provider to use.
-    #[clap(long, value_enum, env = "TELOS_PROVIDER")]
+    #[clap(long, value_enum, env = "TELOS_PROVIDER", global = true)]
     pub provider: Option<ProviderArg>,
 
     /// Model name.
-    #[clap(long, env = "TELOS_MODEL")]
+    #[clap(long, env = "TELOS_MODEL", global = true)]
     pub model: Option<String>,
 
     /// API key for the selected provider.
-    #[clap(long, env = "TELOS_API_KEY")]
+    #[clap(long, env = "TELOS_API_KEY", global = true)]
     pub api_key: Option<String>,
 
     /// Working directory for filesystem and shell tools.
-    #[clap(long, env = "TELOS_CWD")]
+    #[clap(long, env = "TELOS_CWD", global = true)]
     pub cwd: Option<PathBuf>,
 
     /// Maximum number of model-tool iterations per turn.
-    #[clap(long, default_value = "8")]
+    #[clap(long, default_value = "8", global = true)]
     pub max_iterations: usize,
 
     /// Disable automatic JSON schema validation of tool arguments.
-    #[clap(long)]
+    #[clap(long, global = true)]
     pub no_validate_schema: bool,
 
     /// Reduce output.
-    #[clap(short, long)]
+    #[clap(short, long, global = true)]
     pub quiet: bool,
 
     /// Increase output verbosity.
-    #[clap(short, long)]
+    #[clap(short, long, global = true)]
     pub verbose: bool,
 }
 

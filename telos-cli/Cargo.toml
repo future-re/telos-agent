@@ -15,10 +15,20 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1"
+async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env", "wrap_help"] }
 clap_complete = "4"
+dirs = "5"
+dissimilar = "1"
 futures-util = "0.3"
+glob = "0.3"
+rpassword = "7"
+rustyline = { version = "14", default-features = false, features = ["with-file-history"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+termimad = "0.30"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+toml = "0.8"
 telos_agent = { path = ".." }
 tracing = "0.1"
 

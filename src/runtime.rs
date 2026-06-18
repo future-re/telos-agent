@@ -564,6 +564,11 @@ impl AgentSession {
     /// The stream borrows `self` mutably so the conversation is updated in
     /// place as events are produced. Errors abort the stream; partially
     /// produced events up to that point are still observed by the consumer.
+    ///
+    /// If `config.skill_registry` is set, a [`SkillTool`](crate::tools::SkillTool)
+    /// is automatically registered into a per-turn clone of the supplied
+    /// `tools` registry so the model can invoke bundled skills without the
+    /// caller having to register the tool manually.
     pub fn run_turn_stream<'a, P: ModelProvider + 'a>(
         &'a mut self,
         provider: &'a P,
@@ -571,6 +576,12 @@ impl AgentSession {
         user_input: impl Into<String> + 'a,
     ) -> impl Stream<Item = Result<TurnEvent, AgentError>> + 'a {
         try_stream! {
+            let mut tools = tools.clone();
+            if let Some(skill_registry) = self.config.skill_registry.clone() {
+                crate::tools::register_skill_tool(&mut tools, skill_registry);
+            }
+            let tools = tools;
+
             let turn_id = self.next_turn_id;
             self.next_turn_id += 1;
             let user_input = user_input.into();
@@ -710,7 +721,7 @@ impl AgentSession {
                 }
 
                 let (tool_message, tool_events) =
-                    self.execute_tool_calls_phase(tools, tool_calls, turn_id).await?;
+                    self.execute_tool_calls_phase(&tools, tool_calls, turn_id).await?;
                 for event in tool_events {
                     yield event;
                 }

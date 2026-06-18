@@ -5,7 +5,6 @@ pub mod runner;
 pub mod terminal;
 
 pub mod approval;
-pub mod display;
 pub mod repl;
 pub mod session;
 

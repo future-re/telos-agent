@@ -16,7 +16,6 @@ use crate::cli::{ProviderArg, SharedOptions};
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct FileConfig {
     pub agent: Option<AgentSection>,
-    pub display: Option<DisplaySection>,
     pub approval: Option<ApprovalSection>,
     pub env: Option<HashMap<String, String>>,
 }
@@ -26,12 +25,6 @@ pub struct AgentSection {
     pub model: Option<String>,
     pub provider: Option<String>,
     pub max_iterations: Option<usize>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct DisplaySection {
-    pub theme: Option<String>,
-    pub render_markdown: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -79,10 +72,6 @@ pub fn merge_configs(user: Option<FileConfig>, project: Option<FileConfig>) -> F
         user.as_ref().and_then(|c| c.agent.as_ref()),
         project.as_ref().and_then(|c| c.agent.as_ref()),
     );
-    let display = merge_display(
-        user.as_ref().and_then(|c| c.display.as_ref()),
-        project.as_ref().and_then(|c| c.display.as_ref()),
-    );
     let approval = merge_approval(
         user.as_ref().and_then(|c| c.approval.as_ref()),
         project.as_ref().and_then(|c| c.approval.as_ref()),
@@ -97,7 +86,7 @@ pub fn merge_configs(user: Option<FileConfig>, project: Option<FileConfig>) -> F
         (None, None) => None,
     };
 
-    FileConfig { agent, display, approval, env }
+    FileConfig { agent, approval, env }
 }
 
 fn merge_agent(
@@ -120,25 +109,6 @@ fn merge_agent(
             model: p.model.clone().or_else(|| u.model.clone()),
             provider: p.provider.clone().or_else(|| u.provider.clone()),
             max_iterations: p.max_iterations.or(u.max_iterations),
-        }),
-    }
-}
-
-fn merge_display(
-    user: Option<&DisplaySection>,
-    project: Option<&DisplaySection>,
-) -> Option<DisplaySection> {
-    match (user, project) {
-        (None, None) => None,
-        (Some(u), None) => {
-            Some(DisplaySection { theme: u.theme.clone(), render_markdown: u.render_markdown })
-        }
-        (None, Some(p)) => {
-            Some(DisplaySection { theme: p.theme.clone(), render_markdown: p.render_markdown })
-        }
-        (Some(u), Some(p)) => Some(DisplaySection {
-            theme: p.theme.clone().or_else(|| u.theme.clone()),
-            render_markdown: p.render_markdown.or(u.render_markdown),
         }),
     }
 }

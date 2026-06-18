@@ -1,6 +1,9 @@
 use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use std::collections::VecDeque;
 use std::pin::pin;
 use std::sync::Arc;
@@ -12,6 +15,7 @@ use crate::tui::chat_panel::ChatPanel;
 use crate::tui::event::Event;
 use crate::tui::input_panel::InputPanel;
 use crate::tui::status_bar;
+use crate::tui::theme::Theme;
 
 /// TUI application mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -278,5 +282,47 @@ impl App {
         self.chat.render(frame, layout[1], &self.messages);
 
         self.input.render(frame, layout[2], self.mode == Mode::Normal);
+
+        if self.mode == Mode::Approving
+            && let Some(pending) = self.pending_approvals.front()
+        {
+            let area = frame.area();
+            let block_area = ratatui::layout::Rect {
+                x: area.x + 4,
+                y: area.y + area.height / 3,
+                width: area.width.saturating_sub(8),
+                height: 10.min(area.height.saturating_sub(4)),
+            };
+            let theme = Theme::default();
+            let block = Block::default()
+                .title("Approval required")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.tool_pending_fg));
+            let args = serde_json::to_string_pretty(&pending.request.arguments)
+                .unwrap_or_else(|_| pending.request.arguments.to_string());
+            let text = Text::from(vec![
+                Line::from(vec![
+                    Span::styled("Tool: ", Style::default().fg(Color::White)),
+                    Span::styled(
+                        pending.request.tool_name.clone(),
+                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("Reason: ", Style::default().fg(Color::White)),
+                    Span::styled(pending.request.reason.clone(), Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(args, Style::default().fg(Color::Gray))),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "[a/y] approve  [d/n] deny  [e] edit-request",
+                    Style::default().fg(Color::White),
+                )),
+            ]);
+            let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
+            frame.render_widget(Clear, block_area);
+            frame.render_widget(paragraph, block_area);
+        }
     }
 }

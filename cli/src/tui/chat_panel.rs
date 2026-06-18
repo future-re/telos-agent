@@ -1,1 +1,7 @@
-//! TUI chat transcript panel (placeholder for Task 3).
+#[derive(Debug, Default)]
+pub struct ChatPanel;
+impl ChatPanel {
+    pub fn new() -> Self {
+        Self
+    }
+}

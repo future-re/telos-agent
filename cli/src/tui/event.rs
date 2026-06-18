@@ -2,7 +2,7 @@ use crossterm::event::{KeyEvent, MouseEvent};
 use telos_agent::TurnEvent;
 
 /// Events that flow through the TUI event loop.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Event {
     /// A keyboard event from crossterm.
     Key(KeyEvent),

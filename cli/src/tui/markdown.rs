@@ -1,1 +1,5 @@
-//! Markdown rendering helpers for the TUI (placeholder for Task 3).
+use ratatui::text::Text;
+
+pub fn render_markdown(_text: &str) -> Text<'static> {
+    Text::from("markdown placeholder")
+}

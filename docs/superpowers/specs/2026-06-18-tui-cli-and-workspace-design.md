@@ -1,4 +1,8 @@
 # TUI CLI & Workspace 重构设计
+> **Historical note:** This document describes the project state before the
+> `telos-cli/` → `cli/` rename and before the root workspace was added.
+> Some paths and commands may be outdated.
+
 
 **日期**: 2026-06-18
 **状态**: 设计完成，待实现

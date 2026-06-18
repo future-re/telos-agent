@@ -1,4 +1,8 @@
 # Design: Rename `telos-cli/` to `cli/` and Restore Clean Git State
+> **Historical note:** This document describes the project state before the
+> `telos-cli/` → `cli/` rename and before the root workspace was added.
+> Some paths and commands may be outdated.
+
 
 ## Problem
 

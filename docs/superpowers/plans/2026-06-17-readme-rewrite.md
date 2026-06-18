@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将 `tiny_agent_core/README.md` 更新为准确、完整、结构清晰的项目入口文档，反映代码库已实现的功能、设计与架构。
+**Goal:** 将 `README.md` 更新为准确、完整、结构清晰的项目入口文档，反映代码库已实现的功能、设计与架构。
 
 **Architecture:** 按「简介 → 功能 → 架构 → 流程 → 对象 → 示例 → 测试 → 边界」组织内容；功能按子系统分组；示例代码须与当前 API 保持一致并可编译。
 
@@ -12,8 +12,8 @@
 
 ### 文件结构
 
-- **修改：** `tiny_agent_core/README.md` — 项目入口文档。
-- **参考：** `tiny_agent_core/docs/superpowers/specs/2026-06-17-readme-rewrite-design.md` — 设计文档。
+- **修改：** `README.md` — 项目入口文档。
+- **参考：** `docs/superpowers/specs/2026-06-17-readme-rewrite-design.md` — 设计文档。
 - **参考：** 审计报告（由 explore agent 产出）—— 能力、对象、流程、示例修正要点。
 
 ---
@@ -21,13 +21,13 @@
 ### Task 1: 重写简介、定位、功能特性
 
 **Files:**
-- Modify: `tiny_agent_core/README.md`（全文替换的开始部分）
+- Modify: `README.md`（全文替换的开始部分）
 
 **目标：** 更新项目简介、定位，并按子系统分组重写「功能特性」。
 
 - [ ] **Step 1: 写入 README 开头至「功能特性」末尾**
 
-将以下内容写入 `tiny_agent_core/README.md`，覆盖原有开头与「已实现能力」章节：
+将以下内容写入 `README.md`，覆盖原有开头与「已实现能力」章节：
 
 ```markdown
 # tiny_agent_core
@@ -115,7 +115,7 @@
 
 - [ ] **Step 2: 检查格式**
 
-Run: `cat tiny_agent_core/README.md | head -n 120`
+Run: `cat README.md | head -n 120`
 Expected: 文件以 `# tiny_agent_core` 开头，包含「定位与使用场景」和完整的「功能特性」分组列表，无原「已实现能力」标题。
 
 - [ ] **Step 3: Commit**
@@ -131,7 +131,7 @@ git commit -m "docs: rewrite intro, positioning and features"
 ### Task 2: 重写架构概览与执行流程
 
 **Files:**
-- Modify: `tiny_agent_core/README.md`
+- Modify: `README.md`
 
 **目标：** 用分层描述替换旧的「执行流程」，并补充详细的执行阶段。
 
@@ -178,7 +178,7 @@ git commit -m "docs: rewrite intro, positioning and features"
 
 - [ ] **Step 2: 检查格式**
 
-Run: `grep -n "## 架构概览\|## 执行流程" tiny_agent_core/README.md`
+Run: `grep -n "## 架构概览\|## 执行流程" README.md`
 Expected: 两行均存在，且中间包含上述 10 步流程。
 
 - [ ] **Step 3: Commit**
@@ -194,7 +194,7 @@ git commit -m "docs: rewrite architecture overview and execution flow"
 ### Task 3: 重写核心对象表格与最小示例
 
 **Files:**
-- Modify: `tiny_agent_core/README.md`
+- Modify: `README.md`
 
 **目标：** 用表格形式更新核心对象，并修正最小示例代码使其可编译。
 
@@ -310,7 +310,7 @@ git commit -m "docs: rewrite core objects table and fix minimal example"
 ### Task 4: 补充运行示例、测试与「暂不包含」
 
 **Files:**
-- Modify: `tiny_agent_core/README.md`
+- Modify: `README.md`
 
 **目标：** 保留并更新运行示例与测试章节，重写「暂不包含」列表。
 
@@ -347,7 +347,7 @@ cargo test
 
 - [ ] **Step 2: 检查「暂不包含」准确性**
 
-Run: `grep -n "thinking block\|classifier" tiny_agent_core/README.md`
+Run: `grep -n "thinking block\|classifier" README.md`
 Expected: 无匹配；确认 thinking block 与 classifier 不再出现在「暂不包含」中。
 
 - [ ] **Step 3: 全文检查**
@@ -355,7 +355,7 @@ Expected: 无匹配；确认 thinking block 与 classifier 不再出现在「暂
 Run: `cd tiny_agent_core && cargo check`
 Expected: 编译通过。
 
-Run: `grep -n "system_prompt:" tiny_agent_core/README.md`
+Run: `grep -n "system_prompt:" README.md`
 Expected: 不再出现旧的 `system_prompt:` 字段用法（最小示例中应为 `base_system_prompt:`）。
 
 - [ ] **Step 4: Commit**
@@ -371,13 +371,13 @@ git commit -m "docs: add run example, tests and update out-of-scope section"
 ### Task 5: 最终审阅与收尾
 
 **Files:**
-- Modify: `tiny_agent_core/README.md`
+- Modify: `README.md`
 
 **目标：** 通读全文，修正格式、链接、错别字，确保与设计文档一致。
 
 - [ ] **Step 1: 通读全文并修正**
 
-Run: `cat tiny_agent_core/README.md`
+Run: `cat README.md`
 检查项：
 - 所有 Markdown 标题层级正确（`#`、`##`、`###`）。
 - 代码块语言标记正确（`rust`、`bash`）。

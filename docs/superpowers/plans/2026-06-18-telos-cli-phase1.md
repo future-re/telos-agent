@@ -14,28 +14,28 @@
 
 | File | Responsibility |
 |------|----------------|
-| `telos-cli/Cargo.toml` | New dependencies: rustyline, termimad, dissimilar, glob, toml, dirs |
-| `telos-cli/src/lib.rs` | Module declarations, updated `run()` orchestration |
-| `telos-cli/src/main.rs` | Binary entry point (unchanged) |
-| `telos-cli/src/cli.rs` | Clap CLI — add `--config` flag, new slash-command variants |
-| `telos-cli/src/config.rs` | Extended: load toml config files, merge layers |
-| `telos-cli/src/project.rs` | NEW: project root detection, .telos.toml discovery |
-| `telos-cli/src/session.rs` | NEW: session persistence (save/load chat history) |
-| `telos-cli/src/display.rs` | NEW: termimad markdown rendering, diff coloring |
-| `telos-cli/src/repl.rs` | NEW: rustyline REPL with history, completion, slash commands |
-| `telos-cli/src/approval.rs` | Extended: approval policy system |
-| `telos-cli/src/runner.rs` | Updated: wire display + session + policy into run loops |
-| `telos-cli/src/terminal.rs` | (unchanged, keep existing) |
-| `telos-cli/README.md` | Updated usage docs |
-| `telos-cli/tests/cli_tests.rs` | New integration tests for all Phase 1 features |
+| `cli/Cargo.toml` | New dependencies: rustyline, termimad, dissimilar, glob, toml, dirs |
+| `cli/src/lib.rs` | Module declarations, updated `run()` orchestration |
+| `cli/src/main.rs` | Binary entry point (unchanged) |
+| `cli/src/cli.rs` | Clap CLI — add `--config` flag, new slash-command variants |
+| `cli/src/config.rs` | Extended: load toml config files, merge layers |
+| `cli/src/project.rs` | NEW: project root detection, .telos.toml discovery |
+| `cli/src/session.rs` | NEW: session persistence (save/load chat history) |
+| `cli/src/display.rs` | NEW: termimad markdown rendering, diff coloring |
+| `cli/src/repl.rs` | NEW: rustyline REPL with history, completion, slash commands |
+| `cli/src/approval.rs` | Extended: approval policy system |
+| `cli/src/runner.rs` | Updated: wire display + session + policy into run loops |
+| `cli/src/terminal.rs` | (unchanged, keep existing) |
+| `cli/README.md` | Updated usage docs |
+| `cli/tests/cli_tests.rs` | New integration tests for all Phase 1 features |
 
 ---
 
 ### Task 1: Add crate dependencies
 
 **Files:**
-- Modify: `telos-cli/Cargo.toml`
-- Test: `telos-cli/tests/cli_tests.rs` (compile-check test)
+- Modify: `cli/Cargo.toml`
+- Test: `cli/tests/cli_tests.rs` (compile-check test)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -87,9 +87,9 @@ cargo check -p telos-cli 2>&1 | grep -v "warning"
 ### Task 2: Configuration file support (toml + dirs)
 
 **Files:**
-- Modify: `telos-cli/src/config.rs`
-- Modify: `telos-cli/src/cli.rs` (add `--config` flag)
-- New test in: `telos-cli/tests/cli_tests.rs`
+- Modify: `cli/src/config.rs`
+- Modify: `cli/src/cli.rs` (add `--config` flag)
+- New test in: `cli/tests/cli_tests.rs`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -188,9 +188,9 @@ cargo test -p telos-cli
 ### Task 3: Project context detection
 
 **Files:**
-- Create: `telos-cli/src/project.rs`
-- Modify: `telos-cli/src/lib.rs` (add `pub mod project;`)
-- New test in: `telos-cli/tests/cli_tests.rs`
+- Create: `cli/src/project.rs`
+- Modify: `cli/src/lib.rs` (add `pub mod project;`)
+- New test in: `cli/tests/cli_tests.rs`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -243,8 +243,8 @@ cargo test -p telos-cli
 ### Task 4: Expanded slash commands
 
 **Files:**
-- Modify: `telos-cli/src/runner.rs` (expand `ReplCommand` enum)
-- New test in: `telos-cli/tests/cli_tests.rs`
+- Modify: `cli/src/runner.rs` (expand `ReplCommand` enum)
+- New test in: `cli/tests/cli_tests.rs`
 
 - [ ] **Step 1: Write failing tests**
 
@@ -332,8 +332,8 @@ cargo test -p telos-cli
 ### Task 5: Approval policy system
 
 **Files:**
-- Modify: `telos-cli/src/approval.rs`
-- New test in: `telos-cli/tests/cli_tests.rs`
+- Modify: `cli/src/approval.rs`
+- New test in: `cli/tests/cli_tests.rs`
 
 - [ ] **Step 1: Write failing tests**
 
@@ -418,10 +418,10 @@ cargo test -p telos-cli
 ### Task 6: Markdown display via termimad
 
 **Files:**
-- Create: `telos-cli/src/display.rs`
-- Modify: `telos-cli/src/lib.rs` (add `pub mod display;`)
-- Modify: `telos-cli/src/runner.rs` (use display for assistant output)
-- New test in: `telos-cli/tests/cli_tests.rs`
+- Create: `cli/src/display.rs`
+- Modify: `cli/src/lib.rs` (add `pub mod display;`)
+- Modify: `cli/src/runner.rs` (use display for assistant output)
+- New test in: `cli/tests/cli_tests.rs`
 
 - [ ] **Step 1: Write failing tests**
 
@@ -502,9 +502,9 @@ cargo test -p telos-cli
 ### Task 7: Session persistence
 
 **Files:**
-- Create: `telos-cli/src/session.rs`
-- Modify: `telos-cli/src/lib.rs` (add `pub mod session;`)
-- New test in: `telos-cli/tests/cli_tests.rs`
+- Create: `cli/src/session.rs`
+- Modify: `cli/src/lib.rs` (add `pub mod session;`)
+- New test in: `cli/tests/cli_tests.rs`
 
 - [ ] **Step 1: Write failing tests**
 
@@ -586,10 +586,10 @@ cargo test -p telos-cli
 ### Task 8: Rustyline REPL integration
 
 **Files:**
-- Create: `telos-cli/src/repl.rs`
-- Modify: `telos-cli/src/lib.rs` (add `pub mod repl;`)
-- Modify: `telos-cli/src/runner.rs` (replace stdin loop with rustyline)
-- New test in: `telos-cli/tests/cli_tests.rs`
+- Create: `cli/src/repl.rs`
+- Modify: `cli/src/lib.rs` (add `pub mod repl;`)
+- Modify: `cli/src/runner.rs` (replace stdin loop with rustyline)
+- New test in: `cli/tests/cli_tests.rs`
 
 - [ ] **Step 1: Write failing tests**
 
@@ -692,9 +692,9 @@ cargo test -p telos-cli
 ### Task 9: Runner integration — wire everything together
 
 **Files:**
-- Modify: `telos-cli/src/runner.rs`
-- Modify: `telos-cli/src/lib.rs`
-- New test in: `telos-cli/tests/cli_tests.rs`
+- Modify: `cli/src/runner.rs`
+- Modify: `cli/src/lib.rs`
+- New test in: `cli/tests/cli_tests.rs`
 
 - [ ] **Step 1: Write integration test**
 
@@ -748,10 +748,10 @@ cargo build -p telos-cli --release
 ### Task 10: Documentation update
 
 **Files:**
-- Modify: `telos-cli/README.md`
+- Modify: `cli/README.md`
 - Modify: `README.md` (workspace root, if needed)
 
-- [ ] **Step 1: Update telos-cli/README.md**
+- [ ] **Step 1: Update cli/README.md**
 
 - Document new config file format
 - Document slash commands
@@ -763,7 +763,7 @@ cargo build -p telos-cli --release
 
 ```bash
 # Manual check — README.md should be clear and complete
-head -20 telos-cli/README.md
+head -20 cli/README.md
 ```
 
 - [ ] **Step 3: Run final test suite**

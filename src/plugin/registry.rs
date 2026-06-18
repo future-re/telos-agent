@@ -392,7 +392,7 @@ impl PluginRegistry {
         _hooks: &mut crate::hooks::HookRegistry,
         skills: &mut crate::skills::SkillRegistry,
         _mcp: &mut crate::mcp::McpManager,
-        _prompt: &mut crate::prompt::PromptAssembly,
+        prompt: &mut crate::prompt::PromptAssembly,
     ) -> Result<(), Vec<PluginError>> {
         let enabled = self.list_enabled();
         let mut errors = Vec::new();
@@ -457,6 +457,33 @@ impl PluginRegistry {
                                     "failed to load plugin skill file"
                                 );
                             }
+                        }
+                    }
+                }
+            }
+
+            // --- Prompt sections ---
+            for section_path in &plugin.resolved_prompt_sections {
+                component_count += 1;
+                if section_path.is_file() {
+                    match std::fs::read_to_string(section_path) {
+                        Ok(template) => {
+                            let template =
+                                template.replace("${PLUGIN_ROOT}", &plugin.path.to_string_lossy());
+                            let section = crate::plugin::PluginPromptSection {
+                                name: format!("plugin_{plugin_id_str}_section_{}", component_count),
+                                template,
+                            };
+                            prompt.add(section);
+                            loaded_count += 1;
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                plugin = %plugin.id,
+                                section = %section_path.display(),
+                                error = %e,
+                                "failed to read plugin prompt section"
+                            );
                         }
                     }
                 }

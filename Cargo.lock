@@ -2597,6 +2597,7 @@ dependencies = [
  "dirs",
  "futures-util",
  "glob",
+ "libc",
  "predicates",
  "ratatui",
  "rpassword",

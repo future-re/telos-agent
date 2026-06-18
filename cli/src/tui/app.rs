@@ -3,7 +3,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::collections::VecDeque;
 use std::pin::pin;
 use std::sync::Arc;
@@ -361,37 +361,40 @@ impl App {
                 x: area.x + 4,
                 y: area.y + area.height / 3,
                 width: area.width.saturating_sub(8),
-                height: 10.min(area.height.saturating_sub(4)),
+                height: 12.min(area.height.saturating_sub(4)),
             };
             let theme = Theme::default();
+            // Solid background to obscure content underneath.
+            let bg = Block::default().style(Style::default().bg(Color::Black));
             let block = Block::default()
-                .title("Approval required")
+                .title(" Approval required ")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.tool_pending_fg));
+                .border_style(Style::default().fg(theme.tool_pending_fg))
+                .style(Style::default().bg(Color::Rgb(24, 24, 32)));
             let args = serde_json::to_string_pretty(&pending.request.arguments)
                 .unwrap_or_else(|_| pending.request.arguments.to_string());
             let text = Text::from(vec![
                 Line::from(vec![
-                    Span::styled("Tool: ", Style::default().fg(Color::White)),
+                    Span::styled("Tool:   ", Style::default().fg(Color::White)),
                     Span::styled(
                         pending.request.tool_name.clone(),
-                        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                        Style::default().fg(theme.tool_pending_fg).add_modifier(Modifier::BOLD),
                     ),
                 ]),
                 Line::from(vec![
                     Span::styled("Reason: ", Style::default().fg(Color::White)),
-                    Span::styled(pending.request.reason.clone(), Style::default().fg(Color::Gray)),
+                    Span::styled(&pending.request.reason, Style::default().fg(Color::Gray)),
                 ]),
                 Line::from(""),
-                Line::from(Span::styled(args, Style::default().fg(Color::Gray))),
+                Line::from(Span::styled(&args, Style::default().fg(Color::Gray))),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "[a/y] approve  [d/n] deny  [e] edit-request",
+                    "  [a/y] approve  [d/n] deny  [e] edit-request  ",
                     Style::default().fg(Color::White),
                 )),
             ]);
-            let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
-            frame.render_widget(Clear, block_area);
+            let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
+            frame.render_widget(bg, block_area);
             frame.render_widget(paragraph, block_area);
         }
     }

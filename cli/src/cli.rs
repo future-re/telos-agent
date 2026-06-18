@@ -38,7 +38,7 @@ pub enum Command {
     },
 }
 
-#[derive(Debug, Parser, Clone)]
+#[derive(Debug, Parser, Clone, Default)]
 pub struct SharedOptions {
     /// Model provider to use.
     #[clap(long, value_enum, env = "TELOS_PROVIDER")]
@@ -57,8 +57,8 @@ pub struct SharedOptions {
     pub cwd: Option<PathBuf>,
 
     /// Maximum number of model-tool iterations per turn.
-    #[clap(long, default_value = "8")]
-    pub max_iterations: usize,
+    #[clap(long)]
+    pub max_iterations: Option<usize>,
 
     /// Disable automatic JSON schema validation of tool arguments.
     #[clap(long)]

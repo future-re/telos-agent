@@ -7,6 +7,7 @@ pub mod terminal;
 pub mod tui;
 
 pub mod approval;
+pub mod onboarding;
 pub mod session;
 
 pub use project::find_project_root;
@@ -32,6 +33,10 @@ pub async fn run() -> Result<()> {
         None => None,
     };
     let merged = config::merge_configs(user_config, project_config);
+
+    // Apply FileConfig env vars to the process environment so clap/env-style
+    // resolvers (including resolve_api_key) can find them on next run.
+    config::apply_config_env(&merged);
 
     // Print project root on startup (informational).
     if let Some(ref root) = project_root {
@@ -63,15 +68,41 @@ pub async fn run() -> Result<()> {
     // ── Dispatch ───────────────────────────────────────────────────────────
     match cli.command {
         Some(Command::Completion { shell }) => {
+            // Completion subcommand doesn't need a provider — skip onboarding.
             generate_completion(shell);
             Ok(())
         }
-        Some(Command::Chat) => runner::run_chat(&cli.shared, approval_handler).await,
+        Some(Command::Chat) => {
+            let onboarding = match check_onboarding(&cli.shared, &merged) {
+                Ok(o) => o,
+                Err(e) => {
+                    if e.to_string().contains("Setup cancelled") {
+                        return Ok(());
+                    }
+                    return Err(e);
+                }
+            };
+            runner::run_chat(&cli.shared, &merged, onboarding, approval_handler).await
+        }
         None => {
             let prompt = cli.prompt.join(" ");
             if prompt.trim().is_empty() {
-                let mut config = config::build_agent_config(&cli.shared, approval_handler.clone())?;
-                let provider = build_erased_provider(&cli.shared)?;
+                let onboarding = match check_onboarding(&cli.shared, &merged) {
+                    Ok(o) => o,
+                    Err(e) => {
+                        if e.to_string().contains("Setup cancelled") {
+                            return Ok(());
+                        }
+                        return Err(e);
+                    }
+                };
+                let config =
+                    config::build_agent_config(&cli.shared, &merged, approval_handler.clone())?;
+                let provider = if let Some(ref onb) = onboarding {
+                    build_erased_from_onboarding(onb)?
+                } else {
+                    build_erased_provider(&cli.shared, &merged)?
+                };
                 let mut tools = telos_agent::ToolRegistry::new();
                 telos_agent::register_core_tools(&mut tools);
 
@@ -85,7 +116,8 @@ pub async fn run() -> Result<()> {
 
                 // Inject the loaded context into the agent's prompt assembly.
                 let assembly = crate::context::build_prompt_assembly(&ctx);
-                config.prompt_assembly = Some(Arc::new(assembly));
+                let mut tui_config = config;
+                tui_config.prompt_assembly = Some(Arc::new(assembly));
 
                 let status = crate::context::build_status_text(
                     cli.shared.model.as_deref(),
@@ -93,10 +125,76 @@ pub async fn run() -> Result<()> {
                     &ctx,
                 );
 
-                return tui::run(config, provider, tools, status, project_root.as_deref()).await;
+                return tui::run(tui_config, provider, tools, status, project_root.as_deref())
+                    .await;
             }
-            runner::run_single(&cli.shared, prompt, approval_handler).await
+            let onboarding = match check_onboarding(&cli.shared, &merged) {
+                Ok(o) => o,
+                Err(e) => {
+                    if e.to_string().contains("Setup cancelled") {
+                        return Ok(());
+                    }
+                    return Err(e);
+                }
+            };
+            runner::run_single(&cli.shared, &merged, onboarding, prompt, approval_handler).await
         }
+    }
+}
+
+/// Check whether a provider is configured. If not, and stdin is a terminal,
+/// launch the interactive onboarding wizard. Returns `None` if the provider was
+/// already configured (no onboarding needed), or `Some(result)` if the user
+/// completed the setup wizard.
+fn check_onboarding(
+    options: &cli::SharedOptions,
+    merged: &config::FileConfig,
+) -> Result<Option<onboarding::OnboardingResult>> {
+    let has_provider = options.provider.is_some()
+        || std::env::var("TELOS_PROVIDER").is_ok()
+        || merged.agent.as_ref().and_then(|a| a.provider.as_ref()).is_some();
+
+    if has_provider {
+        return Ok(None);
+    }
+
+    if !std::io::stdin().is_terminal() {
+        anyhow::bail!(
+            "No provider configured.\n\
+             Set TELOS_PROVIDER and TELOS_API_KEY environment variables,\n\
+             or create ~/.config/telos/config.toml with:\n\
+             \n  [agent]\n  provider = \"deepseek\"  # or \"kimi\"\n\
+             \n  Or run `telos` interactively to use the setup wizard."
+        );
+    }
+
+    match onboarding::run() {
+        Ok(Some(result)) => {
+            // Set provider env vars so resolve_api_key finds the key
+            // for this session.
+            // SAFETY: set_var is called during startup before any threads
+            // are spawned, so no data races can occur.
+            match result.provider {
+                cli::ProviderArg::Deepseek => unsafe {
+                    std::env::set_var("DEEPSEEK_API_KEY", &result.api_key);
+                },
+                cli::ProviderArg::Kimi => unsafe {
+                    std::env::set_var("MOONSHOT_API_KEY", &result.api_key);
+                },
+                cli::ProviderArg::Mock => {}
+            }
+            Ok(Some(result))
+        }
+        Ok(None) => {
+            eprintln!("\nSetup cancelled. Exiting.");
+            // Return Ok(()) would exit run(), but we're in a helper. The caller
+            // checks for this and should propagate. We use a sentinel approach:
+            // the caller sees Ok(None) and exits.
+            // But Ok(None) is also the "already configured" case...
+            // We need to distinguish. Use a custom error that the caller catches.
+            anyhow::bail!("Setup cancelled");
+        }
+        Err(e) => Err(e),
     }
 }
 
@@ -106,10 +204,21 @@ fn generate_completion(shell: clap_complete::Shell) {
     clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
 }
 
-fn build_erased_provider(
+pub(crate) fn build_erased_provider(
     options: &cli::SharedOptions,
+    config: &config::FileConfig,
 ) -> Result<Arc<dyn telos_agent::ModelProvider>> {
-    match config::build_provider(options)? {
+    match config::build_provider(options, config)? {
+        config::ResolvedProvider::Kimi(p) => Ok(Arc::new(p)),
+        config::ResolvedProvider::DeepSeek(p) => Ok(Arc::new(p)),
+        config::ResolvedProvider::Mock(p) => Ok(Arc::new(p)),
+    }
+}
+
+pub(crate) fn build_erased_from_onboarding(
+    onb: &onboarding::OnboardingResult,
+) -> Result<Arc<dyn telos_agent::ModelProvider>> {
+    match config::build_provider_from_onboarding(onb)? {
         config::ResolvedProvider::Kimi(p) => Ok(Arc::new(p)),
         config::ResolvedProvider::DeepSeek(p) => Ok(Arc::new(p)),
         config::ResolvedProvider::Mock(p) => Ok(Arc::new(p)),

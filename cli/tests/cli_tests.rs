@@ -201,3 +201,54 @@ fn sessions_dir_without_project() {
     assert!(sessions.to_string_lossy().contains("telos"));
     assert!(sessions.ends_with("sessions"));
 }
+
+// ── Onboarding tests ───────────────────────────────────────────────────────
+
+#[test]
+fn no_provider_non_interactive_shows_error() {
+    // When stdin is piped and no provider configured, the CLI should print
+    // a clear error message and exit non-zero.
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("nonexistent.toml");
+    // Use a temp config path to avoid picking up the user's real config
+    // from ~/.config/telos/config.toml.
+    let mut cmd = Command::cargo_bin("telos").unwrap();
+    cmd.arg("hello").arg("--config").arg(config_path);
+    cmd.assert().failure().stderr(predicates::str::contains("No provider configured"));
+}
+
+#[test]
+fn config_file_provider_avoids_onboarding() {
+    // When a config file specifies a provider, onboarding should be skipped
+    // even with no CLI flags or env vars.
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+[agent]
+provider = "deepseek"
+model = "deepseek-v4-flash"
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("telos").unwrap();
+    cmd.args(["--config", config_path.to_str().unwrap(), "--api-key", "sk-test", "hello"]);
+    // Should NOT print the "No provider configured" error — it should
+    // attempt to use DeepSeek (and fail with an API error, not a config error).
+    let output = cmd.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // The error should be about the API call, not about missing config.
+    assert!(!stderr.contains("No provider configured"));
+    // With a bad API key, should fail with an HTTP/API error or timeout.
+    assert!(
+        stderr.contains("API")
+            || stderr.contains("DeepSeek")
+            || stderr.contains("HTTP")
+            || stderr.contains("connect")
+            || stderr.contains("timed out")
+            || stderr.contains("error"),
+        "expected API/network error, got: {stderr}"
+    );
+}

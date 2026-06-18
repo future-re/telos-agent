@@ -8,19 +8,25 @@ use telos_agent::{
 };
 
 use crate::cli::SharedOptions;
-use crate::config::{ResolvedProvider, build_agent_config, build_provider};
+use crate::config::{self, FileConfig, ResolvedProvider};
 
 pub async fn run_single(
     options: &SharedOptions,
+    config: &FileConfig,
+    onboarding: Option<crate::onboarding::OnboardingResult>,
     prompt: String,
     approval_handler: Option<Arc<dyn ApprovalHandler>>,
 ) -> Result<()> {
-    let config = build_agent_config(options, approval_handler)?;
-    let mut session = AgentSession::new(config).context("failed to create agent session")?;
+    let agent_config = config::build_agent_config(options, config, approval_handler)?;
+    let mut session = AgentSession::new(agent_config).context("failed to create agent session")?;
     let mut tools = ToolRegistry::new();
     telos_agent::register_core_tools(&mut tools);
 
-    let provider = build_provider(options)?;
+    let provider = if let Some(ref onb) = onboarding {
+        config::build_provider_from_onboarding(onb)?
+    } else {
+        config::build_provider(options, config)?
+    };
 
     match provider {
         ResolvedProvider::Kimi(p) => {
@@ -45,10 +51,16 @@ pub async fn run_single(
 
 pub async fn run_chat(
     options: &SharedOptions,
+    config: &FileConfig,
+    onboarding: Option<crate::onboarding::OnboardingResult>,
     approval_handler: Option<Arc<dyn ApprovalHandler>>,
 ) -> Result<()> {
-    let mut config = build_agent_config(options, approval_handler)?;
-    let provider = crate::build_erased_provider(options)?;
+    let mut agent_config = config::build_agent_config(options, config, approval_handler)?;
+    let provider = if let Some(ref onb) = onboarding {
+        crate::build_erased_from_onboarding(onb)?
+    } else {
+        crate::build_erased_provider(options, config)?
+    };
     let mut tools = ToolRegistry::new();
     telos_agent::register_core_tools(&mut tools);
 
@@ -62,12 +74,12 @@ pub async fn run_chat(
 
     // Inject the loaded context into the agent's prompt assembly.
     let assembly = crate::context::build_prompt_assembly(&ctx);
-    config.prompt_assembly = Some(Arc::new(assembly));
+    agent_config.prompt_assembly = Some(Arc::new(assembly));
 
     let status =
         crate::context::build_status_text(options.model.as_deref(), project_root.as_deref(), &ctx);
 
-    crate::tui::run(config, provider, tools, status, project_root.as_deref()).await
+    crate::tui::run(agent_config, provider, tools, status, project_root.as_deref()).await
 }
 
 async fn run_with_provider<P: telos_agent::ModelProvider>(

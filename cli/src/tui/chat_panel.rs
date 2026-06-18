@@ -106,7 +106,7 @@ impl ChatPanel {
         let visible_lines: Vec<Line> =
             text.lines.into_iter().skip(visible_start).take(area_height).collect();
 
-        let paragraph = Paragraph::new(Text::from(visible_lines)).wrap(Wrap { trim: false });
+        let paragraph = Paragraph::new(Text::from(visible_lines)).wrap(Wrap { trim: true });
         frame.render_widget(paragraph, area);
     }
 }

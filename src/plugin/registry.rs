@@ -288,6 +288,8 @@ impl PluginRegistry {
                 }
             }
         }
+        resolved_tools.sort();
+        resolved_tools.dedup();
 
         let resolved_skills = resolve(&manifest.skills);
         let resolved_agents = resolve(&manifest.agents);
@@ -318,7 +320,8 @@ impl PluginRegistry {
             .iter()
             .map(|(id, entry)| {
                 let status_str = match entry.status {
-                    PluginStatus::Enabled | PluginStatus::Degraded => "enabled",
+                    PluginStatus::Enabled => "enabled",
+                    PluginStatus::Degraded => "degraded",
                     PluginStatus::Disabled => "disabled",
                     PluginStatus::Error => "error",
                 };
@@ -359,6 +362,10 @@ impl PluginRegistry {
                     match status_str {
                         "enabled" => {
                             entry.status = PluginStatus::Enabled;
+                            entry.plugin.enabled = true;
+                        }
+                        "degraded" => {
+                            entry.status = PluginStatus::Degraded;
                             entry.plugin.enabled = true;
                         }
                         "disabled" => {
@@ -425,6 +432,38 @@ impl PluginRegistry {
                 }
             }
 
+            // --- Unsupported component warnings ---
+            if plugin.manifest.hooks.is_some() {
+                tracing::warn!(
+                    plugin = %plugin.id,
+                    "plugin declares hooks but hook support is not yet implemented"
+                );
+            }
+            if plugin.manifest.mcp_servers.is_some() {
+                tracing::warn!(
+                    plugin = %plugin.id,
+                    "plugin declares MCP servers but MCP server support is not yet implemented"
+                );
+            }
+            if plugin.manifest.lsp_servers.is_some() {
+                tracing::warn!(
+                    plugin = %plugin.id,
+                    "plugin declares LSP servers but LSP server support is not yet implemented"
+                );
+            }
+            if plugin.manifest.agents.is_some() {
+                tracing::warn!(
+                    plugin = %plugin.id,
+                    "plugin declares agents but agent support is not yet implemented"
+                );
+            }
+            if plugin.manifest.output_styles.is_some() {
+                tracing::warn!(
+                    plugin = %plugin.id,
+                    "plugin declares output styles but output style support is not yet implemented"
+                );
+            }
+
             // --- Skills ---
             // Resolve skill paths: each entry can be a .md file or a directory.
             for skill_path in &plugin.resolved_skills {
@@ -470,8 +509,12 @@ impl PluginRegistry {
                         Ok(template) => {
                             let template =
                                 template.replace("${PLUGIN_ROOT}", &plugin.path.to_string_lossy());
+                            let stem = section_path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("unknown");
                             let section = crate::plugin::PluginPromptSection {
-                                name: format!("plugin_{plugin_id_str}_section_{}", component_count),
+                                name: format!("plugin_{plugin_id_str}_{stem}"),
                                 template,
                             };
                             prompt.add(section);

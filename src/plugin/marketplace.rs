@@ -264,6 +264,40 @@ impl MarketplaceRegistry {
         })?;
         Ok(manifest)
     }
+
+    /// Refresh a marketplace by re-reading its source.
+    ///
+    /// For `Local` sources, this re-reads marketplace.json from disk.
+    /// For remote sources (GitHub, Git, Url, Npm), this is not yet implemented.
+    /// For `Inline` sources, this is a no-op.
+    pub fn refresh(&mut self, name: &str) -> Result<(), PluginError> {
+        let cached =
+            self.marketplaces.get(name).ok_or_else(|| PluginError::MarketplaceNotFound {
+                marketplace: name.to_string(),
+                available: self.marketplaces.keys().cloned().collect(),
+            })?;
+
+        let source = cached.source.clone();
+        match &source {
+            MarketplaceSource::Local { path } => {
+                let manifest = Self::load_manifest_from_dir(path)?;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                if let Some(cached) = self.marketplaces.get_mut(name) {
+                    cached.manifest = manifest;
+                    cached.last_updated = now;
+                }
+                Ok(())
+            }
+            MarketplaceSource::Inline { .. } => {
+                // Inline marketplaces are immutable; nothing to refresh.
+                Ok(())
+            }
+            _ => Err(PluginError::Other("remote marketplace refresh not yet implemented".into())),
+        }
+    }
 }
 
 #[cfg(test)]

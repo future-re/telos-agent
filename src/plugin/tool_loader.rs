@@ -13,6 +13,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command as TokioCommand;
 
 use crate::error::AgentError;
+use crate::plugin::PluginError;
 use crate::tool::{
     InterruptBehavior, PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput,
 };
@@ -55,12 +56,16 @@ fn default_permission() -> ToolPermission {
 }
 
 /// Load a tool spec from a JSON file.
-pub fn load_tool_spec(path: &Path) -> Result<ToolSpec, AgentError> {
-    let content = std::fs::read_to_string(path).map_err(|e| {
-        AgentError::Config(format!("failed to read tool spec {}: {e}", path.display()))
+pub fn load_tool_spec(path: &Path) -> Result<ToolSpec, PluginError> {
+    let content = std::fs::read_to_string(path).map_err(|e| PluginError::ManifestParse {
+        path: path.to_path_buf(),
+        reason: format!("failed to read tool spec: {e}"),
     })?;
-    let spec: ToolSpec = serde_json::from_str(&content)
-        .map_err(|e| AgentError::Config(format!("invalid tool spec {}: {e}", path.display())))?;
+    let spec: ToolSpec =
+        serde_json::from_str(&content).map_err(|e| PluginError::ManifestParse {
+            path: path.to_path_buf(),
+            reason: format!("invalid JSON: {e}"),
+        })?;
     Ok(spec)
 }
 

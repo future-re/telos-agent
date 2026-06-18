@@ -11,6 +11,7 @@ impl SkillLoader {
             ("remember.md", include_str!("bundled/remember.md")),
             ("brainstorm.md", include_str!("bundled/brainstorm.md")),
             ("update-config.md", include_str!("bundled/update-config.md")),
+            ("explore.md", include_str!("bundled/explore.md")),
         ];
         for (_name, content) in files {
             if let Some(skill) = Self::parse_skill(content, SkillSource::Bundled) {

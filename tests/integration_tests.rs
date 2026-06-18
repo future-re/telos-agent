@@ -1599,7 +1599,7 @@ fn skill_registry_get_missing_returns_none() {
 fn bundled_skills_load_successfully() {
     use telos_agent::skills::SkillLoader;
     let skills = SkillLoader::load_bundled_skills();
-    assert!(skills.len() >= 5, "expected >=5 bundled skills, got {}", skills.len());
+    assert!(skills.len() >= 6, "expected >=6 bundled skills, got {}", skills.len());
     for s in &skills {
         assert!(!s.name.is_empty(), "skill has empty name");
         assert!(!s.description.is_empty(), "skill '{}' has empty description", s.name);

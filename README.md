@@ -1,12 +1,12 @@
-# tiny_agent_core
+# telos
 
-`tiny_agent_core` 是一个用 Rust 编写的意图驱动 agent runtime，重点覆盖会话管理、模型调用、工具执行和结果回注这一条核心链路。它把一次「用户输入 → 模型采样 → 工具执行 → 结果回注」的完整 turn 封装成可扩展、可观测、可持久化的运行时单元。
+**telos** 是一个用 Rust 编写的意图驱动 agent runtime。它把「用户输入 → 模型采样 → 工具执行 → 结果回注」的完整 turn 封装成可扩展、可观测、可持久化的运行时单元，为构建 AI 编码助手、聊天机器人和自动化工作流提供内核级支撑。
+
+> Loop: intent → execute → think → complete
 
 ## 定位与使用场景
 
-它主要面向两类使用场景：
-
-- **作为实验底座**，用于验证 agent loop、tool use、provider adapter、权限审批、memory、skills 等设计。
+- **作为实验底座**，验证 agent loop、tool use、provider adapter、权限审批、memory、skills 等设计。
 - **作为运行时内核**，供 TUI、HTTP 服务、任务系统或其他编排层集成；上层只需实现交互界面，核心链路由 `telos_agent` 库提供。
 
 ## 功能特性
@@ -15,7 +15,7 @@
 
 - 会话级 `AgentSession`，驱动每一轮 turn 的模型采样与工具执行循环。
 - `TurnEvent` 事件流，暴露采样、工具执行、compaction、停止等关键阶段。
-- `HookRegistry`，支持 **7 个 hook phase**：`SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`PostSampling`、`Stop`；支持 Command / Prompt / HTTP 三种 hook 类型及条件过滤。
+- `HookRegistry` 支持 **7 个 hook phase**：`SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`PostSampling`、`Stop`；支持 Command / Prompt / HTTP 三种 hook 类型及条件过滤。
 - 基于 `Arc<AtomicBool>` 的取消检查点，可在 provider 调用或迭代间隙安全中断。
 - `SessionMetrics` 汇总每轮 turn 的 token、tool call、错误、迭代、compaction、重试等数据。
 
@@ -34,7 +34,7 @@
 - `ToolRegistry` 管理工具注册、别名（`Tool::aliases`）和 JSON Schema 预编译。
 - 开启 `auto_validate_schema` 后，运行时自动校验工具参数是否符合 `input_schema`。
 - 内置核心工具：`Bash`/`Read`/`Edit`/`Write`/`Glob`/`Grep`（同时保留 `shell`、`file_read` 等旧别名）。
-- `SubagentTool`，支持 **agent** 模式（完整子会话）和 **fork** 模式（轻量级上下文分叉，多视角并发执行）。
+- `SubagentTool` 支持 **agent** 模式（完整子会话）和 **fork** 模式（轻量级上下文分叉，多视角并发执行）。
 - `SkillTool`，把加载的 skill 暴露为工具。
 - 5 个 Memory 工具：`MemoryRead`、`MemoryWrite`、`MemoryGrep`、`MemoryEdit`、`MemoryStatus`。
 - 4 个 Task 工具：`TaskCreate`、`TaskGet`、`TaskList`、`TaskUpdate`。
@@ -108,17 +108,19 @@
 
 运行时由几条清晰的分层职责构成：
 
-- **Session 层**：`AgentSession` 持有消息历史、配置、文件读状态、metrics，并对外暴露 `run_turn` / `run_turn_stream`。
-- **Runtime 层**：负责单轮 turn 内的迭代循环、provider 调用、compaction、hook 调用、tool 执行编排和持久化。
-- **Provider 层**：`ModelProvider` 将不同服务商封装为统一的采样接口；流式输出统一为 `ProviderEvent`。
-- **Tool 层**：`Tool` trait + `ToolRegistry` + 执行器，完成参数校验、权限判定、审批、调用和结果格式化。
-- **Prompt 层**：`PromptAssembly` 在每次采样前动态组装 system prompt，并缓存静态 section。
-- **权限与安全层**：`PermissionEngine` 规则引擎 + `bash_security` AST 分析 + `ApprovalHandler` 人工审批。
-- **Skills / Memory / Profiles 层**：提供可注入的 slash-command 技能、跨会话持久记忆和上下文画像。
-- **MCP 层**：`McpManager` + `McpToolBridge`，通过 stdio JSON-RPC 接入 MCP 生态。
-- **Fork 层**：`Synapse` + `ForkLens`，轻量级多视角并发执行引擎。
-- **Task 层**：`TaskManager` 统一追踪后台任务、fork lens 和 hook 触发任务的状态与输出。
-- **Storage 层**：`Storage` trait 将会话状态持久化到 JSONL 等后端。
+| 层 | 职责 |
+|---|---|
+| **Session 层** | `AgentSession` 持有消息历史、配置、文件读状态、metrics，并对外暴露 `run_turn` / `run_turn_stream`。 |
+| **Runtime 层** | 负责单轮 turn 内的迭代循环、provider 调用、compaction、hook 调用、tool 执行编排和持久化。 |
+| **Provider 层** | `ModelProvider` 将不同服务商封装为统一的采样接口；流式输出统一为 `ProviderEvent`。 |
+| **Tool 层** | `Tool` trait + `ToolRegistry` + 执行器，完成参数校验、权限判定、审批、调用和结果格式化。 |
+| **Prompt 层** | `PromptAssembly` 在每次采样前动态组装 system prompt，并缓存静态 section。 |
+| **权限与安全层** | `PermissionEngine` 规则引擎 + `bash_security` AST 分析 + `ApprovalHandler` 人工审批。 |
+| **Skills / Memory / Profiles 层** | 提供可注入的 slash-command 技能、跨会话持久记忆和上下文画像。 |
+| **MCP 层** | `McpManager` + `McpToolBridge`，通过 stdio JSON-RPC 接入 MCP 生态。 |
+| **Fork 层** | `Synapse` + `ForkLens`，轻量级多视角并发执行引擎。 |
+| **Task 层** | `TaskManager` 统一追踪后台任务、fork lens 和 hook 触发任务的状态与输出。 |
+| **Storage 层** | `Storage` trait 将会话状态持久化到 JSONL 等后端。 |
 
 ## 执行流程
 
@@ -174,7 +176,9 @@
 | `Message` / `ContentBlock` / `TextBlock` / `ThinkingBlock` / `ToolCall` / `ToolResult` | 消息与内容块模型。 |
 | `ErasedProvider` | 类型擦除 provider 辅助。 |
 
-## 最小示例
+## 快速开始
+
+### 库
 
 ```rust
 use async_trait::async_trait;
@@ -236,7 +240,7 @@ async fn main() -> Result<(), AgentError> {
 }
 ```
 
-## 运行示例
+### 运行示例
 
 仓库中提供了一个基于真实 provider 的工具调用示例：
 
@@ -245,45 +249,34 @@ export MOONSHOT_API_KEY=...
 cargo run --example kimi_tool_loop -- "Use the echo_json tool once, then summarize."
 ```
 
-## 构建与运行 CLI
+## CLI
 
-项目根目录已配置为 Cargo workspace，包含 `telos_agent` 库和 `telos-cli` 可执行 crate。
+项目包含 `telos-cli` 终端接口，提供单次调用和交互式 REPL 两种模式。
 
-### 构建整个 workspace
+### 构建与安装
 
 ```bash
-cd /home/alin/codework/tiny_agent/tiny_agent_core
+# 构建整个 workspace
 cargo build --workspace
-```
 
-### 安装 CLI
-
-```bash
-cd /home/alin/codework/tiny_agent/tiny_agent_core/cli
+# 安装 CLI（安装后可直接使用 `telos` 命令）
+cd cli
 cargo install --path .
 ```
 
-安装后可直接使用 `telos` 命令。
-
-### CLI 用法
+### 基本用法
 
 ```bash
-# DeepSeek（推荐：通过 --api-key 传入，避免污染全局环境）
-telos --provider deepseek --api-key $DEEPSEEK_API_KEY "给 src/lib.rs 添加错误处理"
-
-# 或者通过环境变量传入
-telos --provider deepseek "给 src/lib.rs 添加错误处理"
-
-# 如果都没有设置，在终端中运行时会交互式提示输入 API key
-telos --provider deepseek "Review src/lib.rs"
-
-# 指定 provider 和模型
-telos --provider deepseek --model deepseek-chat --api-key $DEEPSEEK_API_KEY "Review src/lib.rs"
+# DeepSeek
+telos --provider deepseek --api-key $DEEPSEEK_API_KEY "Review src/lib.rs"
 
 # Kimi
-telos --provider kimi --api-key $MOONSHOT_API_KEY "Review src/lib.rs"
+telos --provider kimi --api-key $MOONSHOT_API_KEY "Refactor error handling"
 
-# 使用 mock provider 做快速测试
+# 交互式 REPL
+telos --provider deepseek chat
+
+# Mock（快速测试）
 telos --provider mock "hello"
 
 # 生成 shell 补全
@@ -291,19 +284,37 @@ telos completion bash > /usr/share/bash-completion/completions/telos
 telos completion zsh  > /usr/local/share/zsh/site-functions/_telos
 ```
 
+### 配置
+
+支持用户级 `~/.config/telos/config.toml` 和项目级 `.telos.toml` 配置文件：
+
+```toml
+[agent]
+model = "deepseek-chat"
+provider = "deepseek"
+max_iterations = 16
+
+[approval]
+default_policy = "ask"
+
+[approval.policies]
+read = "allow"
+shell = "ask"
+write = "deny"
+```
+
 CLI 完整说明见 [cli/README.md](cli/README.md)。
 
 ## 测试
 
 ```bash
-cd /home/alin/codework/tiny_agent/tiny_agent_core
 cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
 ## 暂不包含
 
-以下能力在 `tiny_agent_core` 当前范围之外：
+以下能力在 `telos_agent` 当前范围之外：
 
 - TUI / Web 层（CLI 已提供基础命令行入口，但还不是全功能 TUI）。
 - Plugin / swarm / coordinator 等多 agent 编排协议。
@@ -312,3 +323,7 @@ cargo clippy --workspace --all-targets
 - 远程执行环境（当前提供的是规则权限引擎 + bash AST 分析 + 人工审批）。
 - Workflow 脚本编排。
 - Cron / 定时任务调度。
+
+## License
+
+MIT

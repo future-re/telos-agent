@@ -94,7 +94,7 @@ pub async fn run() -> Result<()> {
                     &ctx,
                 );
 
-                return tui::run(config, provider, tools, status).await;
+                return tui::run(config, provider, tools, status, project_root.as_deref()).await;
             }
             runner::run_single(&cli.shared, prompt, approval_handler).await
         }

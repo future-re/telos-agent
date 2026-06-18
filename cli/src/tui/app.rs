@@ -71,11 +71,19 @@ pub struct App {
 
 impl App {
     pub fn new(
-        config: telos_agent::AgentConfig,
+        mut config: telos_agent::AgentConfig,
         provider: Arc<dyn telos_agent::ModelProvider>,
         tools: telos_agent::ToolRegistry,
         status_text: String,
+        project_root: Option<&std::path::Path>,
     ) -> Result<Self, telos_agent::AgentError> {
+        // Wire up session storage before creating the AgentSession.
+        let session_manager = crate::session::SessionManager::new(project_root);
+        std::fs::create_dir_all(session_manager.sessions_dir()).ok();
+        let storage =
+            Arc::new(telos_agent::JsonlStorage::new(session_manager.sessions_dir().to_path_buf())?);
+        config.storage = Some(storage);
+
         let (prompt_tx, mut prompt_rx) = mpsc::unbounded_channel::<String>();
         let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
         let (approval_tx, approval_rx) = mpsc::unbounded_channel::<PendingApproval>();
@@ -92,15 +100,18 @@ impl App {
 
             while let Some(prompt) = prompt_rx.recv().await {
                 let erased = telos_agent::ErasedProvider(provider.as_ref());
-                let mut stream = pin!(session.run_turn_stream(&erased, &tools, prompt,));
-                while let Some(event) = stream.next().await {
-                    match event {
-                        Ok(te) => {
-                            let _ = event_tx.send(Event::Turn(te));
+                {
+                    let mut stream = pin!(session.run_turn_stream(&erased, &tools, prompt,));
+                    while let Some(event) = stream.next().await {
+                        match event {
+                            Ok(te) => {
+                                let _ = event_tx.send(Event::Turn(te));
+                            }
+                            Err(_e) => break,
                         }
-                        Err(_e) => break,
                     }
                 }
+                let _ = session.save().await;
                 let _ = event_tx.send(Event::TurnComplete);
             }
         });
@@ -138,6 +149,15 @@ impl App {
                     (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
                         self.messages.clear();
                         self.chat.scroll_to_bottom();
+                        return Ok(());
+                    }
+                    (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                        // Full session reset requires recreating the background AgentSession,
+                        // which is a follow-up enhancement. For now, clear the chat and indicate
+                        // that a new session will begin on the next prompt.
+                        self.messages.clear();
+                        self.chat.scroll_to_bottom();
+                        self.status_text = "telos · new session (next prompt)".to_string();
                         return Ok(());
                     }
                     _ => {}

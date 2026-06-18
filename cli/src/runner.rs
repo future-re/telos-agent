@@ -67,7 +67,7 @@ pub async fn run_chat(
     let status =
         crate::context::build_status_text(options.model.as_deref(), project_root.as_deref(), &ctx);
 
-    crate::tui::run(config, provider, tools, status).await
+    crate::tui::run(config, provider, tools, status, project_root.as_deref()).await
 }
 
 /// Represents a parsed slash command or chat input.

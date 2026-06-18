@@ -86,3 +86,29 @@ fn current_timestamp() -> String {
         .as_secs()
         .to_string()
 }
+
+/// Manages session filenames and directories.
+pub struct SessionManager {
+    sessions_dir: PathBuf,
+    current: String,
+}
+
+impl SessionManager {
+    pub fn new(project_root: Option<&Path>) -> Self {
+        let sessions_dir = sessions_dir(project_root);
+        let current = next_session_name(&sessions_dir, "chat");
+        Self { sessions_dir, current }
+    }
+
+    pub fn current_name(&self) -> &str {
+        &self.current
+    }
+
+    pub fn new_session(&mut self) {
+        self.current = next_session_name(&self.sessions_dir, "chat");
+    }
+
+    pub fn sessions_dir(&self) -> &Path {
+        &self.sessions_dir
+    }
+}

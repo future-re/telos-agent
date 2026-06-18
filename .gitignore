@@ -3,3 +3,4 @@
 .env
 cobertura.xml
 .worktrees/
+.claude/

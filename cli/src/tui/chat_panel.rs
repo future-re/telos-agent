@@ -44,20 +44,9 @@ impl ChatPanel {
                     }
                 }
                 UiMessage::AssistantDelta(text) => {
-                    // Append to the last assistant line if possible.
-                    if let Some(last) = lines.last_mut()
-                        && last.spans.len() == 1
-                        && last.spans[0].style == theme.assistant_style()
-                        && !text.contains('\n')
-                    {
-                        last.spans[0].content = format!("{}{}", last.spans[0].content, text).into();
-                    } else {
-                        for line in text.lines() {
-                            lines.push(Line::from(Span::styled(
-                                line.to_string(),
-                                theme.assistant_style(),
-                            )));
-                        }
+                    let md_text = crate::tui::markdown::render_markdown(text);
+                    for line in md_text.lines {
+                        lines.push(line);
                     }
                 }
                 UiMessage::ThinkingDelta(text) => {

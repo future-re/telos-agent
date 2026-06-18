@@ -265,3 +265,21 @@ fn sessions_dir_without_project() {
     assert!(sessions.to_string_lossy().contains("telos"));
     assert!(sessions.ends_with("sessions"));
 }
+
+// ── Task 8: Rustyline REPL ─────────────────────────────────────────────────
+
+#[test]
+fn repl_editor_creates() {
+    // Verify the editor builds successfully (no readline interaction).
+    let _editor = telos_cli::repl::build_editor().expect("build_editor should succeed");
+}
+
+#[test]
+fn repl_completion_returns_commands() {
+    let results = telos_cli::repl::complete_command("/", "");
+    assert!(!results.is_empty(), "should return at least one command");
+    let names: Vec<&str> = results.iter().map(|(cmd, _)| cmd.as_str()).collect();
+    assert!(names.contains(&"/exit"));
+    assert!(names.contains(&"/help"));
+    assert!(names.contains(&"/model"));
+}

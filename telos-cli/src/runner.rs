@@ -58,92 +58,106 @@ pub async fn run_chat(
     eprintln!("Available commands: /exit, /quit, /reset, /clear, /tools, /help");
     eprintln!();
 
-    let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
+    let mut editor = crate::repl::build_editor()
+        .map_err(|e| anyhow::anyhow!("failed to create REPL editor: {e}"))?;
+
+    let history_path = dirs::data_dir().map(|d| d.join("telos").join("history.txt"));
 
     loop {
-        use std::io::Write;
-        eprint!("> ");
-        let _ = std::io::stderr().flush();
+        let readline = editor.readline("telos> ");
+        match readline {
+            Ok(input) => {
+                let input = input.trim();
+                if input.is_empty() {
+                    continue;
+                }
+                let _ = editor.add_history_entry(input);
 
-        let mut line = String::new();
-        let bytes = tokio::io::AsyncBufReadExt::read_line(&mut stdin, &mut line)
-            .await
-            .context("failed to read from stdin")?;
-
-        if bytes == 0 {
-            break;
+                match parse_repl_command(input) {
+                    ReplCommand::Exit => break,
+                    ReplCommand::Reset => {
+                        let new_config = build_agent_config(options, approval_handler.clone())?;
+                        session =
+                            AgentSession::new(new_config).context("failed to reset session")?;
+                        eprintln!("Session reset.");
+                        continue;
+                    }
+                    ReplCommand::Tools => {
+                        eprintln!("Registered tools:");
+                        for def in tools.definitions() {
+                            eprintln!("  - {}", def.name);
+                        }
+                        continue;
+                    }
+                    ReplCommand::Clear => {
+                        print!("\x1b[2J\x1b[H");
+                        continue;
+                    }
+                    ReplCommand::Help => {
+                        eprintln!("Available commands:");
+                        eprintln!("  /exit, /quit  Exit the REPL");
+                        eprintln!("  /reset        Reset the conversation");
+                        eprintln!("  /clear        Clear the screen");
+                        eprintln!("  /tools        List available tools");
+                        eprintln!("  /help         Show this help");
+                        eprintln!("  /add <glob>   Add files matching a glob pattern");
+                        eprintln!("  /drop <glob>  Remove files matching a glob pattern");
+                        eprintln!("  /model <name> Change the active model");
+                        eprintln!();
+                        eprintln!("Anything else is sent as a chat prompt to the agent.");
+                        continue;
+                    }
+                    ReplCommand::Add(pattern) => {
+                        eprintln!("Added files matching: {pattern}");
+                        continue;
+                    }
+                    ReplCommand::Drop(pattern) => {
+                        eprintln!("Dropped: {pattern}");
+                        continue;
+                    }
+                    ReplCommand::Model(name) => {
+                        eprintln!("Model changed to: {name}");
+                        continue;
+                    }
+                    ReplCommand::Chat(prompt) => match &provider {
+                        ResolvedProvider::Kimi(p) => {
+                            run_with_provider(&mut session, p, &tools, prompt).await?;
+                        }
+                        ResolvedProvider::DeepSeek(p) => {
+                            run_with_provider(&mut session, p, &tools, prompt).await?;
+                        }
+                        ResolvedProvider::Mock(_) => {
+                            eprintln!("Note: using mock provider; no real model call is made.");
+                            let mock = MockProvider::new(vec![CompletionResponse {
+                                message: Message::assistant(
+                                    "Mock provider has no real response configured.",
+                                ),
+                                stop_reason: StopReason::EndTurn,
+                                usage: None,
+                            }]);
+                            run_with_provider(&mut session, &mock, &tools, prompt).await?;
+                        }
+                    },
+                }
+            }
+            Err(rustyline::error::ReadlineError::Interrupted)
+            | Err(rustyline::error::ReadlineError::Eof) => {
+                // Ctrl-C or Ctrl-D — exit the REPL.
+                break;
+            }
+            Err(e) => {
+                eprintln!("Readline error: {e}");
+                break;
+            }
         }
+    }
 
-        let input = line.trim();
-        if input.is_empty() {
-            continue;
+    // Save history on exit (best-effort).
+    if let Some(path) = history_path {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
         }
-
-        match parse_repl_command(input) {
-            ReplCommand::Exit => break,
-            ReplCommand::Reset => {
-                let new_config = build_agent_config(options, approval_handler.clone())?;
-                session = AgentSession::new(new_config).context("failed to reset session")?;
-                eprintln!("Session reset.");
-                continue;
-            }
-            ReplCommand::Tools => {
-                eprintln!("Registered tools:");
-                for def in tools.definitions() {
-                    eprintln!("  - {}", def.name);
-                }
-                continue;
-            }
-            ReplCommand::Clear => {
-                print!("\x1b[2J\x1b[H");
-                continue;
-            }
-            ReplCommand::Help => {
-                eprintln!("Available commands:");
-                eprintln!("  /exit, /quit  Exit the REPL");
-                eprintln!("  /reset        Reset the conversation");
-                eprintln!("  /clear        Clear the screen");
-                eprintln!("  /tools        List available tools");
-                eprintln!("  /help         Show this help");
-                eprintln!("  /add <glob>   Add files matching a glob pattern");
-                eprintln!("  /drop <glob>  Remove files matching a glob pattern");
-                eprintln!("  /model <name> Change the active model");
-                eprintln!();
-                eprintln!("Anything else is sent as a chat prompt to the agent.");
-                continue;
-            }
-            ReplCommand::Add(pattern) => {
-                eprintln!("Added files matching: {pattern}");
-                continue;
-            }
-            ReplCommand::Drop(pattern) => {
-                eprintln!("Dropped: {pattern}");
-                continue;
-            }
-            ReplCommand::Model(name) => {
-                eprintln!("Model changed to: {name}");
-                continue;
-            }
-            ReplCommand::Chat(prompt) => match &provider {
-                ResolvedProvider::Kimi(p) => {
-                    run_with_provider(&mut session, p, &tools, prompt).await?;
-                }
-                ResolvedProvider::DeepSeek(p) => {
-                    run_with_provider(&mut session, p, &tools, prompt).await?;
-                }
-                ResolvedProvider::Mock(_) => {
-                    eprintln!("Note: using mock provider; no real model call is made.");
-                    let mock = MockProvider::new(vec![CompletionResponse {
-                        message: Message::assistant(
-                            "Mock provider has no real response configured.",
-                        ),
-                        stop_reason: StopReason::EndTurn,
-                        usage: None,
-                    }]);
-                    run_with_provider(&mut session, &mock, &tools, prompt).await?;
-                }
-            },
-        }
+        let _ = editor.save_history(&path);
     }
 
     Ok(())

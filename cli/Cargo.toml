@@ -31,7 +31,7 @@ termimad = "0.30"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 toml = "0.8"
 tui-textarea = "0.7"
-telos_agent = { path = ".." }
+telos_agent = { path = "../core" }
 tracing = "0.1"
 
 [dev-dependencies]

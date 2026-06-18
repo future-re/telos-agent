@@ -1,0 +1,46 @@
+[package]
+name = "telos_agent"
+version = "0.1.0"
+edition = "2024"
+description = "telos — an intent-driven agent runtime. Loop: intent → execute → think → complete"
+license = "MIT"
+repository = "https://github.com/future-re/tiny_agent_core"
+readme = "README.md"
+keywords = ["llm", "agent", "ai", "tool-use"]
+categories = ["development-tools", "api-bindings", "asynchronous"]
+rust-version = "1.96"
+
+[dependencies]
+async-openai = { version = "0.41", default-features = true, features = [
+    "chat-completion",
+] }
+async-stream = "0.3"
+async-trait = "0.1"
+futures-core = "0.3"
+futures-util = "0.3"
+glob = "0.3"
+jsonschema = "0.29"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "2"
+tiktoken-rs = "0.12.0"
+time = { version = "0.3", features = ["macros"] }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "fs",
+    "io-util",
+    "process",
+    "sync",
+    "time",
+] }
+tracing = "0.1"
+tree-sitter = "0.25"
+tree-sitter-bash = "0.25"
+
+[dev-dependencies]
+dotenvy = "0.15"
+tempfile = "3"
+wiremock = "0.6"

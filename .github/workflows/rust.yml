@@ -19,6 +19,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      - run: rustup show
       - run: rustup component add rustfmt
       - run: cargo fmt --all -- --check
 
@@ -30,6 +31,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - run: rustup show
       - run: rustup component add clippy
       - uses: actions/cache@v4
         with:
@@ -40,7 +42,7 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-clippy-
-      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
   build:
     name: Build & Test
@@ -48,6 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - run: rustup show
       - uses: actions/cache@v4
         with:
           path: |
@@ -58,9 +61,9 @@ jobs:
           key: ${{ runner.os }}-cargo-build-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-build-
       - name: Build
-        run: cargo build --verbose
+        run: cargo build --workspace --verbose
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --workspace --verbose
 
   coverage:
     name: Coverage
@@ -70,6 +73,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
+      - run: rustup show
       - uses: actions/cache@v4
         with:
           path: |
@@ -84,7 +88,7 @@ jobs:
         with:
           tool: cargo-llvm-cov
       - name: Generate coverage
-        run: cargo llvm-cov --cobertura --output-path cobertura.xml
+        run: cargo llvm-cov --workspace --cobertura --output-path cobertura.xml
       - name: Upload to codecov
         uses: codecov/codecov-action@v4
         with:

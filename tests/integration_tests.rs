@@ -2114,3 +2114,11 @@ fn tool_prompt_text_defaults_to_none() {
     }
     assert!(NoPromptTool.prompt_text().is_none());
 }
+
+#[test]
+fn tool_registry_iterates_tools() {
+    let mut registry = ToolRegistry::new();
+    registry.register(AddTool);
+    let names: Vec<_> = registry.iter().map(|(n, _)| n.clone()).collect();
+    assert!(names.contains(&"add".to_string()));
+}

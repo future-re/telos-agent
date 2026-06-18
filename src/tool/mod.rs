@@ -207,6 +207,12 @@ impl ToolRegistry {
         Self::default()
     }
 
+    /// Iterate all registered tools as `(canonical_name, tool)` pairs.
+    /// The `Arc` is cloned; the underlying tool is shared.
+    pub fn iter(&self) -> impl Iterator<Item = (&String, Arc<dyn Tool>)> + '_ {
+        self.tools.iter().map(|(name, tool)| (name, Arc::clone(tool)))
+    }
+
     /// Register a tool. A later registration with the same name overrides the earlier one.
     pub fn register<T>(&mut self, tool: T)
     where

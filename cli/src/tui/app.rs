@@ -1,7 +1,6 @@
 use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::widgets::Paragraph;
 use std::collections::VecDeque;
 use std::pin::pin;
 use std::sync::Arc;
@@ -166,6 +165,7 @@ impl App {
         match event {
             TurnEvent::AssistantDelta { text } => {
                 self.messages.push(UiMessage::AssistantDelta(text));
+                self.chat.scroll_to_bottom();
             }
             TurnEvent::ThinkingDelta { text } => {
                 self.messages.push(UiMessage::ThinkingDelta(text));
@@ -195,9 +195,7 @@ impl App {
 
         status_bar::render(frame, layout[0], &self.status_text);
 
-        let placeholder =
-            Paragraph::new("Welcome to telos TUI.\nPress Ctrl+D on empty input to exit.");
-        frame.render_widget(placeholder, layout[1]);
+        self.chat.render(frame, layout[1], &self.messages);
 
         self.input.render(frame, layout[2], self.mode == Mode::Normal);
     }

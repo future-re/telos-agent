@@ -1,6 +1,62 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::Value;
 use telos_agent::{ApprovalDecision, ApprovalHandler, ApprovalRequest};
+
+/// Approval policy for tool calls.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApprovalPolicy {
+    /// Always allow without prompting.
+    AlwaysAllow,
+    /// Always prompt interactively.
+    #[default]
+    AlwaysAsk,
+    /// Always deny without prompting.
+    AlwaysDeny,
+}
+
+impl ApprovalPolicy {
+    /// Returns `true` if the policy is [`AlwaysAllow`](ApprovalPolicy::AlwaysAllow).
+    pub fn is_allow(self) -> bool {
+        matches!(self, Self::AlwaysAllow)
+    }
+
+    /// Returns a decision based on the policy.
+    ///
+    /// - `AlwaysAllow` returns `Some(Allow)`.
+    /// - `AlwaysDeny` returns `Some(Deny { .. })`.
+    /// - `AlwaysAsk` returns `None` (meaning "delegate to the interactive handler").
+    pub fn decide(self, _tool_name: &str, _args: Value) -> Option<ApprovalDecision> {
+        match self {
+            Self::AlwaysAllow => Some(ApprovalDecision::Allow),
+            Self::AlwaysDeny => {
+                Some(ApprovalDecision::Deny { reason: "policy: always deny".into() })
+            }
+            Self::AlwaysAsk => None,
+        }
+    }
+}
+
+/// Per-tool policy configuration.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PolicyConfig {
+    /// Default policy applied when no tool-specific policy is set.
+    pub default: ApprovalPolicy,
+    /// Tool-specific overrides keyed by tool name.
+    pub policies: HashMap<String, ApprovalPolicy>,
+}
+
+impl PolicyConfig {
+    /// Returns the effective policy for the given tool name.
+    ///
+    /// Looks up a tool-specific override first; falls back to `default`.
+    pub fn policy_for(&self, tool_name: &str) -> ApprovalPolicy {
+        self.policies.get(tool_name).copied().unwrap_or(self.default)
+    }
+}
 
 /// Interactive terminal approval handler.
 ///
@@ -8,12 +64,41 @@ use telos_agent::{ApprovalDecision, ApprovalHandler, ApprovalRequest};
 /// - `y` / `yes` / empty → Allow
 /// - `n` / `no` → Deny
 /// - `m` / `modify` → Prompt for modified arguments (JSON)
+///
+/// When a [`PolicyConfig`] is set, the handler checks the policy first and
+/// may short-circuit (Allow / Deny) without prompting.
 #[derive(Debug, Clone, Default)]
-pub struct TerminalApprovalHandler;
+pub struct TerminalApprovalHandler {
+    /// Optional policy configuration for fast-path decisions.
+    pub policy: Option<PolicyConfig>,
+}
+
+impl TerminalApprovalHandler {
+    /// Create a new handler with an optional policy configuration.
+    pub fn new(policy: Option<PolicyConfig>) -> Self {
+        Self { policy }
+    }
+
+    /// Set or replace the policy configuration at runtime.
+    pub fn set_policy(&mut self, policy: Option<PolicyConfig>) {
+        self.policy = policy;
+    }
+}
 
 #[async_trait]
 impl ApprovalHandler for TerminalApprovalHandler {
     async fn ask(&self, request: ApprovalRequest) -> ApprovalDecision {
+        // Check policy first for a fast-path decision.
+        if let Some(ref config) = self.policy {
+            let tool_policy = config.policy_for(&request.tool_name);
+            if let Some(decision) =
+                tool_policy.decide(&request.tool_name, request.arguments.clone())
+            {
+                return decision;
+            }
+            // AlwaysAsk or no applicable policy -> fall through to interactive.
+        }
+
         eprintln!();
         eprintln!("Approval required: {}", request.tool_name);
         if !request.reason.is_empty() {

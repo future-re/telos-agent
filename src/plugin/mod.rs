@@ -9,6 +9,7 @@
 
 pub mod errors;
 pub mod manifest;
+pub mod registry;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -19,6 +20,7 @@ pub use manifest::{
     LspServersConfig, MarketplaceEntry, McpServerEntry, McpServersConfig, PartialPluginManifest,
     PluginAuthor, PluginManifest, PluginSource, UserConfigOption,
 };
+pub use registry::{LoadedPlugin, PluginEntry, PluginRegistry, PluginStatus};
 
 /// Universal plugin identifier: `name@marketplace`.
 ///

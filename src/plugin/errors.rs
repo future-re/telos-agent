@@ -24,7 +24,7 @@ impl std::fmt::Display for DependencyReason {
 }
 
 /// All error conditions surfaced by the plugin system.
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum PluginError {
     // --- Manifest ---
     #[error("manifest not found at {path}")]
@@ -72,13 +72,25 @@ pub enum PluginError {
 
     // --- I/O ---
     #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(String),
 
     // --- Serde ---
     #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
+    Json(String),
 
     // --- Generic ---
     #[error("{0}")]
     Other(String),
+}
+
+impl From<std::io::Error> for PluginError {
+    fn from(err: std::io::Error) -> Self {
+        PluginError::Io(err.to_string())
+    }
+}
+
+impl From<serde_json::Error> for PluginError {
+    fn from(err: serde_json::Error) -> Self {
+        PluginError::Json(err.to_string())
+    }
 }

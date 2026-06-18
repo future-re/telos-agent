@@ -1,13 +1,13 @@
-# telos-agent
+# tiny_agent_core
 
-`telos-agent` 是一个用 Rust 编写的意图驱动 agent runtime，重点覆盖会话管理、模型调用、工具执行和结果回注这一条核心链路。它把一次「用户输入 → 模型采样 → 工具执行 → 结果回注」的完整 turn 封装成可扩展、可观测、可持久化的运行时单元。
+`tiny_agent_core` 是一个用 Rust 编写的意图驱动 agent runtime，重点覆盖会话管理、模型调用、工具执行和结果回注这一条核心链路。它把一次「用户输入 → 模型采样 → 工具执行 → 结果回注」的完整 turn 封装成可扩展、可观测、可持久化的运行时单元。
 
 ## 定位与使用场景
 
 它主要面向两类使用场景：
 
 - **作为实验底座**，用于验证 agent loop、tool use、provider adapter、权限审批、memory、skills 等设计。
-- **作为运行时内核**，供 TUI、HTTP 服务、任务系统或其他编排层集成；上层只需实现交互界面，核心链路由 `telos-agent` 提供。
+- **作为运行时内核**，供 TUI、HTTP 服务、任务系统或其他编排层集成；上层只需实现交互界面，核心链路由 `telos_agent` 库提供。
 
 ## 功能特性
 
@@ -252,14 +252,14 @@ cargo run --example kimi_tool_loop -- "Use the echo_json tool once, then summari
 ### 构建整个 workspace
 
 ```bash
-cd /home/alin/codework/tiny_agent
-cargo build
+cd /home/alin/codework/tiny_agent/tiny_agent_core
+cargo build --workspace
 ```
 
 ### 安装 CLI
 
 ```bash
-cd /home/alin/codework/tiny_agent/tiny_agent_core/telos-cli
+cd /home/alin/codework/tiny_agent/tiny_agent_core/cli
 cargo install --path .
 ```
 
@@ -291,19 +291,19 @@ telos completion bash > /usr/share/bash-completion/completions/telos
 telos completion zsh  > /usr/local/share/zsh/site-functions/_telos
 ```
 
-CLI 完整说明见 [telos-cli/README.md](telos-cli/README.md)。
+CLI 完整说明见 [cli/README.md](cli/README.md)。
 
 ## 测试
 
 ```bash
-cd /home/alin/codework/tiny_agent
+cd /home/alin/codework/tiny_agent/tiny_agent_core
 cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
 ## 暂不包含
 
-以下能力在 `telos-agent` 当前范围之外：
+以下能力在 `tiny_agent_core` 当前范围之外：
 
 - TUI / Web 层（CLI 已提供基础命令行入口，但还不是全功能 TUI）。
 - Plugin / swarm / coordinator 等多 agent 编排协议。

@@ -30,7 +30,11 @@ use crate::tool::ToolRegistry;
 ///
 /// Optional sections such as skills, memory, profiles, MCP tools, and git
 /// status can be added afterwards by the caller.
-pub fn default_coding_assembly(tools: Arc<ToolRegistry>, cwd: PathBuf) -> PromptAssembly {
+pub fn default_coding_assembly(
+    tools: Arc<ToolRegistry>,
+    cwd: PathBuf,
+    skills: Option<Arc<crate::skills::SkillRegistry>>,
+) -> PromptAssembly {
     let mut assembly = PromptAssembly::new();
     assembly.add_static(IdentitySection::new(None));
     assembly.add_static(ToneStyleSection);
@@ -41,5 +45,8 @@ pub fn default_coding_assembly(tools: Arc<ToolRegistry>, cwd: PathBuf) -> Prompt
     assembly.add_static(ToolPromptsSection::new(Arc::clone(&tools)));
     assembly.add_dynamic(DateSection);
     assembly.add_dynamic(CwdSection::new(cwd));
+    if let Some(skills) = skills {
+        assembly.add_dynamic(SkillsSection::new(skills));
+    }
     assembly
 }

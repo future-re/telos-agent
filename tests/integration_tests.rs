@@ -1608,6 +1608,16 @@ fn bundled_skills_load_successfully() {
     }
 }
 
+#[test]
+fn bundled_skills_load_and_render() {
+    use telos_agent::skills::SkillRegistry;
+    let mut registry = SkillRegistry::new();
+    registry.load_bundled_skills();
+    assert!(registry.get("explore").is_some());
+    let rendered = registry.render_for_prompt();
+    assert!(rendered.contains("explore"));
+}
+
 #[tokio::test]
 async fn prompt_assembly_caches_static_sections() {
     use async_trait::async_trait;
@@ -1695,7 +1705,7 @@ async fn default_coding_assembly_renders_claude_style_sections() {
     use telos_agent::tool::ToolRegistry;
 
     let tools = std::sync::Arc::new(ToolRegistry::new());
-    let assembly = default_coding_assembly(tools, std::env::current_dir().unwrap());
+    let assembly = default_coding_assembly(tools, std::env::current_dir().unwrap(), None);
     let result = assembly.build().await;
 
     assert!(result.contains("You are telos-agent"));
@@ -2173,6 +2183,7 @@ fn default_assembly_includes_tool_prompts() {
         let assembly = telos_agent::prompt::default_coding_assembly(
             Arc::new(tools),
             std::env::current_dir().unwrap(),
+            None,
         );
         let text = assembly.build().await;
         assert!(text.contains("## Tool-specific guidance"));

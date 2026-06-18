@@ -67,6 +67,9 @@ pub struct AgentConfig {
     /// Maximum number of bytes the built-in file tools will read from a single
     /// file. Files larger than this are rejected to avoid OOMing the agent.
     pub max_file_read_bytes: usize,
+    /// Optional skill registry. When set, the Skill tool and the default prompt
+    /// assembly can use registered skills (including bundled Superpowers skills).
+    pub skill_registry: Option<Arc<crate::skills::SkillRegistry>>,
 }
 
 impl std::fmt::Debug for AgentConfig {
@@ -93,6 +96,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("cancelled", &self.cancelled)
             .field("tool_timeout_ms", &self.tool_timeout_ms)
             .field("max_file_read_bytes", &self.max_file_read_bytes)
+            .field("skill_registry", &self.skill_registry.as_ref().map(|_| "<set>"))
             .finish()
     }
 }
@@ -122,6 +126,7 @@ impl Default for AgentConfig {
             cancelled: Arc::new(AtomicBool::new(false)),
             tool_timeout_ms: None,
             max_file_read_bytes: 50 * 1024 * 1024,
+            skill_registry: None,
         }
     }
 }
@@ -238,10 +243,22 @@ impl AgentConfig {
         mut self,
         tools: Arc<crate::tool::ToolRegistry>,
     ) -> Result<Self, AgentError> {
-        let assembly = crate::prompt::default_coding_assembly(tools, self.cwd.clone());
+        let assembly = crate::prompt::default_coding_assembly(
+            tools,
+            self.cwd.clone(),
+            self.skill_registry.clone(),
+        );
         self.base_system_prompt = None;
         self.prompt_assembly = Some(Arc::new(assembly));
         Ok(self)
+    }
+
+    /// Load bundled skills into a fresh skill registry attached to this config.
+    pub fn with_bundled_skills(mut self) -> Self {
+        let mut registry = crate::skills::SkillRegistry::new();
+        registry.load_bundled_skills();
+        self.skill_registry = Some(Arc::new(registry));
+        self
     }
 }
 

@@ -37,6 +37,13 @@ impl SkillRegistry {
         Ok(())
     }
 
+    /// Load all skills bundled with the crate and register them.
+    pub fn load_bundled_skills(&mut self) {
+        for skill in SkillLoader::load_bundled_skills() {
+            self.register(skill);
+        }
+    }
+
     /// Look up a skill by name.
     pub fn get(&self, name: &str) -> Option<&Skill> {
         self.skills.get(name)

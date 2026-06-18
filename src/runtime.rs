@@ -584,6 +584,7 @@ impl AgentSession {
                     crate::prompt::default_coding_assembly(
                         Arc::new(tools.clone()),
                         self.config.cwd.clone(),
+                        self.config.skill_registry.clone(),
                     ),
                 ));
             }

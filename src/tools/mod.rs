@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use crate::skills::SkillRegistry;
 use crate::tasks::TaskManager;
 use crate::tool::ToolRegistry;
 
@@ -51,6 +52,11 @@ pub fn register_task_tools(registry: &mut ToolRegistry, task_manager: Arc<TaskMa
     registry.register(TaskGetTool::new(task_manager.clone()));
     registry.register(TaskListTool::new(task_manager.clone()));
     registry.register(TaskUpdateTool::new(task_manager));
+}
+
+/// Register the Skill tool if a skill registry is available.
+pub fn register_skill_tool(registry: &mut ToolRegistry, skill_registry: Arc<SkillRegistry>) {
+    registry.register(SkillTool::new(skill_registry));
 }
 
 // Re-export shared helpers that other crate modules use directly.

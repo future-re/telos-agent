@@ -18,7 +18,7 @@ use crate::provider::types::{CompletionRequest, CompletionResponse, ModelHint, P
 /// Maps [`ModelHint`] values to concrete model names.
 ///
 /// Hints not present in the map fall back to `default_model`.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RoutedModelConfig {
     /// hint → model_name mapping
     pub routes: HashMap<ModelHint, String>,
@@ -28,6 +28,17 @@ pub struct RoutedModelConfig {
     pub api_key: String,
     /// Base URL shared across all routed models
     pub base_url: String,
+}
+
+impl std::fmt::Debug for RoutedModelConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RoutedModelConfig")
+            .field("routes", &self.routes)
+            .field("default_model", &self.default_model)
+            .field("api_key", &"[REDACTED]")
+            .field("base_url", &self.base_url)
+            .finish()
+    }
 }
 
 impl RoutedModelConfig {

@@ -10,6 +10,7 @@ pub mod overlay;
 pub mod selection_popup;
 pub mod status_bar;
 pub mod theme;
+pub mod user_input_popup;
 
 use crate::tui::app::App;
 use crate::tui::event::Event;

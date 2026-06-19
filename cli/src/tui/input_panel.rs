@@ -91,6 +91,20 @@ impl InputPanel {
         self.mode
     }
 
+    pub fn wants_key(&self, key: KeyEvent) -> bool {
+        if self.mode != InputMode::Normal {
+            return true;
+        }
+
+        match (key.code, key.modifiers) {
+            (KeyCode::Up | KeyCode::Down, KeyModifiers::NONE) => {
+                self.history_pos.is_some() || !self.is_empty() || !self.history.is_empty()
+            }
+            (KeyCode::Up | KeyCode::Down, KeyModifiers::CONTROL) => !self.history.is_empty(),
+            _ => true,
+        }
+    }
+
     /// Process a key event. Returns an InputEvent.
     pub fn handle_key(&mut self, key: KeyEvent) -> InputEvent {
         match self.mode {
@@ -144,6 +158,14 @@ impl InputPanel {
                 InputEvent::None
             }
             (KeyCode::Down, KeyModifiers::CONTROL) if !self.history.is_empty() => {
+                self.navigate_history(1);
+                InputEvent::None
+            }
+            (KeyCode::Up, KeyModifiers::NONE) if self.is_empty() && !self.history.is_empty() => {
+                self.navigate_history(-1);
+                InputEvent::None
+            }
+            (KeyCode::Down, KeyModifiers::NONE) if self.history_pos.is_some() => {
                 self.navigate_history(1);
                 InputEvent::None
             }
@@ -220,8 +242,7 @@ impl InputPanel {
                 self.submit_text(trimmed)
             }
             (KeyCode::Char('n'), KeyModifiers::NONE) | (KeyCode::Esc, _) => {
-                // Cancel paste — clear and return to normal
-                self.clear_text();
+                // Cancel paste confirmation, keeping the pasted text for editing.
                 self.mode = InputMode::Normal;
                 InputEvent::None
             }
@@ -247,12 +268,12 @@ impl InputPanel {
             Some(p) => {
                 let np = p as isize + delta;
                 if np < 0 {
-                    self.history_pos = None;
-                    let draft = self.draft.clone();
-                    self.set_text(&draft);
                     return;
                 }
                 if np >= len {
+                    self.history_pos = None;
+                    let draft = self.draft.clone();
+                    self.set_text(&draft);
                     return;
                 }
                 np as usize
@@ -378,7 +399,24 @@ impl Default for InputPanel {
 
 #[cfg(test)]
 mod tests {
-    use super::ComposerHints;
+    use super::{ComposerHints, InputMode, InputPanel};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn ctrl_key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    fn text(panel: &InputPanel) -> String {
+        panel.textarea.lines().join("\n")
+    }
+
+    fn set_text(panel: &mut InputPanel, value: &str) {
+        panel.set_text(value);
+    }
 
     #[test]
     fn composer_hints_split_when_width_allows() {
@@ -405,5 +443,69 @@ mod tests {
 
         assert_eq!(hints.left, " History 3/5 ");
         assert_eq!(hints.right, None);
+    }
+
+    #[test]
+    fn plain_up_recalls_latest_history_when_empty() {
+        let mut panel = InputPanel::new();
+        panel.submit_text("first".into());
+        panel.submit_text("latest".into());
+
+        panel.handle_key(key(KeyCode::Up));
+
+        assert_eq!(text(&panel), "latest");
+    }
+
+    #[test]
+    fn plain_down_after_history_recall_restores_empty_draft() {
+        let mut panel = InputPanel::new();
+        panel.submit_text("previous".into());
+        panel.handle_key(key(KeyCode::Up));
+
+        panel.handle_key(key(KeyCode::Down));
+
+        assert_eq!(text(&panel), "");
+    }
+
+    #[test]
+    fn paste_cancel_keeps_text_and_returns_to_normal_mode() {
+        let mut panel = InputPanel::new();
+        let pasted = [
+            "This pasted text is intentionally long enough to trigger confirmation.",
+            "It spans multiple lines and should stay in the composer when declined.",
+            "Keeping the draft lets the user edit it instead of losing the content.",
+            "The cancel action only exits confirmation mode.",
+        ]
+        .join("\n");
+        set_text(&mut panel, &pasted);
+
+        panel.handle_key(key(KeyCode::Enter));
+        assert!(matches!(panel.input_mode(), InputMode::Pasting { .. }));
+
+        panel.handle_key(key(KeyCode::Esc));
+
+        assert_eq!(panel.input_mode(), InputMode::Normal);
+        assert_eq!(text(&panel), pasted);
+    }
+
+    #[test]
+    fn wants_plain_up_down_for_text_or_history_but_not_empty_without_history() {
+        let mut panel = InputPanel::new();
+
+        assert!(!panel.wants_key(key(KeyCode::Up)));
+        assert!(!panel.wants_key(key(KeyCode::Down)));
+
+        set_text(&mut panel, "line one\nline two");
+        assert!(panel.wants_key(key(KeyCode::Up)));
+        assert!(panel.wants_key(key(KeyCode::Down)));
+
+        panel.clear_text();
+        panel.submit_text("previous".into());
+        assert!(panel.wants_key(key(KeyCode::Up)));
+        assert!(panel.wants_key(key(KeyCode::Down)));
+
+        panel.handle_key(ctrl_key(KeyCode::Up));
+        assert_eq!(text(&panel), "previous");
+        assert!(panel.wants_key(key(KeyCode::Down)));
     }
 }

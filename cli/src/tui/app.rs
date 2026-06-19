@@ -354,11 +354,21 @@ impl App {
                                 return Ok(());
                             }
                             (KeyCode::Up, false) => {
-                                self.chat.scroll_up(1);
+                                if self.input.wants_key(key) {
+                                    let input_event = self.input.handle_key(key);
+                                    self.handle_input_event(input_event).await;
+                                } else {
+                                    self.chat.scroll_up(1);
+                                }
                                 return Ok(());
                             }
                             (KeyCode::Down, false) => {
-                                self.chat.scroll_down(1);
+                                if self.input.wants_key(key) {
+                                    let input_event = self.input.handle_key(key);
+                                    self.handle_input_event(input_event).await;
+                                } else {
+                                    self.chat.scroll_down(1);
+                                }
                                 return Ok(());
                             }
                             (KeyCode::Tab, _) => {

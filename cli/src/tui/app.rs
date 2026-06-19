@@ -406,7 +406,7 @@ impl App {
                                 return Ok(());
                             }
                             (KeyCode::Up, false) => {
-                                if self.input.wants_key(key) {
+                                if self.input.wants_vertical_nav_key(key) {
                                     let input_event = self.input.handle_key(key);
                                     self.handle_input_event(input_event).await;
                                 } else {
@@ -415,7 +415,7 @@ impl App {
                                 return Ok(());
                             }
                             (KeyCode::Down, false) => {
-                                if self.input.wants_key(key) {
+                                if self.input.wants_vertical_nav_key(key) {
                                     let input_event = self.input.handle_key(key);
                                     self.handle_input_event(input_event).await;
                                 } else {
@@ -1354,6 +1354,45 @@ mod tests {
         .unwrap();
 
         assert_eq!(app.tool_activity.height(80), before);
+    }
+
+    #[tokio::test]
+    async fn empty_composer_down_scrolls_chat_when_not_browsing_history() {
+        let config = telos_agent::AgentConfig::default();
+        let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
+        let tools = telos_agent::ToolRegistry::new();
+        let temp = tempfile::tempdir().unwrap();
+        let memory = Arc::new(Mutex::new(MemoryStore::new(temp.path().join("memory"))));
+
+        let mut app = App::new(
+            config,
+            provider,
+            tools,
+            "telos".into(),
+            Some(temp.path()),
+            false,
+            memory,
+            ModelSwitchConfig::default(),
+        )
+        .unwrap();
+        app.input.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('h'),
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        app.input.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        app.chat.scroll_offset = 3;
+
+        app.handle_event(Event::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        )))
+        .await
+        .unwrap();
+
+        assert_eq!(app.chat.scroll_offset, 2);
     }
 
     #[tokio::test]

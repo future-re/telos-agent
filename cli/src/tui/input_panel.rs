@@ -91,7 +91,7 @@ impl InputPanel {
         self.mode
     }
 
-    pub fn wants_key(&self, key: KeyEvent) -> bool {
+    pub fn wants_vertical_nav_key(&self, key: KeyEvent) -> bool {
         if self.mode != InputMode::Normal {
             return true;
         }
@@ -102,7 +102,7 @@ impl InputPanel {
             }
             (KeyCode::Down, KeyModifiers::NONE) => self.history_pos.is_some() || !self.is_empty(),
             (KeyCode::Up | KeyCode::Down, KeyModifiers::CONTROL) => !self.history.is_empty(),
-            _ => true,
+            _ => false,
         }
     }
 
@@ -508,20 +508,20 @@ mod tests {
     fn wants_plain_up_down_for_text_or_history_but_not_empty_without_history() {
         let mut panel = InputPanel::new();
 
-        assert!(!panel.wants_key(key(KeyCode::Up)));
-        assert!(!panel.wants_key(key(KeyCode::Down)));
+        assert!(!panel.wants_vertical_nav_key(key(KeyCode::Up)));
+        assert!(!panel.wants_vertical_nav_key(key(KeyCode::Down)));
 
         set_text(&mut panel, "line one\nline two");
-        assert!(panel.wants_key(key(KeyCode::Up)));
-        assert!(panel.wants_key(key(KeyCode::Down)));
+        assert!(panel.wants_vertical_nav_key(key(KeyCode::Up)));
+        assert!(panel.wants_vertical_nav_key(key(KeyCode::Down)));
 
         panel.clear_text();
         panel.submit_text("previous".into());
-        assert!(panel.wants_key(key(KeyCode::Up)));
-        assert!(!panel.wants_key(key(KeyCode::Down)));
+        assert!(panel.wants_vertical_nav_key(key(KeyCode::Up)));
+        assert!(!panel.wants_vertical_nav_key(key(KeyCode::Down)));
 
         panel.handle_key(ctrl_key(KeyCode::Up));
         assert_eq!(text(&panel), "previous");
-        assert!(panel.wants_key(key(KeyCode::Down)));
+        assert!(panel.wants_vertical_nav_key(key(KeyCode::Down)));
     }
 }

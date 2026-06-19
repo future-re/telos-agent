@@ -43,10 +43,6 @@ fn models_for(provider: ProviderArg) -> &'static [ModelInfo] {
     }
 }
 
-fn default_model_index(_provider: ProviderArg) -> usize {
-    0 // first model is always the recommended default
-}
-
 // ── Public API ─────────────────────────────────────────────────────────────
 
 /// Run the interactive setup wizard.
@@ -100,36 +96,79 @@ pub fn run() -> Result<Option<OnboardingResult>> {
     }
     eprintln!("  ✓ API key received ({} characters)", api_key.len());
 
-    // ── Model selection ─────────────────────────────────────────────────
+    // ── Model selection (dual-model) ──────────────────────────────────────
     let models = models_for(provider);
-    let default_idx = default_model_index(provider);
 
     eprintln!();
-    eprintln!("  Available {} models:", provider_display(provider));
-    for (i, m) in models.iter().enumerate() {
-        eprintln!("    [{}] {} — {}", i + 1, m.id, m.label);
-        eprintln!("        {}", m.desc);
-    }
+    eprintln!("  telos uses two models by default:");
+    eprintln!();
+    eprintln!("    🧠 Thinking  → deepseek-v4-pro");
+    eprintln!("       Planning, complex reasoning, error recovery");
+    eprintln!();
+    eprintln!("    ⚡ Fast      → deepseek-v4-flash");
+    eprintln!("       Tool execution, file ops, summarization");
+    eprintln!();
+    eprintln!("  This gives you powerful reasoning when needed,");
+    eprintln!("  and fast, cheap execution for routine work.");
     eprintln!();
 
-    let model = loop {
-        let default_label = &models[default_idx].id;
-        let choice = match prompt_input(&format!(
-            "  Select model [{}] {}: ",
-            default_idx + 1,
-            default_label
-        ))? {
-            Some(s) if s.is_empty() => default_idx,
-            Some(s) => match s.parse::<usize>() {
-                Ok(n) if n >= 1 && n <= models.len() => n - 1,
-                _ => {
-                    eprintln!("  Invalid choice. Enter 1-{}.", models.len());
-                    continue;
-                }
-            },
+    // Default dual-model setup
+    let thinking_model = "deepseek-v4-pro".to_string();
+    let fast_model = "deepseek-v4-flash".to_string();
+
+    let customize = loop {
+        match prompt_input("  Press Enter to accept, or type 'c' to customize: ")? {
+            Some(s) if s.is_empty() => break false,
+            Some(s) if s.trim().to_lowercase() == "c" => break true,
+            Some(_) => {
+                eprintln!("  Press Enter to continue, or 'c' to customize.");
+                continue;
+            }
             None => return Ok(None),
+        }
+    };
+
+    let (thinking_model, fast_model) = if customize {
+        eprintln!();
+        eprintln!("  Available {} models:", provider_display(provider));
+        for (i, m) in models.iter().enumerate() {
+            eprintln!("    [{}] {} — {}", i + 1, m.id, m.label);
+            eprintln!("        {}", m.desc);
+        }
+        eprintln!();
+
+        let thinking = loop {
+            match prompt_input("  Select thinking model [1] deepseek-v4-pro: ")? {
+                Some(s) if s.is_empty() => break "deepseek-v4-pro".to_string(),
+                Some(s) => match s.parse::<usize>() {
+                    Ok(n) if n >= 1 && n <= models.len() => break models[n - 1].id.to_string(),
+                    _ => {
+                        eprintln!("  Invalid choice. Enter 1-{}.", models.len());
+                        continue;
+                    }
+                },
+                None => return Ok(None),
+            }
         };
-        break models[choice].id.to_string();
+
+        let fast = loop {
+            match prompt_input("  Select fast model [2] deepseek-v4-flash: ")? {
+                Some(s) if s.is_empty() => break "deepseek-v4-flash".to_string(),
+                Some(s) => match s.parse::<usize>() {
+                    Ok(n) if n >= 1 && n <= models.len() => break models[n - 1].id.to_string(),
+                    _ => {
+                        eprintln!("  Invalid choice. Enter 1-{}.", models.len());
+                        continue;
+                    }
+                },
+                None => return Ok(None),
+            }
+        };
+
+        (thinking, fast)
+    } else {
+        eprintln!("  ✓ Using default dual-model setup");
+        (thinking_model, fast_model)
     };
 
     // ── Save to config? ────────────────────────────────────────────────
@@ -149,7 +188,7 @@ pub fn run() -> Result<Option<OnboardingResult>> {
         }
     };
 
-    let result = OnboardingResult { provider, api_key, model };
+    let result = OnboardingResult { provider, api_key, thinking_model, fast_model };
 
     if save {
         save_config(&result)?;
@@ -180,10 +219,12 @@ pub fn save_config(result: &OnboardingResult) -> Result<()> {
         FileConfig::default()
     };
 
-    // Update agent section.
+    // Update agent section with dual-model setup.
     let agent = existing.agent.get_or_insert_with(Default::default);
     agent.provider = Some(provider_to_config_str(result.provider).to_string());
-    agent.model = Some(result.model.clone());
+    let models = agent.models.get_or_insert_with(Default::default);
+    models.thinking = Some(result.thinking_model.clone());
+    models.fast = Some(result.fast_model.clone());
 
     // Update env section with the API key.
     let env = existing.env.get_or_insert_with(Default::default);

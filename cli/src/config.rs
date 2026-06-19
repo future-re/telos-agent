@@ -288,8 +288,17 @@ fn provider_from_config(config: &FileConfig) -> Option<ProviderArg> {
 pub fn build_provider_from_onboarding(result: &OnboardingResult) -> Result<ResolvedProvider> {
     match result.provider {
         ProviderArg::Deepseek => {
-            let cfg = DeepSeekConfig::new(&result.api_key, &result.model);
-            Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
+            if result.thinking_model != result.fast_model {
+                let routed_config = RoutedModelConfig::dual(
+                    result.api_key.clone(),
+                    result.thinking_model.clone(),
+                    result.fast_model.clone(),
+                );
+                Ok(ResolvedProvider::Routed(RoutedProvider::new(routed_config)))
+            } else {
+                let cfg = DeepSeekConfig::new(&result.api_key, &result.thinking_model);
+                Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
+            }
         }
         ProviderArg::Mock => Ok(ResolvedProvider::Mock(MockProvider::new(vec![]))),
     }

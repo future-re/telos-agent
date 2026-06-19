@@ -154,6 +154,13 @@ pub async fn run() -> Result<()> {
                     project_root.as_deref(),
                     merged.auto_mode.unwrap_or(false),
                     memory_store,
+                    tui::app::ModelSwitchConfig {
+                        deepseek_api_key: deepseek_api_key_for_switch(
+                            &cli.shared,
+                            &merged,
+                            onboarding.as_ref(),
+                        ),
+                    },
                 )
                 .await;
             }
@@ -213,6 +220,20 @@ fn generate_completion(shell: clap_complete::Shell) {
     let mut cmd = <Cli as clap::CommandFactory>::command();
     let name = cmd.get_name().to_string();
     clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
+}
+
+pub(crate) fn deepseek_api_key_for_switch(
+    options: &cli::SharedOptions,
+    config: &config::FileConfig,
+    onboarding: Option<&onboarding::OnboardingResult>,
+) -> Option<String> {
+    options
+        .api_key
+        .clone()
+        .or_else(|| onboarding.map(|result| result.api_key.clone()))
+        .or_else(|| std::env::var("DEEPSEEK_API_KEY").ok())
+        .or_else(|| config.env.as_ref()?.get("DEEPSEEK_API_KEY").cloned())
+        .filter(|key| !key.trim().is_empty())
 }
 
 pub(crate) fn build_erased_provider(

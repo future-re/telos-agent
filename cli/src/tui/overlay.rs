@@ -39,11 +39,24 @@ pub trait Overlay: Send {
 /// Overlay that shows an approval request popup.
 pub struct ApprovalOverlay {
     pub pending: PendingApproval,
+    edit_requested: bool,
+    remember: bool,
 }
 
 impl ApprovalOverlay {
     pub fn new(pending: PendingApproval) -> Self {
-        Self { pending }
+        Self { pending, edit_requested: false, remember: false }
+    }
+
+    pub fn take_edit_request(&mut self) -> Option<PendingApproval> {
+        self.edit_requested.then(|| PendingApproval {
+            request: self.pending.request.clone(),
+            respond: self.pending.respond.take(),
+        })
+    }
+
+    pub fn remember(&self) -> bool {
+        self.remember
     }
 }
 
@@ -127,9 +140,15 @@ impl Overlay for ApprovalOverlay {
 
         text_lines.push(Line::from(""));
         text_lines.push(Line::from(Span::styled(
-            "  [a/y] approve  [d/n] deny  [e] edit-request  ",
+            "  [a/y] approve  [d/n] deny  [e] edit  [r] remember  ",
             Style::default().fg(theme.approval_hint_fg),
         )));
+        if self.remember {
+            text_lines.push(Line::from(Span::styled(
+                "  remember: current TUI session",
+                Style::default().fg(theme.approval_hint_fg),
+            )));
+        }
 
         let text = Text::from(text_lines);
         let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
@@ -155,12 +174,12 @@ impl Overlay for ApprovalOverlay {
                 OverlayAction::Pop
             }
             KeyCode::Char('e') => {
-                if let Some(tx) = self.pending.respond.take() {
-                    let _ = tx.send(telos_agent::ApprovalDecision::Deny {
-                        reason: "edit requested".into(),
-                    });
-                }
-                OverlayAction::Pop
+                self.edit_requested = true;
+                OverlayAction::Handled
+            }
+            KeyCode::Char('r') => {
+                self.remember = !self.remember;
+                OverlayAction::Handled
             }
             _ => OverlayAction::None,
         }
@@ -250,7 +269,14 @@ pub fn truncate_for_popup(s: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::truncate_for_popup;
+    use super::{ApprovalOverlay, Overlay, OverlayAction, truncate_for_popup};
+    use crate::tui::approval::PendingApproval;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use serde_json::json;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use telos_agent::{ApprovalRequest, Message};
+    use tokio::sync::oneshot;
 
     #[test]
     fn truncate_for_popup_handles_utf8_boundaries() {
@@ -261,5 +287,28 @@ mod tests {
     #[test]
     fn truncate_for_popup_leaves_short_text_unchanged() {
         assert_eq!(truncate_for_popup("hello", 10), "hello");
+    }
+
+    #[test]
+    fn approval_edit_requests_app_followup_without_sending_decision() {
+        let (tx, mut rx) = oneshot::channel();
+        let pending = PendingApproval {
+            request: ApprovalRequest {
+                tool_name: "Bash".into(),
+                invocation_names: vec!["Bash".into(), "shell".into()],
+                arguments: json!({"command": "echo hi"}),
+                cwd: PathBuf::from("."),
+                messages: Arc::new(vec![Message::user("hi")]),
+                reason: "test".into(),
+            },
+            respond: Some(tx),
+        };
+        let mut overlay = ApprovalOverlay::new(pending);
+
+        let action = overlay.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
+
+        assert_eq!(action, OverlayAction::Handled);
+        assert!(overlay.take_edit_request().is_some());
+        assert!(rx.try_recv().is_err());
     }
 }

@@ -1,10 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent};
-use std::any::Any;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use std::any::Any;
 use std::collections::HashMap;
 
 use crate::tui::overlay::{Overlay, OverlayAction};
@@ -20,6 +20,8 @@ pub struct UserInputPopup {
     questions: Vec<Question>,
     active_field: usize,
     result: Option<Option<HashMap<String, String>>>,
+    context: Option<String>,
+    error: Option<String>,
 }
 
 pub struct Question {
@@ -31,7 +33,27 @@ pub struct Question {
 
 impl UserInputPopup {
     pub fn new(title: impl Into<String>, questions: Vec<Question>) -> Self {
-        Self { title: title.into(), questions, active_field: 0, result: None }
+        Self {
+            title: title.into(),
+            questions,
+            active_field: 0,
+            result: None,
+            context: None,
+            error: None,
+        }
+    }
+
+    pub fn with_context(mut self, context: impl Into<String>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    pub fn context(&self) -> Option<&str> {
+        self.context.as_deref()
+    }
+
+    pub fn set_error(&mut self, error: impl Into<String>) {
+        self.error = Some(error.into());
     }
 
     /// The collected answers after submission, or None if cancelled.
@@ -81,6 +103,12 @@ impl Overlay for UserInputPopup {
             lines.push(Line::from(Span::styled(display, input_style)));
             lines.push(Line::from(""));
         }
+        if let Some(error) = &self.error {
+            lines.push(Line::from(Span::styled(
+                format!("  {error}"),
+                Style::default().fg(theme.tool_error_fg),
+            )));
+        }
 
         lines.push(Line::from(Span::styled(
             "  Tab·next  Enter·submit  Esc·cancel",
@@ -114,12 +142,14 @@ impl Overlay for UserInputPopup {
                 if let Some(q) = self.questions.get_mut(self.active_field) {
                     q.value.push(c);
                 }
+                self.error = None;
                 OverlayAction::None
             }
             KeyCode::Backspace => {
                 if let Some(q) = self.questions.get_mut(self.active_field) {
                     q.value.pop();
                 }
+                self.error = None;
                 OverlayAction::None
             }
             KeyCode::Enter => {

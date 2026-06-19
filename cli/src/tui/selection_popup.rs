@@ -1,10 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent};
-use std::any::Any;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use std::any::Any;
 
 use crate::tui::overlay::{Overlay, OverlayAction};
 use crate::tui::theme::Theme;
@@ -22,12 +22,29 @@ pub struct SelectionPopup {
     selected: usize,
     scroll_offset: usize,
     result: Option<Option<usize>>, // None = cancelled, Some(Some(idx)) = selected
+    context: Option<String>,
 }
 
 impl SelectionPopup {
     pub fn new(title: impl Into<String>, items: Vec<impl Into<String>>) -> Self {
         let items: Vec<String> = items.into_iter().map(Into::into).collect();
-        Self { title: title.into(), items, selected: 0, scroll_offset: 0, result: None }
+        Self {
+            title: title.into(),
+            items,
+            selected: 0,
+            scroll_offset: 0,
+            result: None,
+            context: None,
+        }
+    }
+
+    pub fn with_context(mut self, context: impl Into<String>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    pub fn context(&self) -> Option<&str> {
+        self.context.as_deref()
     }
 
     /// The result after this popup has been popped.

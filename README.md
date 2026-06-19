@@ -19,33 +19,43 @@ telos
 telos "Review src/lib.rs"
 
 # 指定 provider 和模型
-telos --provider kimi --model kimi-k2-0711-preview "Refactor error handling"
+telos --provider deepseek --model deepseek-v4-pro "Refactor error handling"
+
+# 使用双模型路由：thinking 负责规划/恢复，fast 负责工具执行
+telos --provider deepseek \
+  --thinking-model deepseek-v4-pro \
+  --fast-model deepseek-v4-flash \
+  "Refactor error handling"
 
 # 生成 shell 补全
 telos completion bash > /usr/share/bash-completion/completions/telos
 ```
 
-API key 按以下优先级解析：`--api-key` 标志 → `DEEPSEEK_API_KEY` / `MOONSHOT_API_KEY` 环境变量 → 交互式输入。详细用法见 [cli/README.md](cli/README.md)。
+当前 CLI 支持 `deepseek` 和 `mock` provider。API key 按以下优先级解析：`--api-key` 标志 → `DEEPSEEK_API_KEY` 环境变量 → 配置文件 `[env]` → 交互式输入。详细用法见 [cli/README.md](cli/README.md)。
 
 ### 库
 
 ```rust
 use telos_agent::{
-    AgentConfig, AgentSession, CompletionResponse, Message,
-    MockProvider, StopReason, Tool, ToolContext, ToolDefinition,
-    ToolOutput, ToolRegistry,
+    AgentConfig, AgentError, AgentSession, CompletionResponse, Message, MockProvider,
+    StopReason, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
 };
+use serde_json::{json, Value};
 
 struct EchoTool;
 
 #[async_trait::async_trait]
 impl Tool for EchoTool {
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new("echo", "Echo input text.", json!({
-            "type": "object",
-            "properties": { "text": { "type": "string" } },
-            "required": ["text"]
-        }))
+        ToolDefinition {
+            name: "echo".into(),
+            description: "Echo input text.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "text": { "type": "string" } },
+                "required": ["text"]
+            }),
+        }
     }
 
     async fn invoke(&self, args: Value, _ctx: ToolContext) -> Result<ToolOutput, AgentError> {
@@ -80,12 +90,13 @@ async fn main() -> Result<(), AgentError> {
 ### 核心循环
 - `AgentSession` 驱动 turn 循环（采样 → 工具执行 → 结果回注）
 - `TurnEvent` 流式事件，暴露采样、工具、compaction、停止等阶段
-- 7 个 hook phase：`SessionStart`、`UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`PostSampling`、`Stop`
+- hook phase：当前 turn loop 内执行 `PostSampling` 和 `Stop`，hook 注册表保留扩展接口
 - 取消检查点，可在 provider 调用或迭代间隙安全中断
 
 ### Provider
-- 统一的 `ModelProvider` trait，内置 Kimi、DeepSeek、Mock 实现
-- SSE streaming（基于 `async-openai`），指数退避重试
+- 统一的 `ModelProvider` trait，内置 DeepSeek、双模型 `RoutedProvider`、Mock 实现
+- DeepSeek 走 OpenAI-compatible Chat Completions / SSE streaming，支持指数退避重试
+- `ModelHint` 将请求标记为 thinking、execution、recovery 或 summarization，路由 provider 可据此选择模型
 - `ErasedProvider` 辅助类型擦除
 
 ### 工具系统
@@ -94,6 +105,7 @@ async fn main() -> Result<(), AgentError> {
 - `SubagentTool`（完整子会话 + fork 并发多视角）、`SkillTool`（slash-command）
 - Memory 工具（Read/Write/Grep/Edit/Status）、Task 工具（Create/Get/List/Update）
 - MCP 工具桥接（stdio JSON-RPC，自动注册为 `mcp__<server>__<tool>`）
+- 插件系统可加载 manifest、tool specs、skills、prompt sections 和 MCP 声明；core 层已提供 registry/apply 能力
 - 工具超时、panic 隔离、文件写冲突保护
 
 ### 权限与安全
@@ -110,6 +122,11 @@ async fn main() -> Result<(), AgentError> {
 - `JsonlStorage` JSONL 持久化，`NoopStorage` 用于无持久化场景
 - Token 预算感知 compaction（`SummaryCompaction` + 字符截断）
 - 任务管理系统（`TaskManager`，支持 blocked_by/blocks 依赖）
+
+### CLI / TUI
+- `telos` 无 prompt 时启动全屏 TUI，`telos "..."` 执行单次调用，`telos chat` 进入交互会话
+- TUI 使用后台 agent task 消费 `TurnEvent`，支持流式 markdown、工具状态、审批 overlay、自动审批、会话保存/恢复和模型切换
+- CLI 启动时加载项目上下文、memory runtime，并按配置可选注册 CodeQL 工具和 prompt section
 
 ## 架构
 
@@ -132,8 +149,14 @@ async fn main() -> Result<(), AgentError> {
 ```toml
 [agent]
 provider = "deepseek"
-model = "deepseek-chat"
 max_iterations = 16
+
+[agent.models]
+thinking = "deepseek-v4-pro"
+fast = "deepseek-v4-flash"
+
+[env]
+DEEPSEEK_API_KEY = "sk-..."
 
 [approval]
 default_policy = "ask"

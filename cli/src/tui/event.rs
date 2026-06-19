@@ -16,6 +16,8 @@ pub enum Event {
     TurnComplete,
     /// A non-recoverable error from the session or turn stream.
     SessionError { message: String },
+    /// Informational message from the background session task.
+    SessionNotice { message: String },
     /// Request to redraw (e.g. from a timer tick).
     Tick,
 }

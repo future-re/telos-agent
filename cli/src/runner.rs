@@ -134,6 +134,13 @@ pub async fn run_chat(
         project_root.as_deref(),
         auto_mode,
         memory_store,
+        crate::tui::app::ModelSwitchConfig {
+            deepseek_api_key: crate::deepseek_api_key_for_switch(
+                options,
+                config,
+                onboarding.as_ref(),
+            ),
+        },
     )
     .await
 }

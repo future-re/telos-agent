@@ -31,6 +31,17 @@ pub trait HistoryCell: Send {
     /// Append text to a streaming cell. No-op for non-streaming cells.
     fn push_text(&mut self, _text: &str) {}
 
+    /// Mark this cell as no longer receiving streamed content.
+    fn finish_streaming(&mut self) {}
+
+    /// Whether this cell can be selected for keyboard actions.
+    fn is_selectable(&self) -> bool {
+        false
+    }
+
+    /// Render this cell as selected.
+    fn set_selected(&mut self, _selected: bool) {}
+
     /// Optional tool_call_id for ToolCallCell lookups.
     fn tool_call_id(&self) -> Option<&str> {
         None
@@ -163,6 +174,10 @@ impl HistoryCell for AgentCell {
         self.buffer.push_str(text);
     }
 
+    fn finish_streaming(&mut self) {
+        self.is_streaming = false;
+    }
+
     fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         if self.buffer.is_empty() {
             return;
@@ -189,6 +204,7 @@ impl HistoryCell for AgentCell {
 
 pub struct ThinkingCell {
     pub buffer: String,
+    pub is_streaming: bool,
 }
 
 impl HistoryCell for ThinkingCell {
@@ -215,7 +231,11 @@ impl HistoryCell for ThinkingCell {
     }
 
     fn is_streaming(&self) -> bool {
-        true
+        self.is_streaming
+    }
+
+    fn finish_streaming(&mut self) {
+        self.is_streaming = false;
     }
 
     fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
@@ -254,6 +274,8 @@ pub struct ToolCallCell {
     pub progress_messages: Vec<String>,
     /// Whether to show expanded output (for shell commands).
     pub expanded: bool,
+    /// Whether this cell is selected for keyboard actions.
+    pub selected: bool,
 }
 
 impl ToolCallCell {
@@ -266,6 +288,7 @@ impl ToolCallCell {
             tool_call_id,
             progress_messages: Vec::new(),
             expanded: !is_shell, // shell commands start collapsed
+            selected: false,
         }
     }
 
@@ -308,6 +331,14 @@ impl HistoryCell for ToolCallCell {
         Some(&self.tool_call_id)
     }
 
+    fn is_selectable(&self) -> bool {
+        true
+    }
+
+    fn set_selected(&mut self, selected: bool) {
+        self.selected = selected;
+    }
+
     fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         // ── Shell command collapsed: show command with [+N] hint ────
         if self.is_shell() && !self.expanded {
@@ -321,19 +352,26 @@ impl HistoryCell for ToolCallCell {
             } else {
                 format!("  [+{} lines]", self.progress_messages.len())
             };
-            let (icon, style) = match self.state {
+            let (icon, mut style) = match self.state {
                 ToolState::Pending => ("  ◌ ", theme.tool_pending_style()),
                 ToolState::Running { .. } => ("  ◌ ", theme.tool_pending_style()),
                 ToolState::Completed { ok } => {
-                    if ok { ("  ✓ ", theme.tool_ok_style()) } else { ("  ✗ ", theme.tool_error_style()) }
+                    if ok {
+                        ("  ✓ ", theme.tool_ok_style())
+                    } else {
+                        ("  ✗ ", theme.tool_error_style())
+                    }
                 }
             };
+            if self.selected {
+                style = style.add_modifier(Modifier::REVERSED);
+            }
             let label = format!("$ {}{}", cmd, hint);
-            let line = Line::from(vec![
-                Span::styled(icon, style),
-                Span::styled(label, style),
-            ]);
-            frame.render_widget(Paragraph::new(Text::from(vec![line])).wrap(Wrap { trim: true }), area);
+            let line = Line::from(vec![Span::styled(icon, style), Span::styled(label, style)]);
+            frame.render_widget(
+                Paragraph::new(Text::from(vec![line])).wrap(Wrap { trim: true }),
+                area,
+            );
             return;
         }
 
@@ -342,7 +380,12 @@ impl HistoryCell for ToolCallCell {
 
         match self.state {
             ToolState::Pending | ToolState::Running { .. } => {
-                spans.push(Span::styled("  ◌ ", theme.tool_pending_style()));
+                let style = if self.selected {
+                    theme.tool_pending_style().add_modifier(Modifier::REVERSED)
+                } else {
+                    theme.tool_pending_style()
+                };
+                spans.push(Span::styled("  ◌ ", style));
                 let label = if self.is_shell() {
                     format!("$ {}", self.detail)
                 } else if self.detail.is_empty() {
@@ -350,14 +393,17 @@ impl HistoryCell for ToolCallCell {
                 } else {
                     format!("{}: {}", self.name, self.detail)
                 };
-                spans.push(Span::styled(label, theme.tool_pending_style()));
+                spans.push(Span::styled(label, style));
             }
             ToolState::Completed { ok } => {
-                let (icon, style) = if ok {
+                let (icon, mut style) = if ok {
                     ("  ✓ ", theme.tool_ok_style())
                 } else {
                     ("  ✗ ", theme.tool_error_style())
                 };
+                if self.selected {
+                    style = style.add_modifier(Modifier::REVERSED);
+                }
                 spans.push(Span::styled(icon, style));
                 let label = if self.is_shell() {
                     format!("$ {}", self.detail)

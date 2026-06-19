@@ -12,7 +12,7 @@ pub mod status_bar;
 pub mod theme;
 pub mod user_input_popup;
 
-use crate::tui::app::App;
+use crate::tui::app::{App, ModelSwitchConfig};
 use crate::tui::event::Event;
 use anyhow::Result;
 use crossterm::event::{Event as CEvent, EventStream};
@@ -44,6 +44,7 @@ pub async fn run(
     project_root: Option<&std::path::Path>,
     auto_mode: bool,
     memory_store: Arc<Mutex<MemoryStore>>,
+    model_switch: ModelSwitchConfig,
 ) -> Result<()> {
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = stdout();
@@ -53,8 +54,16 @@ pub async fn run(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app =
-        App::new(config, provider, tools, status_text, project_root, auto_mode, memory_store)?;
+    let mut app = App::new(
+        config,
+        provider,
+        tools,
+        status_text,
+        project_root,
+        auto_mode,
+        memory_store,
+        model_switch,
+    )?;
     let tick_rate = Duration::from_millis(100);
     let mut reader = EventStream::new();
 

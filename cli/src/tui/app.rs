@@ -1,12 +1,13 @@
 use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
+use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
-use telos_agent::{MemoryStore, TurnEvent};
+use telos_agent::{MemoryStore, Role, Storage, TurnEvent};
 use tokio::sync::mpsc;
 
 use crate::tui::approval::PendingApproval;
@@ -19,6 +20,28 @@ use crate::tui::overlay::{ApprovalOverlay, Overlay, OverlayAction};
 use crate::tui::selection_popup::SelectionPopup;
 use crate::tui::status_bar;
 use crate::tui::theme::Theme;
+use crate::tui::user_input_popup::{Question, UserInputPopup};
+
+const MODEL_OPTIONS: [&str; 2] = ["deepseek-v4-flash", "deepseek-v4-pro"];
+
+#[derive(Debug, Clone, Default)]
+pub struct ModelSwitchConfig {
+    pub deepseek_api_key: Option<String>,
+}
+
+enum BackgroundCommand {
+    Prompt(String),
+    SetProvider { provider: Arc<dyn telos_agent::ModelProvider>, label: String },
+    NewSession,
+    ResumeSession(String),
+}
+
+#[derive(Clone)]
+struct ToolInfo {
+    name: String,
+    aliases: Vec<String>,
+    description: String,
+}
 
 /// TUI application mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,8 +87,18 @@ pub struct App {
     token_budget_max: Option<u64>,
     /// Shared memory store for tools, prompt injection, and automatic feedback.
     memory: Arc<Mutex<MemoryStore>>,
-    /// Send prompts to the background agent task.
-    turn_tx: mpsc::UnboundedSender<String>,
+    /// Session storage used by the background session and TUI resume UI.
+    storage: Arc<dyn Storage>,
+    /// On-disk directory containing JSONL sessions.
+    sessions_dir: PathBuf,
+    /// Model switch settings.
+    model_switch: ModelSwitchConfig,
+    /// Snapshot of registered tool metadata for /tool.
+    tool_infos: Vec<ToolInfo>,
+    /// Approval request currently being edited in a UserInputPopup.
+    editing_approval: Option<PendingApproval>,
+    /// Send commands to the background agent task.
+    turn_tx: mpsc::UnboundedSender<BackgroundCommand>,
     /// Receive TurnEvents from the background agent task.
     turn_rx: mpsc::UnboundedReceiver<Event>,
     /// Receive pending approvals from the TuiApprovalHandler.
@@ -85,13 +118,16 @@ impl App {
         project_root: Option<&std::path::Path>,
         auto_mode_on: bool,
         memory: Arc<Mutex<MemoryStore>>,
+        model_switch: ModelSwitchConfig,
     ) -> Result<Self, telos_agent::AgentError> {
         // Wire up session storage before creating the AgentSession.
         let session_manager = crate::session::SessionManager::new(project_root);
         std::fs::create_dir_all(session_manager.sessions_dir()).ok();
+        let sessions_dir = session_manager.sessions_dir().to_path_buf();
         let storage =
             Arc::new(telos_agent::JsonlStorage::new(session_manager.sessions_dir().to_path_buf())?);
-        config.storage = Some(storage);
+        config.storage = Some(storage.clone());
+        let app_storage: Arc<dyn Storage> = storage.clone();
 
         // Extract the cancellation flag before moving config into the spawned task.
         let cancel_flag = Arc::clone(&config.cancelled);
@@ -105,7 +141,9 @@ impl App {
         let status_text =
             if auto_mode_on { format!("{status_text} ⏵⏵ auto") } else { status_text };
 
-        let (prompt_tx, mut prompt_rx) = mpsc::unbounded_channel::<String>();
+        let tool_infos = collect_tool_infos(&tools);
+
+        let (prompt_tx, mut prompt_rx) = mpsc::unbounded_channel::<BackgroundCommand>();
         let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
         let (approval_tx, approval_rx) = mpsc::unbounded_channel::<PendingApproval>();
         let (app_event_tx, app_event_rx) = mpsc::unbounded_channel::<AppEvent>();
@@ -117,6 +155,8 @@ impl App {
             ));
             let mut config = config;
             config.approval_handler = approval_handler;
+            let base_config = config.clone();
+            let storage_for_resume = storage.clone();
 
             let mut session = match telos_agent::AgentSession::new(config) {
                 Ok(s) => s,
@@ -127,26 +167,70 @@ impl App {
                     return;
                 }
             };
+            let mut current_provider = provider;
 
-            while let Some(prompt) = prompt_rx.recv().await {
-                let erased = telos_agent::ErasedProvider(provider.as_ref());
-                {
-                    let mut stream = pin!(session.run_turn_stream(&erased, &tools, prompt,));
-                    while let Some(event) = stream.next().await {
-                        match event {
-                            Ok(te) => {
-                                let _ = event_tx.send(Event::Turn(te));
+            while let Some(command) = prompt_rx.recv().await {
+                match command {
+                    BackgroundCommand::Prompt(prompt) => {
+                        let erased = telos_agent::ErasedProvider(current_provider.as_ref());
+                        {
+                            let mut stream =
+                                pin!(session.run_turn_stream(&erased, &tools, prompt,));
+                            while let Some(event) = stream.next().await {
+                                match event {
+                                    Ok(te) => {
+                                        let _ = event_tx.send(Event::Turn(te));
+                                    }
+                                    Err(e) => {
+                                        let _ = event_tx
+                                            .send(Event::SessionError { message: e.to_string() });
+                                        break;
+                                    }
+                                }
                             }
+                        }
+                        let _ = session.save().await;
+                        let _ = event_tx.send(Event::TurnComplete);
+                    }
+                    BackgroundCommand::SetProvider { provider, label } => {
+                        current_provider = provider;
+                        let _ = event_tx.send(Event::SessionNotice {
+                            message: format!("model switched to {label}"),
+                        });
+                    }
+                    BackgroundCommand::NewSession => {
+                        session = match telos_agent::AgentSession::new(base_config.clone()) {
+                            Ok(s) => s,
                             Err(e) => {
                                 let _ =
                                     event_tx.send(Event::SessionError { message: e.to_string() });
-                                break;
+                                continue;
                             }
-                        }
+                        };
+                        let _ = event_tx.send(Event::SessionNotice {
+                            message: "new session started".to_string(),
+                        });
+                    }
+                    BackgroundCommand::ResumeSession(session_id) => {
+                        session = match telos_agent::AgentSession::resume(
+                            session_id.clone(),
+                            base_config.clone(),
+                            storage_for_resume.clone(),
+                        )
+                        .await
+                        {
+                            Ok(s) => s,
+                            Err(e) => {
+                                let _ =
+                                    event_tx.send(Event::SessionError { message: e.to_string() });
+                                continue;
+                            }
+                        };
+                        let _ = event_tx.send(Event::SessionNotice {
+                            message: format!("resumed session {session_id}"),
+                        });
                     }
                 }
-                let _ = session.save().await;
-                let _ = event_tx.send(Event::TurnComplete);
             }
         });
 
@@ -165,6 +249,11 @@ impl App {
             turn_input_tokens: 0,
             turn_output_tokens: 0,
             memory,
+            storage: app_storage,
+            sessions_dir,
+            model_switch,
+            tool_infos,
+            editing_approval: None,
             spinner_frame: 0,
             token_budget_max,
             turn_tx: prompt_tx,
@@ -206,12 +295,7 @@ impl App {
                         return Ok(());
                     }
                     (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                        // Full session reset requires recreating the background AgentSession,
-                        // which is a follow-up enhancement. For now, clear the chat and indicate
-                        // that a new session will begin on the next prompt.
-                        self.chat.clear();
-                        self.chat.scroll_to_bottom();
-                        self.status_text = "telos · new session (next prompt)".to_string();
+                        self.new_session();
                         return Ok(());
                     }
                     _ => {}
@@ -219,16 +303,25 @@ impl App {
 
                 match self.mode {
                     Mode::Approving => {
-                        if let Some(overlay) = self.overlays.last_mut()
-                            && overlay.handle_key(key) == OverlayAction::Pop
-                        {
-                            let popped = self.overlays.pop();
-                            self.handle_overlay_popped(popped);
-                            self.mode = if self.overlays.is_empty() {
-                                if self.turn_active { Mode::Streaming } else { Mode::Normal }
-                            } else {
-                                Mode::Approving
-                            };
+                        if let Some(overlay) = self.overlays.last_mut() {
+                            match overlay.handle_key(key) {
+                                OverlayAction::Pop => {
+                                    let popped = self.overlays.pop();
+                                    self.handle_overlay_popped(popped).await;
+                                    self.refresh_mode_after_overlay();
+                                }
+                                OverlayAction::Handled => {
+                                    if let Some(approval) =
+                                        overlay.as_any_mut().downcast_mut::<ApprovalOverlay>()
+                                        && let Some(pending) = approval.take_edit_request()
+                                    {
+                                        let _ = self.overlays.pop();
+                                        self.open_approval_edit_popup(pending);
+                                        self.mode = Mode::Approving;
+                                    }
+                                }
+                                OverlayAction::None => {}
+                            }
                         }
                         return Ok(());
                     }
@@ -250,6 +343,19 @@ impl App {
                             }
                             (KeyCode::Down, false) => {
                                 self.chat.scroll_down(1);
+                                return Ok(());
+                            }
+                            (KeyCode::Tab, _) => {
+                                self.chat.select_next_tool();
+                                return Ok(());
+                            }
+                            (KeyCode::BackTab, _) => {
+                                self.chat.select_prev_tool();
+                                return Ok(());
+                            }
+                            (KeyCode::Enter, _) | (KeyCode::Char(' '), _)
+                                if self.chat.toggle_selected_tool() =>
+                            {
                                 return Ok(());
                             }
                             _ => {}
@@ -274,6 +380,11 @@ impl App {
                             (KeyCode::PageDown, _) => self.chat.scroll_down(10),
                             (KeyCode::Up, false) => self.chat.scroll_up(1),
                             (KeyCode::Down, false) => self.chat.scroll_down(1),
+                            (KeyCode::Tab, _) => self.chat.select_next_tool(),
+                            (KeyCode::BackTab, _) => self.chat.select_prev_tool(),
+                            (KeyCode::Enter, _) | (KeyCode::Char(' '), _) => {
+                                let _ = self.chat.toggle_selected_tool();
+                            }
                             _ => {}
                         }
                     }
@@ -301,6 +412,10 @@ impl App {
                             self.turn_input_tokens = 0;
                             self.turn_output_tokens = 0;
                             self.status_text = self.base_status.clone();
+                        }
+                        Event::SessionNotice { message } => {
+                            self.status_text = format!("telos · {message}");
+                            self.base_status = self.status_text.clone();
                         }
                         _ => {}
                     }
@@ -376,10 +491,11 @@ impl App {
 
     /// Send a user prompt to the background agent task.
     pub async fn send_prompt(&mut self, prompt: String) {
+        self.cancel_flag.store(false, Ordering::Relaxed);
         crate::memory_runtime::record_user_preference(&self.memory, &prompt).await;
         self.chat.push_cell(Box::new(UserCell { content: prompt.clone() }));
         self.base_status = self.status_text.clone();
-        let _ = self.turn_tx.send(prompt);
+        let _ = self.turn_tx.send(BackgroundCommand::Prompt(prompt));
         self.mode = Mode::Streaming;
         self.turn_active = true;
     }
@@ -388,12 +504,12 @@ impl App {
         match cmd {
             SlashCommand::Help => {
                 let help_text = "\
-Available commands:\n\n  /tool   — configure tools\n\
-  /model  — switch model\n\
-  /help   — show this help\n\
-  /clear  — clear conversation\n\
-  /session — session management\n\
-  /auto   — toggle auto-approve mode";
+Available commands:\n\n  /tool    — show registered tools and aliases\n\
+  /model   — switch the model for later turns\n\
+  /session — new, list, or resume stored sessions\n\
+  /clear   — clear the visible conversation\n\
+  /auto    — toggle auto-approve mode\n\
+  /help    — show this help";
                 self.chat.push_cell(Box::new(UserCell { content: format!("/{cmd:?}") }));
                 self.chat.push_cell(Box::new(AgentCell {
                     buffer: help_text.to_string(),
@@ -411,41 +527,300 @@ Available commands:\n\n  /tool   — configure tools\n\
                 self.update_auto_mode_status();
             }
             SlashCommand::Model => {
-                let models = vec!["deepseek-v4-flash", "deepseek-v4-pro"];
-                let popup = SelectionPopup::new(" Select model ", models);
+                let popup = SelectionPopup::new(" Select model ", MODEL_OPTIONS.to_vec())
+                    .with_context("model");
                 self.overlays.push(Box::new(popup));
                 self.mode = Mode::Approving;
             }
             SlashCommand::Tool => {
-                self.chat.push_cell(Box::new(AgentCell {
-                    buffer: "Tool configuration not yet available.".to_string(),
-                    is_streaming: false,
-                }));
+                self.show_tool_summary();
             }
             SlashCommand::Session => {
-                self.chat.push_cell(Box::new(AgentCell {
-                    buffer: "Session management not yet available.".to_string(),
-                    is_streaming: false,
-                }));
+                let popup = SelectionPopup::new(
+                    " Session ",
+                    vec!["new session", "resume session", "list sessions"],
+                )
+                .with_context("session_action");
+                self.overlays.push(Box::new(popup));
+                self.mode = Mode::Approving;
             }
         }
     }
 
     /// Process a popped overlay — extract results from selection popups, etc.
-    fn handle_overlay_popped(&mut self, popped: Option<Box<dyn Overlay>>) {
+    async fn handle_overlay_popped(&mut self, popped: Option<Box<dyn Overlay>>) {
         let Some(overlay) = popped else { return };
-        if let Some(popup) = overlay.as_any().downcast_ref::<SelectionPopup>()
-            && let Some(idx) = popup.selected_index()
+        if let Some(popup) = overlay.as_any().downcast_ref::<SelectionPopup>() {
+            match popup.context() {
+                Some("model") => {
+                    if let Some(model) = popup.selected_item() {
+                        self.switch_model(model);
+                    }
+                }
+                Some("session_action") => {
+                    if let Some(idx) = popup.selected_index() {
+                        self.handle_session_action(idx).await;
+                    }
+                }
+                Some("session_resume") => {
+                    if let Some(session_id) = popup.selected_item() {
+                        self.resume_session(session_id).await;
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        if let Some(popup) = overlay.as_any().downcast_ref::<UserInputPopup>()
+            && popup.context() == Some("approval_edit")
         {
-            const MODELS: [&str; 2] = ["deepseek-v4-flash", "deepseek-v4-pro"];
-            if let Some(model) = MODELS.get(idx) {
-                self.chat.push_cell(Box::new(UserCell { content: format!("/model {model}") }));
-                self.chat.push_cell(Box::new(AgentCell {
-                    buffer: format!("Switched model to: {model}"),
-                    is_streaming: false,
-                }));
+            if let Some(answers) = popup.answers() {
+                let edited = answers.get("arguments").cloned().unwrap_or_default();
+                match serde_json::from_str::<serde_json::Value>(&edited) {
+                    Ok(arguments) => {
+                        if let Some(mut pending) = self.editing_approval.take()
+                            && let Some(tx) = pending.respond.take()
+                        {
+                            let _ = tx.send(telos_agent::ApprovalDecision::Modify { arguments });
+                        }
+                    }
+                    Err(err) => {
+                        if let Some(pending) = self.editing_approval.take() {
+                            self.open_approval_edit_popup_with_error(
+                                pending,
+                                edited,
+                                format!("invalid JSON: {err}"),
+                            );
+                        }
+                    }
+                }
+            } else if let Some(mut pending) = self.editing_approval.take()
+                && let Some(tx) = pending.respond.take()
+            {
+                let _ = tx.send(telos_agent::ApprovalDecision::Deny {
+                    reason: "modification cancelled".into(),
+                });
             }
         }
+    }
+
+    fn refresh_mode_after_overlay(&mut self) {
+        self.mode = if self.overlays.is_empty() {
+            if self.turn_active { Mode::Streaming } else { Mode::Normal }
+        } else {
+            Mode::Approving
+        };
+    }
+
+    fn open_approval_edit_popup(&mut self, pending: PendingApproval) {
+        let initial = serde_json::to_string_pretty(&pending.request.arguments)
+            .unwrap_or_else(|_| pending.request.arguments.to_string());
+        self.open_approval_edit_popup_with_error(pending, initial, String::new());
+    }
+
+    fn open_approval_edit_popup_with_error(
+        &mut self,
+        pending: PendingApproval,
+        initial: String,
+        error: String,
+    ) {
+        self.editing_approval = Some(pending);
+        let mut popup = UserInputPopup::new(
+            " Edit approval arguments ",
+            vec![Question {
+                key: "arguments".into(),
+                label: "JSON arguments".into(),
+                value: initial,
+                placeholder: "{}".into(),
+            }],
+        )
+        .with_context("approval_edit");
+        if !error.is_empty() {
+            popup.set_error(error);
+        }
+        self.overlays.push(Box::new(popup));
+        self.mode = Mode::Approving;
+    }
+
+    fn switch_model(&mut self, model: &str) {
+        let Some(api_key) = self.model_switch.deepseek_api_key.clone() else {
+            self.chat.push_cell(Box::new(ErrorCell {
+                message: "cannot switch model: missing DeepSeek API key".to_string(),
+            }));
+            return;
+        };
+        let provider = Arc::new(telos_agent::DeepSeekProvider::new(
+            telos_agent::DeepSeekConfig::new(api_key, model.to_string()),
+        ));
+        let _ = self
+            .turn_tx
+            .send(BackgroundCommand::SetProvider { provider, label: model.to_string() });
+        self.status_text = format!("telos · model {model}");
+        self.base_status = self.status_text.clone();
+        self.chat.push_cell(Box::new(UserCell { content: format!("/model {model}") }));
+        self.chat.push_cell(Box::new(AgentCell {
+            buffer: format!("Switched model to: {model}"),
+            is_streaming: false,
+        }));
+    }
+
+    async fn handle_session_action(&mut self, idx: usize) {
+        match idx {
+            0 => self.new_session(),
+            1 => self.open_session_resume_popup(),
+            2 => self.show_session_list(),
+            _ => {}
+        }
+    }
+
+    fn new_session(&mut self) {
+        if self.turn_active {
+            self.chat.push_cell(Box::new(ErrorCell {
+                message: "wait for the current turn before starting a new session".to_string(),
+            }));
+            return;
+        }
+        self.chat.clear();
+        self.turn_input_tokens = 0;
+        self.turn_output_tokens = 0;
+        self.turn_started = None;
+        self.cancel_flag.store(false, Ordering::Relaxed);
+        let _ = self.turn_tx.send(BackgroundCommand::NewSession);
+        self.status_text = "telos · new session".to_string();
+        self.base_status = self.status_text.clone();
+    }
+
+    fn open_session_resume_popup(&mut self) {
+        let sessions = self.session_ids();
+        if sessions.is_empty() {
+            self.chat.push_cell(Box::new(AgentCell {
+                buffer: "No saved sessions found.".to_string(),
+                is_streaming: false,
+            }));
+            return;
+        }
+        self.overlays.push(Box::new(
+            SelectionPopup::new(" Resume session ", sessions).with_context("session_resume"),
+        ));
+        self.mode = Mode::Approving;
+    }
+
+    fn show_session_list(&mut self) {
+        let sessions = self.session_ids();
+        let body = if sessions.is_empty() {
+            "No saved sessions found.".to_string()
+        } else {
+            format!(
+                "Saved sessions:\n\n{}",
+                sessions.into_iter().map(|s| format!("  {s}")).collect::<Vec<_>>().join("\n")
+            )
+        };
+        self.chat.push_cell(Box::new(AgentCell { buffer: body, is_streaming: false }));
+    }
+
+    async fn resume_session(&mut self, session_id: &str) {
+        if self.turn_active {
+            self.chat.push_cell(Box::new(ErrorCell {
+                message: "wait for the current turn before resuming a session".to_string(),
+            }));
+            return;
+        }
+        match self.storage.load(session_id).await {
+            Ok(messages) => {
+                self.chat.clear();
+                self.chat.push_cell(Box::new(AgentCell {
+                    buffer: format!("Resumed session: {session_id}"),
+                    is_streaming: false,
+                }));
+                for message in messages {
+                    self.push_message_cell(message);
+                }
+                self.cancel_flag.store(false, Ordering::Relaxed);
+                let _ = self.turn_tx.send(BackgroundCommand::ResumeSession(session_id.to_string()));
+                self.status_text = format!("telos · session {session_id}");
+                self.base_status = self.status_text.clone();
+            }
+            Err(err) => self.chat.push_cell(Box::new(ErrorCell {
+                message: format!("failed to load session {session_id}: {err}"),
+            })),
+        }
+    }
+
+    fn push_message_cell(&mut self, message: telos_agent::Message) {
+        match message.role {
+            Role::System => {}
+            Role::User => {
+                let text = message.text_content();
+                if !text.is_empty() {
+                    self.chat.push_cell(Box::new(UserCell { content: text }));
+                }
+            }
+            Role::Assistant => {
+                let thinking = message.thinking_content();
+                if !thinking.is_empty() {
+                    self.chat.push_cell(Box::new(ThinkingCell {
+                        buffer: thinking,
+                        is_streaming: false,
+                    }));
+                }
+                let text = message.text_content();
+                if !text.is_empty() {
+                    self.chat.push_cell(Box::new(AgentCell { buffer: text, is_streaming: false }));
+                }
+            }
+            Role::Tool => {
+                for result in message.tool_results_iter() {
+                    let mut cell = ToolCallCell::new(
+                        result.tool_call_id.clone(),
+                        result.name.clone(),
+                        result.content.to_string(),
+                    );
+                    cell.set_completed(!result.is_error);
+                    self.chat.push_cell(Box::new(cell));
+                }
+            }
+        }
+    }
+
+    fn session_ids(&self) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(&self.sessions_dir) else { return Vec::new() };
+        let mut sessions = entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let path = entry.path();
+                (path.extension().and_then(|ext| ext.to_str()) == Some("jsonl"))
+                    .then(|| path.file_stem()?.to_str().map(str::to_string))?
+            })
+            .collect::<Vec<_>>();
+        sessions.sort();
+        sessions.reverse();
+        sessions
+    }
+
+    fn show_tool_summary(&mut self) {
+        if self.tool_infos.is_empty() {
+            self.chat.push_cell(Box::new(AgentCell {
+                buffer: "No tools are registered.".to_string(),
+                is_streaming: false,
+            }));
+            return;
+        }
+        let mut lines = Vec::new();
+        lines.push("Registered tools:".to_string());
+        lines.push(String::new());
+        for tool in &self.tool_infos {
+            let aliases = if tool.aliases.is_empty() {
+                "no aliases".to_string()
+            } else {
+                format!("aliases: {}", tool.aliases.join(", "))
+            };
+            lines.push(format!("  {} ({})", tool.name, aliases));
+            if !tool.description.is_empty() {
+                lines.push(format!("    {}", tool.description));
+            }
+        }
+        self.chat.push_cell(Box::new(AgentCell { buffer: lines.join("\n"), is_streaming: false }));
     }
 
     async fn handle_turn_event(&mut self, event: TurnEvent) {
@@ -458,23 +833,10 @@ Available commands:\n\n  /tool   — configure tools\n\
             }
             TurnEvent::AssistantDelta { text } => {
                 self.status_text = "streaming…".to_string();
-                if self.chat.active_mut().is_none_or(|c| !c.is_streaming()) {
-                    // New agent turn — push a fresh streaming cell
-                    self.chat.push_cell(Box::new(AgentCell {
-                        buffer: text.clone(),
-                        is_streaming: true,
-                    }));
-                } else {
-                    self.chat.push_text(&text);
-                }
-                self.chat.scroll_to_bottom();
+                self.chat.push_agent_delta(&text);
             }
             TurnEvent::ThinkingDelta { text } => {
-                if self.chat.active_mut().is_none_or(|c| !c.is_streaming()) {
-                    self.chat.push_cell(Box::new(ThinkingCell { buffer: text.clone() }));
-                } else {
-                    self.chat.push_text(&text);
-                }
+                self.chat.push_thinking_delta(&text);
             }
             TurnEvent::ToolCall { tool_call_id, name, detail } => {
                 let label = if detail.is_empty() { name.clone() } else { detail.clone() };
@@ -494,19 +856,18 @@ Available commands:\n\n  /tool   — configure tools\n\
                 }
             }
             TurnEvent::ToolCompleted { tool_call_id, name, is_error } => {
-                // Replace the pending ToolCallCell with a completed one
-                let detail = self
-                    .chat
-                    .find_tool_call(&tool_call_id)
-                    .and_then(|c| c.as_any().downcast_ref::<ToolCallCell>())
-                    .map(|tc| tc.detail.clone())
-                    .unwrap_or_default();
-
-                self.chat.remove_tool_call(&tool_call_id);
-                let mut cell =
-                    ToolCallCell::new(tool_call_id.clone(), name.clone(), detail.clone());
-                cell.set_completed(!is_error);
-                self.chat.push_cell(Box::new(cell));
+                let detail = if let Some(cell) = self.chat.find_tool_call_mut(&tool_call_id)
+                    && let Some(tc) = cell.as_any_mut().downcast_mut::<ToolCallCell>()
+                {
+                    tc.set_completed(!is_error);
+                    tc.detail.clone()
+                } else {
+                    let mut cell =
+                        ToolCallCell::new(tool_call_id.clone(), name.clone(), String::new());
+                    cell.set_completed(!is_error);
+                    self.chat.push_cell(Box::new(cell));
+                    String::new()
+                };
 
                 if !is_error {
                     crate::memory_runtime::record_successful_tool(
@@ -526,13 +887,9 @@ Available commands:\n\n  /tool   — configure tools\n\
                 }
             }
             TurnEvent::TurnFinished { final_text, .. } => {
-                if !final_text.is_empty() {
-                    // Mark the streaming cell as done and add final text
-                    if let Some(active) = self.chat.active_mut()
-                        && active.is_streaming()
-                    {
-                        // AgentCell is no longer streaming
-                    }
+                let had_streamed_assistant = self.chat.has_active_assistant();
+                self.chat.finish_streaming_cells();
+                if !final_text.is_empty() && !had_streamed_assistant {
                     self.chat
                         .push_cell(Box::new(AgentCell { buffer: final_text, is_streaming: false }));
                 }
@@ -618,4 +975,55 @@ fn save_auto_mode(path: &std::path::Path, on: bool) -> anyhow::Result<()> {
     }
     std::fs::write(path, toml::to_string_pretty(&config)?)?;
     Ok(())
+}
+
+fn collect_tool_infos(tools: &telos_agent::ToolRegistry) -> Vec<ToolInfo> {
+    let mut infos = tools
+        .definitions()
+        .into_iter()
+        .map(|definition| {
+            let aliases = tools
+                .get(&definition.name)
+                .map(|tool| tool.aliases().iter().map(|alias| (*alias).to_string()).collect())
+                .unwrap_or_else(|_| Vec::new());
+            ToolInfo { name: definition.name, aliases, description: definition.description }
+        })
+        .collect::<Vec<_>>();
+    infos.sort_by(|a, b| a.name.cmp(&b.name));
+    infos
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    #[tokio::test]
+    async fn send_prompt_resets_cancel_flag() {
+        let cancelled = Arc::new(AtomicBool::new(true));
+        let config = telos_agent::AgentConfig {
+            cancelled: Arc::clone(&cancelled),
+            ..telos_agent::AgentConfig::default()
+        };
+        let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
+        let tools = telos_agent::ToolRegistry::new();
+        let temp = tempfile::tempdir().unwrap();
+        let memory = Arc::new(Mutex::new(MemoryStore::new(temp.path().join("memory"))));
+
+        let mut app = App::new(
+            config,
+            provider,
+            tools,
+            "telos".into(),
+            Some(temp.path()),
+            false,
+            memory,
+            ModelSwitchConfig::default(),
+        )
+        .unwrap();
+
+        app.send_prompt("hello".into()).await;
+
+        assert!(!cancelled.load(Ordering::Relaxed));
+    }
 }

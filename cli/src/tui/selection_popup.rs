@@ -89,6 +89,10 @@ impl Overlay for SelectionPopup<'_> {
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> OverlayAction {
+        // Guard: empty items — nothing to select.
+        if self.items.is_empty() {
+            return OverlayAction::None;
+        }
         match key.code {
             KeyCode::Up => {
                 if self.selected > 0 {

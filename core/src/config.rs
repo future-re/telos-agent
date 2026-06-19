@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::approval::ApprovalHandler;
 use crate::compaction::CompactionStrategy;
@@ -15,6 +15,66 @@ use crate::diagnostics::ToolDiagnosticsSink;
 use crate::error::AgentError;
 use crate::hooks::HookRegistry;
 use crate::storage::Storage;
+
+/// Shared cancellation state for one agent runtime.
+///
+/// The atomic flag preserves cheap synchronous checks, while the notify handle
+/// wakes async waits that would otherwise remain parked until a provider or
+/// tool produces another event.
+#[derive(Clone, Debug)]
+pub struct CancellationState {
+    flag: Arc<AtomicBool>,
+    notify: Arc<tokio::sync::Notify>,
+}
+
+impl CancellationState {
+    pub fn new() -> Self {
+        Self {
+            flag: Arc::new(AtomicBool::new(false)),
+            notify: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+
+    pub fn from_flag(flag: Arc<AtomicBool>) -> Self {
+        Self { flag, notify: Arc::new(tokio::sync::Notify::new()) }
+    }
+
+    pub fn flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.flag)
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.flag.load(Ordering::Relaxed)
+    }
+
+    pub fn cancel(&self) {
+        self.flag.store(true, Ordering::Relaxed);
+        self.notify.notify_waiters();
+    }
+
+    pub fn reset(&self) {
+        self.flag.store(false, Ordering::Relaxed);
+    }
+
+    pub async fn cancelled(&self) {
+        if self.is_cancelled() {
+            return;
+        }
+
+        loop {
+            self.notify.notified().await;
+            if self.is_cancelled() {
+                return;
+            }
+        }
+    }
+}
+
+impl Default for CancellationState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Workflow path — the agent tailors its runtime behaviour and prompt guidance
 /// to match the expected scope and risk of the task.
@@ -87,9 +147,9 @@ pub struct AgentConfig {
     /// Whether to automatically validate tool arguments against the tool's
     /// `input_schema` after the tool's own `validate` method runs.
     pub auto_validate_schema: bool,
-    /// Shared cancellation flag. Set to `true` from another task to cancel the
-    /// running turn as soon as the next checkpoint is reached.
-    pub cancelled: Arc<AtomicBool>,
+    /// Shared cancellation state. Hosts call `cancel()` to interrupt a running
+    /// turn and `reset()` before starting the next turn.
+    pub cancellation: CancellationState,
     /// Per-tool execution timeout in milliseconds. When set, any tool that runs
     /// longer than this will be interrupted and its result will be an
     /// `is_error: true` timeout so the model can recover.
@@ -128,7 +188,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("token_budget", &self.token_budget)
             .field("retry", &self.retry)
             .field("auto_validate_schema", &self.auto_validate_schema)
-            .field("cancelled", &self.cancelled)
+            .field("cancellation", &self.cancellation)
             .field("tool_timeout_ms", &self.tool_timeout_ms)
             .field("max_file_read_bytes", &self.max_file_read_bytes)
             .field("skill_registry", &self.skill_registry.as_ref().map(|_| "<set>"))
@@ -161,7 +221,7 @@ impl Default for AgentConfig {
             token_budget: None,
             retry: RetryConfig::default(),
             auto_validate_schema: true,
-            cancelled: Arc::new(AtomicBool::new(false)),
+            cancellation: CancellationState::new(),
             tool_timeout_ms: None,
             max_file_read_bytes: 50 * 1024 * 1024,
             skill_registry: None,
@@ -239,6 +299,16 @@ impl RetryConfig {
 }
 
 impl AgentConfig {
+    /// Request cancellation and wake any runtime await that is listening for it.
+    pub fn request_cancel(&self) {
+        self.cancellation.cancel();
+    }
+
+    /// Clear a previous cancellation request before starting a new turn.
+    pub fn reset_cancel(&self) {
+        self.cancellation.reset();
+    }
+
     /// Validate configuration values and return a structured error for any
     /// dangerous or nonsensical combination.
     pub fn validate(&self) -> Result<(), AgentError> {

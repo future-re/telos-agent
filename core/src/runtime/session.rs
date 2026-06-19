@@ -298,7 +298,7 @@ impl AgentSession {
 
         loop {
             attempts += 1;
-            if self.config.cancelled.load(Ordering::Relaxed) {
+            if self.config.cancellation.is_cancelled() {
                 return Err(AgentError::Cancelled);
             }
 
@@ -325,9 +325,13 @@ impl AgentSession {
             let mut text_buf: Option<String> = None;
             let mut thinking_buf: Option<String> = None;
             let mut stream_error: Option<AgentError> = None;
+            let cancellation = self.config.cancellation.clone();
 
-            while let Some(event) = stream.next().await {
-                if self.config.cancelled.load(Ordering::Relaxed) {
+            while let Some(event) = tokio::select! {
+                _ = cancellation.cancelled() => return Err(AgentError::Cancelled),
+                event = stream.next() => event,
+            } {
+                if self.config.cancellation.is_cancelled() {
                     return Err(AgentError::Cancelled);
                 }
                 match event {
@@ -379,7 +383,11 @@ impl AgentSession {
                         max_retries: self.config.retry.max_retries,
                         delay_ms: delay.as_millis() as u64,
                     });
-                    tokio::time::sleep(delay).await;
+                    let cancellation = self.config.cancellation.clone();
+                    tokio::select! {
+                        _ = cancellation.cancelled() => return Err(AgentError::Cancelled),
+                        _ = tokio::time::sleep(delay) => {}
+                    }
                     continue;
                 }
                 if e.is_retryable() {
@@ -465,7 +473,11 @@ impl AgentSession {
         ));
 
         let mut tool_results = Vec::new();
-        while let Some(item) = execution.next().await {
+        let cancellation = self.config.cancellation.clone();
+        while let Some(item) = tokio::select! {
+            _ = cancellation.cancelled() => return Err(AgentError::Cancelled),
+            item = execution.next() => item,
+        } {
             match item {
                 ToolExecutionStreamItem::Event(event) => {
                     let turn_event = match event {
@@ -582,7 +594,7 @@ impl AgentSession {
                 iterations += 1;
                 self.metrics.add_iteration();
 
-                if self.config.cancelled.load(Ordering::Relaxed) {
+                if self.config.cancellation.is_cancelled() {
                     warn!("turn cancelled during iteration {}", iterations);
                     Err(AgentError::Cancelled)?;
                 }
@@ -688,7 +700,7 @@ impl AgentSession {
                     break;
                 }
 
-                if self.config.cancelled.load(Ordering::Relaxed) {
+                if self.config.cancellation.is_cancelled() {
                     Err(AgentError::Cancelled)?;
                 }
 

@@ -6,6 +6,7 @@
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
@@ -97,8 +98,12 @@ Avoid commands that require superuser privileges unless explicitly instructed.",
             // would leak secrets (API keys, tokens) to arbitrary tool calls.
             .env_clear()
             .envs(context.env.iter());
+        #[cfg(unix)]
+        {
+            child.process_group(0);
+        }
         child.kill_on_drop(true);
-        let output = timeout(Duration::from_millis(timeout_ms), child.output())
+        let output = timeout(Duration::from_millis(timeout_ms), run_shell_child(child))
             .await
             .map_err(|_| AgentError::ToolExecution {
                 tool: "Bash".into(),
@@ -128,6 +133,62 @@ Avoid commands that require superuser privileges unless explicitly instructed.",
             "stdout": trim_large_output(&stdout),
             "stderr": trim_large_output(&stderr),
         })))
+    }
+}
+
+async fn run_shell_child(mut command: Command) -> std::io::Result<std::process::Output> {
+    command.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+    let mut child = command.spawn()?;
+    let mut guard = ProcessCleanupGuard::new(&child);
+    let mut stdout = child.stdout.take().expect("stdout was piped");
+    let mut stderr = child.stderr.take().expect("stderr was piped");
+
+    let stdout_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        stdout.read_to_end(&mut buf).await.map(|_| buf)
+    });
+    let stderr_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        stderr.read_to_end(&mut buf).await.map(|_| buf)
+    });
+
+    let status = child.wait().await?;
+    guard.disarm();
+    let stdout = stdout_task.await.map_err(std::io::Error::other)??;
+    let stderr = stderr_task.await.map_err(std::io::Error::other)??;
+
+    Ok(std::process::Output { status, stdout, stderr })
+}
+
+struct ProcessCleanupGuard {
+    #[cfg(unix)]
+    process_group_id: Option<i32>,
+}
+
+impl ProcessCleanupGuard {
+    fn new(child: &tokio::process::Child) -> Self {
+        Self {
+            #[cfg(unix)]
+            process_group_id: child.id().map(|pid| pid as i32),
+        }
+    }
+
+    fn disarm(&mut self) {
+        #[cfg(unix)]
+        {
+            self.process_group_id = None;
+        }
+    }
+}
+
+impl Drop for ProcessCleanupGuard {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(pgid) = self.process_group_id {
+            unsafe {
+                libc::kill(-pgid, libc::SIGKILL);
+            }
+        }
     }
 }
 

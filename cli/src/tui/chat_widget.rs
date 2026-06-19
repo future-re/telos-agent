@@ -266,6 +266,8 @@ impl ChatWidget {
         // Visible range: which total-line indices are visible.
         let visible_end = total.saturating_sub(self.scroll_offset as u16);
         let visible_start = visible_end.saturating_sub(area_height);
+        let visible_window_height = visible_end.saturating_sub(visible_start);
+        let bottom_padding = area_height.saturating_sub(visible_window_height);
 
         let mut acc = 0u16; // accumulated line count before current cell
 
@@ -295,7 +297,7 @@ impl ChatWidget {
             let visible_height = visible_part_end - visible_part_start;
 
             let top_skip = visible_part_start - acc;
-            let display_y = area.y + (visible_part_start - visible_start);
+            let display_y = area.y + bottom_padding + (visible_part_start - visible_start);
 
             let cell_area =
                 Rect { x: area.x, y: display_y, width: area.width, height: visible_height };
@@ -315,8 +317,18 @@ impl Default for ChatWidget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::history_cell::UserCell;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+
+    fn rendered_row(terminal: &Terminal<TestBackend>, row: u16) -> String {
+        let width = terminal.backend().buffer().area.width as usize;
+        let start = row as usize * width;
+        terminal.backend().buffer().content[start..start + width]
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>()
+    }
 
     #[test]
     fn assistant_and_thinking_deltas_use_separate_cells() {
@@ -365,6 +377,23 @@ mod tests {
         assert!(tool.expanded);
         assert_eq!(tool.progress_messages, vec!["line 1"]);
         assert_eq!(tool.result_lines, vec!["ok", "next"]);
+    }
+
+    #[test]
+    fn short_history_renders_against_bottom_edge() {
+        let mut chat = ChatWidget::new();
+        chat.push_cell(Box::new(UserCell { content: "hello".to_string() }));
+
+        let backend = TestBackend::new(20, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal.draw(|frame| chat.render(frame, frame.area(), &theme)).unwrap();
+
+        assert!(rendered_row(&terminal, 0).trim().is_empty());
+        assert!(rendered_row(&terminal, 1).trim().is_empty());
+        assert!(rendered_row(&terminal, 2).trim().is_empty());
+        assert!(rendered_row(&terminal, 3).trim().is_empty());
+        assert!(rendered_row(&terminal, 4).contains("▸ hello"));
     }
 
     #[test]

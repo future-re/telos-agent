@@ -79,6 +79,7 @@ pub use codeql::{
     CodeQLTool, CodeqlConfig, CodeqlDatabase, CodeqlSection, SarifParser, SarifResult,
 };
 // Metrics — session-level counters accumulated by the runtime.
+pub use config::CancellationState;
 pub use metrics::SessionMetrics;
 // Test helper — pre-canned [`ModelProvider`] for unit tests.
 pub use mock::MockProvider;

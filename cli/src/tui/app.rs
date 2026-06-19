@@ -75,8 +75,8 @@ pub struct App {
     pub turn_active: bool,
     /// Saved base status text — restored after each turn.
     base_status: String,
-    /// Shared cancellation flag — set by Ctrl+C and read by the background task.
-    cancel_flag: Arc<AtomicBool>,
+    /// Shared cancellation state — set by Ctrl+C and read by the background task.
+    cancellation: telos_agent::CancellationState,
     /// Auto-approve mode — toggle with Shift+Tab.
     auto_mode: Arc<AtomicBool>,
     /// When the current turn started (for elapsed display).
@@ -135,8 +135,8 @@ impl App {
         config.storage = Some(storage.clone());
         let app_storage: Arc<dyn Storage> = storage.clone();
 
-        // Extract the cancellation flag before moving config into the spawned task.
-        let cancel_flag = Arc::clone(&config.cancelled);
+        // Extract cancellation state before moving config into the spawned task.
+        let cancellation = config.cancellation.clone();
         let token_budget_max = config.token_budget.as_ref().map(|b| b.max_tokens as u64);
 
         // Auto-approve mode — shared between UI and approval handler.
@@ -250,7 +250,7 @@ impl App {
             tool_activity: ToolActivityPanel::new(),
             overlays: Vec::new(),
             turn_active: false,
-            cancel_flag,
+            cancellation,
             auto_mode,
             turn_started: None,
             turn_input_tokens: 0,
@@ -286,7 +286,7 @@ impl App {
                         return Ok(());
                     }
                     (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                        self.cancel_flag.store(true, Ordering::Relaxed);
+                        self.cancellation.cancel();
                         self.turn_active = false;
                         self.turn_started = None;
                         self.status_text = self.base_status.clone();
@@ -557,7 +557,7 @@ impl App {
 
     /// Send a user prompt to the background agent task.
     pub async fn send_prompt(&mut self, prompt: String) {
-        self.cancel_flag.store(false, Ordering::Relaxed);
+        self.cancellation.reset();
         crate::memory_runtime::record_user_preference(&self.memory, &prompt).await;
         self.chat.push_cell(Box::new(UserCell { content: prompt.clone() }));
         self.tool_activity.clear();
@@ -835,7 +835,7 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
         self.turn_input_tokens = 0;
         self.turn_output_tokens = 0;
         self.turn_started = None;
-        self.cancel_flag.store(false, Ordering::Relaxed);
+        self.cancellation.reset();
         let _ = self.turn_tx.send(BackgroundCommand::NewSession);
         self.status_text = "telos · new session".to_string();
         self.base_status = self.status_text.clone();
@@ -887,7 +887,7 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
                 for message in messages {
                     self.push_message_cell(message);
                 }
-                self.cancel_flag.store(false, Ordering::Relaxed);
+                self.cancellation.reset();
                 let _ = self.turn_tx.send(BackgroundCommand::ResumeSession(session_id.to_string()));
                 self.status_text = format!("telos · session {session_id}");
                 self.base_status = self.status_text.clone();
@@ -1208,10 +1208,9 @@ mod tests {
     #[tokio::test]
     async fn send_prompt_resets_cancel_flag() {
         let cancelled = Arc::new(AtomicBool::new(true));
-        let config = telos_agent::AgentConfig {
-            cancelled: Arc::clone(&cancelled),
-            ..telos_agent::AgentConfig::default()
-        };
+        let cancellation = telos_agent::CancellationState::from_flag(Arc::clone(&cancelled));
+        let config =
+            telos_agent::AgentConfig { cancellation, ..telos_agent::AgentConfig::default() };
         let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
         let tools = telos_agent::ToolRegistry::new();
         let temp = tempfile::tempdir().unwrap();

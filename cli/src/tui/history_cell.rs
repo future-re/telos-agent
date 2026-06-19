@@ -83,32 +83,26 @@ impl HistoryCell for UserCell {
     }
 
     fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let lines: Vec<Line> = self
-            .content
-            .lines()
-            .map(|line| {
-                Line::from(vec![
-                    Span::styled("▸ ", theme.user_style()),
-                    Span::styled(line.to_string(), theme.user_style()),
-                ])
-            })
-            .collect();
+        let mut lines: Vec<Line> = vec![Line::from("")];
+        lines.extend(self.content.lines().map(|line| {
+            Line::from(vec![
+                Span::styled("▸ ", theme.user_style()),
+                Span::styled(line.to_string(), theme.user_style()),
+            ])
+        }));
 
         let text = Text::from(lines);
         frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), area);
     }
 
     fn render_scrolled(&self, frame: &mut Frame, area: Rect, theme: &Theme, top_skip: u16) {
-        let lines: Vec<Line> = self
-            .content
-            .lines()
-            .map(|line| {
-                Line::from(vec![
-                    Span::styled("▸ ", theme.user_style()),
-                    Span::styled(line.to_string(), theme.user_style()),
-                ])
-            })
-            .collect();
+        let mut lines: Vec<Line> = vec![Line::from("")];
+        lines.extend(self.content.lines().map(|line| {
+            Line::from(vec![
+                Span::styled("▸ ", theme.user_style()),
+                Span::styled(line.to_string(), theme.user_style()),
+            ])
+        }));
 
         let text = Text::from(lines);
         frame.render_widget(

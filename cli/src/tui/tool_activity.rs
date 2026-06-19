@@ -133,14 +133,16 @@ impl ToolActivityItem {
             }
 
             let preview_lines = expanded_result_line_budget(lines.len(), self.result_lines.len());
-            push_result_preview(
-                &mut lines,
-                &self.result_lines,
-                preview_lines,
-                width,
-                theme,
-                self.expanded,
-            );
+            if remaining_line_budget(lines.len()) > 0 {
+                push_result_preview(
+                    &mut lines,
+                    &self.result_lines,
+                    preview_lines,
+                    width,
+                    theme,
+                    self.expanded,
+                );
+            }
         }
 
         lines
@@ -428,7 +430,14 @@ impl ToolActivityPanel {
 
     fn select_latest_if_became_expandable(&mut self, idx: usize, was_expandable: bool) {
         if !was_expandable && idx + 1 == self.items.len() && self.items[idx].can_expand() {
+            let keep_expanded = self
+                .selected_idx
+                .and_then(|selected| self.items.get(selected))
+                .is_some_and(|item| item.expanded);
             self.set_selected_idx(Some(idx));
+            if keep_expanded {
+                self.items[idx].expanded = true;
+            }
         }
     }
 
@@ -592,6 +601,25 @@ mod tests {
     }
 
     #[test]
+    fn expanded_activity_stays_capped_when_approvals_fill_budget_before_result() {
+        let mut panel = ToolActivityPanel::new();
+        panel.push_call("call-1".into(), "Bash".into(), "deploy".into());
+        for idx in 0..MAX_VISIBLE_ITEM_LINES {
+            panel.approval_requested("call-1", "Bash".into(), format!("approval {idx}"));
+        }
+        panel.add_result_content(
+            "call-1",
+            &serde_json::json!({"stdout": "line 1\nline 2\nline 3\n", "stderr": ""}),
+            false,
+        );
+
+        assert!(panel.toggle_selected());
+        let expanded = panel.render_lines(80, &Theme::default());
+
+        assert!(expanded.len() <= MAX_VISIBLE_LINES as usize);
+    }
+
+    #[test]
     fn latest_non_shell_item_becomes_focused_when_it_gains_result_content() {
         let mut panel = ToolActivityPanel::new();
         panel.push_call("old".into(), "Read".into(), "old.md".into());
@@ -603,6 +631,38 @@ mod tests {
 
         let rendered = rendered_text(&panel.render_lines(80, &Theme::default()));
         assert!(rendered.contains("Read new.md"));
+        assert!(!rendered.contains("old progress"));
+    }
+
+    #[test]
+    fn latest_non_shell_item_becomes_focused_when_it_gains_progress() {
+        let mut panel = ToolActivityPanel::new();
+        panel.push_call("old".into(), "Read".into(), "old.md".into());
+        panel.set_progress("old", "old progress".into());
+        assert!(panel.toggle_selected());
+
+        panel.push_call("new".into(), "Read".into(), "new.md".into());
+        panel.set_progress("new", "new progress".into());
+
+        let rendered = rendered_text(&panel.render_lines(80, &Theme::default()));
+        assert!(rendered.contains("Read new.md"));
+        assert!(rendered.contains("new progress"));
+        assert!(!rendered.contains("old progress"));
+    }
+
+    #[test]
+    fn latest_non_shell_item_becomes_focused_when_it_gains_approval_annotation() {
+        let mut panel = ToolActivityPanel::new();
+        panel.push_call("old".into(), "Read".into(), "old.md".into());
+        panel.set_progress("old", "old progress".into());
+        assert!(panel.toggle_selected());
+
+        panel.push_call("new".into(), "Read".into(), "new.md".into());
+        panel.approval_requested("new", "Read".into(), "needs approval".into());
+
+        let rendered = rendered_text(&panel.render_lines(80, &Theme::default()));
+        assert!(rendered.contains("Read new.md"));
+        assert!(rendered.contains("approval requested: needs approval"));
         assert!(!rendered.contains("old progress"));
     }
 

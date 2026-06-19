@@ -15,9 +15,10 @@ use tokio::sync::mpsc;
 
 use crate::tui::approval::PendingApproval;
 use crate::tui::chat_widget::ChatWidget;
+use crate::tui::command_popup::SlashCommand;
 use crate::tui::event::Event;
 use crate::tui::history_cell::*;
-use crate::tui::input_panel::InputPanel;
+use crate::tui::input_panel::{InputEvent, InputPanel};
 use crate::tui::status_bar;
 use crate::tui::theme::Theme;
 
@@ -220,7 +221,7 @@ impl App {
                         return Ok(());
                     }
                     Mode::Normal => {
-                        // Scroll keys: plain arrow keys scroll chat.
+                        // Scroll keys
                         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                         match (key.code, ctrl) {
                             (KeyCode::PageUp, _) => {
@@ -239,13 +240,18 @@ impl App {
                                 self.chat.scroll_down(1);
                                 return Ok(());
                             }
-                            // Ctrl+Up/Down → input history (handled below).
                             _ => {}
                         }
 
-                        // Input handling (Ctrl+Up/Down → history, other keys → typing).
-                        if let Some(prompt) = self.input.handle_key(key) {
-                            self.send_prompt(prompt).await;
+                        // Input handling with InputEvent
+                        match self.input.handle_key(key) {
+                            InputEvent::Submit(prompt) => {
+                                self.send_prompt(prompt).await;
+                            }
+                            InputEvent::SlashCommand(cmd) => {
+                                self.handle_slash_command(cmd).await;
+                            }
+                            InputEvent::None => {}
                         }
                     }
                     Mode::Streaming => {
@@ -369,6 +375,42 @@ impl App {
         }
         if self.pending_approvals.is_empty() {
             self.mode = if self.turn_active { Mode::Streaming } else { Mode::Normal };
+        }
+    }
+
+    #[allow(unused)]
+    async fn handle_slash_command(&mut self, cmd: SlashCommand) {
+        match cmd {
+            SlashCommand::Help => {
+                let help_text = "\
+Available commands:\n\n  /tool   — configure tools\n\
+  /model  — switch model\n\
+  /help   — show this help\n\
+  /clear  — clear conversation\n\
+  /session — session management\n\
+  /auto   — toggle auto-approve mode";
+                self.chat.push_cell(Box::new(UserCell { content: format!("/{cmd:?}") }));
+                self.chat.push_cell(Box::new(AgentCell {
+                    buffer: help_text.to_string(),
+                    is_streaming: false,
+                }));
+            }
+            SlashCommand::Clear => {
+                // App already has Ctrl+L for clear; /clear does the same
+                self.chat.clear();
+                self.chat.scroll_to_bottom();
+            }
+            SlashCommand::Auto => {
+                let on = !self.auto_mode.load(Ordering::Relaxed);
+                self.auto_mode.store(on, Ordering::Relaxed);
+                self.update_auto_mode_status();
+            }
+            _ => {
+                self.chat.push_cell(Box::new(AgentCell {
+                    buffer: format!("Command `/{cmd:?}` not yet implemented").to_string(),
+                    is_streaming: false,
+                }));
+            }
         }
     }
 

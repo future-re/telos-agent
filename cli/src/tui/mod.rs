@@ -6,6 +6,7 @@ pub mod event;
 pub mod history_cell;
 pub mod input_panel;
 pub mod markdown;
+pub mod overlay;
 pub mod status_bar;
 pub mod theme;
 

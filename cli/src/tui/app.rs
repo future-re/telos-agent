@@ -1,10 +1,7 @@
 use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-use std::collections::VecDeque;
+use ratatui::style::Style;
 use std::pin::pin;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -19,6 +16,7 @@ use crate::tui::command_popup::SlashCommand;
 use crate::tui::event::Event;
 use crate::tui::history_cell::*;
 use crate::tui::input_panel::{InputEvent, InputPanel};
+use crate::tui::overlay::{ApprovalOverlay, Overlay, OverlayAction};
 use crate::tui::status_bar;
 use crate::tui::theme::Theme;
 
@@ -45,8 +43,8 @@ pub struct App {
     pub chat: ChatWidget,
     /// Input panel at the bottom.
     pub input: InputPanel,
-    /// Approval requests waiting for user decision.
-    pub pending_approvals: VecDeque<PendingApproval>,
+    /// Active overlay stack (topmost overlay rendered last).
+    pub overlays: Vec<Box<dyn Overlay>>,
     /// Whether a background turn is currently running.
     pub turn_active: bool,
     /// Saved base status text — restored after each turn.
@@ -149,7 +147,7 @@ impl App {
             base_status: status_text,
             chat: ChatWidget::new(),
             input: InputPanel::new(),
-            pending_approvals: VecDeque::new(),
+            overlays: Vec::new(),
             turn_active: false,
             cancel_flag,
             auto_mode,
@@ -207,16 +205,22 @@ impl App {
 
                 match self.mode {
                     Mode::Approving => {
-                        match key.code {
-                            KeyCode::Char('a') | KeyCode::Char('y') => self.approve_current(),
-                            KeyCode::Char('d') | KeyCode::Char('n') => {
-                                self.deny_current("denied by user");
+                        if let Some(overlay) = self.overlays.last_mut() {
+                            match overlay.handle_key(key) {
+                                OverlayAction::Pop => {
+                                    self.overlays.pop();
+                                    self.mode = if self.overlays.is_empty() {
+                                        if self.turn_active {
+                                            Mode::Streaming
+                                        } else {
+                                            Mode::Normal
+                                        }
+                                    } else {
+                                        Mode::Approving
+                                    };
+                                }
+                                _ => {}
                             }
-                            KeyCode::Char('e') => {
-                                // Future: open editor to modify arguments.
-                                self.deny_current("edit requested");
-                            }
-                            _ => {}
                         }
                         return Ok(());
                     }
@@ -293,7 +297,7 @@ impl App {
                     }
                 }
                 while let Ok(pending) = self.approval_rx.try_recv() {
-                    self.pending_approvals.push_back(pending);
+                    self.overlays.push(Box::new(ApprovalOverlay::new(pending)));
                     self.mode = Mode::Approving;
                 }
             }
@@ -354,28 +358,6 @@ impl App {
         let _ = self.turn_tx.send(prompt);
         self.mode = Mode::Streaming;
         self.turn_active = true;
-    }
-
-    /// Approve the current pending approval request.
-    pub fn approve_current(&mut self) {
-        if let Some(pending) = self.pending_approvals.pop_front() {
-            let _ = pending.respond.send(telos_agent::ApprovalDecision::Allow);
-        }
-        if self.pending_approvals.is_empty() {
-            self.mode = if self.turn_active { Mode::Streaming } else { Mode::Normal };
-        }
-    }
-
-    /// Deny the current pending approval request with a reason.
-    pub fn deny_current(&mut self, reason: &str) {
-        if let Some(pending) = self.pending_approvals.pop_front() {
-            let _ = pending
-                .respond
-                .send(telos_agent::ApprovalDecision::Deny { reason: reason.to_string() });
-        }
-        if self.pending_approvals.is_empty() {
-            self.mode = if self.turn_active { Mode::Streaming } else { Mode::Normal };
-        }
     }
 
     #[allow(unused)]
@@ -524,141 +506,18 @@ Available commands:\n\n  /tool   — configure tools\n\
         let area = frame.area();
         let theme = Theme::default();
 
-        // ── Build constraints dynamically ─────────────────────────────
-        let popup_h = if self.mode == Mode::Approving
-            && let Some(pending) = self.pending_approvals.front()
-        {
-            let max_w = area.width.saturating_sub(10);
-            let inner_w = (max_w.saturating_sub(2)).max(40) as usize;
-            // Count content lines for height.
-            let content_lines = approval_content_lines(
-                &pending.request.tool_name,
-                &pending.request.arguments,
-                inner_w,
-            );
-            // Title(1) + content + hints(1) + border(2)
-            let h = 1 + content_lines + 1 + 2;
-            let max_h = ((area.height as f32) * 0.5) as u16;
-            Some(h.min(max_h as usize).max(8) as u16)
-        } else {
-            None
-        };
-
-        // Layout: chat | popup? | input | status
-        let mut constraints: Vec<Constraint> = vec![Constraint::Min(0)]; // chat
-        if let Some(h) = popup_h {
-            constraints.push(Constraint::Length(h + 1)); // popup + padding
-        }
-        constraints.push(Constraint::Length(5)); // input panel
-        constraints.push(Constraint::Length(1)); // status bar (bottom)
+        // Layout: chat | input | status
+        let constraints = vec![
+            Constraint::Min(0),    // chat
+            Constraint::Length(5), // input panel
+            Constraint::Length(1), // status bar
+        ];
 
         let layout =
             Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
 
-        let mut idx = 0;
-
-        self.chat.render(frame, layout[idx], &theme);
-        idx += 1;
-
-        // ── Render approval popup in its own layout slot ──────────────
-        if let Some(_h) = popup_h
-            && let Some(pending) = self.pending_approvals.front()
-        {
-            let popup_area = layout[idx];
-            idx += 1;
-
-            let args = &pending.request.arguments;
-            let tool_name = &pending.request.tool_name;
-
-            let block = Block::default()
-                .title(" Approval required ")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.tool_pending_fg))
-                .style(Style::default().bg(Color::Rgb(20, 22, 30)));
-
-            let mut text_lines: Vec<Line> = Vec::new();
-
-            // Tool name line.
-            text_lines.push(Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled(
-                    tool_name.clone(),
-                    Style::default().fg(theme.tool_pending_fg).add_modifier(Modifier::BOLD),
-                ),
-            ]));
-
-            // ── Tool-specific content ────────────────────────────
-            let tool_lower = tool_name.to_lowercase();
-            if tool_lower == "bash" || tool_lower == "shell" {
-                if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
-                    text_lines.push(Line::from(""));
-                    text_lines.push(Line::from(Span::styled(
-                        format!("  $ {}", truncate_for_popup(cmd, 200)),
-                        Style::default().fg(Color::Rgb(180, 220, 180)),
-                    )));
-                }
-            } else if tool_lower == "edit" {
-                let file = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-                let old = args.get("old_string").and_then(|v| v.as_str()).unwrap_or("");
-                let new = args.get("new_string").and_then(|v| v.as_str()).unwrap_or("");
-                text_lines.push(Line::from(Span::styled(
-                    format!("  File: {}", truncate_for_popup(file, 120)),
-                    Style::default().fg(Color::Gray),
-                )));
-                text_lines.push(Line::from(""));
-                text_lines.push(Line::from(Span::styled(
-                    format!("  - {}", truncate_for_popup(old, 150)),
-                    Style::default().fg(Color::Rgb(220, 120, 120)),
-                )));
-                text_lines.push(Line::from(Span::styled(
-                    format!("  + {}", truncate_for_popup(new, 150)),
-                    Style::default().fg(Color::Rgb(120, 220, 120)),
-                )));
-            } else if tool_lower == "write" {
-                let file = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
-                let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                text_lines.push(Line::from(Span::styled(
-                    format!("  File: {}", truncate_for_popup(file, 120)),
-                    Style::default().fg(Color::Gray),
-                )));
-                let preview = truncate_for_popup(content, 300);
-                if !preview.is_empty() {
-                    text_lines.push(Line::from(""));
-                    for pline in preview.lines().take(6) {
-                        text_lines.push(Line::from(Span::styled(
-                            format!("  | {}", pline),
-                            Style::default().fg(Color::DarkGray),
-                        )));
-                    }
-                }
-            } else {
-                // Generic: show pretty JSON.
-                let args_str =
-                    serde_json::to_string_pretty(args).unwrap_or_else(|_| args.to_string());
-                text_lines.push(Line::from(""));
-                for aline in args_str.lines().take(20) {
-                    text_lines.push(Line::from(Span::styled(
-                        format!("  {}", aline),
-                        Style::default().fg(Color::Gray),
-                    )));
-                }
-            }
-
-            text_lines.push(Line::from(""));
-            text_lines.push(Line::from(Span::styled(
-                "  [a/y] approve  [d/n] deny  [e] edit-request  ",
-                Style::default().fg(Color::White),
-            )));
-
-            let text = Text::from(text_lines);
-            let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
-
-            frame.render_widget(Clear, popup_area);
-            frame.render_widget(paragraph, popup_area);
-        }
-
-        self.input.render(frame, layout[idx], self.mode == Mode::Normal);
-        idx += 1;
+        self.chat.render(frame, layout[0], &theme);
+        self.input.render(frame, layout[1], self.mode == Mode::Normal);
 
         // ── Status bar at the bottom ─────────────────────────────────
         let status = if self.turn_active {
@@ -673,66 +532,12 @@ Available commands:\n\n  /tool   — configure tools\n\
             self.status_text.clone()
         };
 
-        status_bar::render(frame, layout[idx], &status);
-    }
-}
+        status_bar::render(frame, layout[2], &status);
 
-/// Count how many lines `text` will occupy when wrapped at `width` columns.
-fn count_wrapped_lines(text: &str, width: usize) -> usize {
-    text.lines()
-        .map(|line| {
-            let chars = line.chars().count();
-            if chars == 0 { 1 } else { (chars + width.saturating_sub(1)) / width }
-        })
-        .sum::<usize>()
-        .max(1)
-}
-
-fn approval_content_lines(tool_name: &str, args: &serde_json::Value, width: usize) -> usize {
-    let tool_lower = tool_name.to_lowercase();
-    let mut lines = 1usize; // tool name line
-
-    if tool_lower == "bash" || tool_lower == "shell" {
-        if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
-            lines += 1; // blank
-            lines += count_wrapped_lines(&format!("  $ {}", truncate_for_popup(cmd, 200)), width);
+        // ── Render active overlay on top ─────────────────────────────
+        if let Some(overlay) = self.overlays.last() {
+            overlay.render(frame, area, &theme);
         }
-    } else if tool_lower == "edit" {
-        let file = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
-        let old = args.get("old_string").and_then(|v| v.as_str()).unwrap_or("");
-        let new = args.get("new_string").and_then(|v| v.as_str()).unwrap_or("");
-        lines += count_wrapped_lines(&format!("  File: {}", truncate_for_popup(file, 120)), width);
-        lines += 1;
-        lines += count_wrapped_lines(&format!("  - {}", truncate_for_popup(old, 150)), width);
-        lines += count_wrapped_lines(&format!("  + {}", truncate_for_popup(new, 150)), width);
-    } else if tool_lower == "write" {
-        let file = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
-        let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-        lines += count_wrapped_lines(&format!("  File: {}", truncate_for_popup(file, 120)), width);
-        let preview = truncate_for_popup(content, 300);
-        if !preview.is_empty() {
-            lines += 1;
-            for pline in preview.lines().take(6) {
-                lines += count_wrapped_lines(&format!("  | {}", pline), width);
-            }
-        }
-    } else {
-        let args_str = serde_json::to_string_pretty(args).unwrap_or_else(|_| args.to_string());
-        lines += 1;
-        for aline in args_str.lines().take(20) {
-            lines += count_wrapped_lines(&format!("  {}", aline), width);
-        }
-    }
-    lines
-}
-
-fn truncate_for_popup(s: &str, max_chars: usize) -> String {
-    let s = s.trim();
-    if s.chars().count() <= max_chars {
-        s.to_string()
-    } else {
-        let keep = max_chars.saturating_sub(1);
-        format!("{}…", s.chars().take(keep).collect::<String>())
     }
 }
 
@@ -754,20 +559,4 @@ fn save_auto_mode(path: &std::path::Path, on: bool) -> anyhow::Result<()> {
     }
     std::fs::write(path, toml::to_string_pretty(&config)?)?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::truncate_for_popup;
-
-    #[test]
-    fn truncate_for_popup_handles_utf8_boundaries() {
-        let truncated = truncate_for_popup("中文命令🙂测试", 5);
-        assert_eq!(truncated, "中文命令…");
-    }
-
-    #[test]
-    fn truncate_for_popup_leaves_short_text_unchanged() {
-        assert_eq!(truncate_for_popup("hello", 10), "hello");
-    }
 }

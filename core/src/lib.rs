@@ -81,7 +81,8 @@ pub use permissions::{PermissionEngine, PermissionRule, RuleDecision};
 // Provider — the trait downstream LLM backends implement, plus built-in impls.
 pub use provider::{
     CompletionRequest, CompletionResponse, DeepSeekConfig, DeepSeekProvider, ErasedProvider,
-    ModelProvider, ProviderEvent, StopReason, TokenUsage,
+    ModelHint, ModelProvider, ProviderEvent, RoutedModelConfig, RoutedProvider, StopReason,
+    TokenUsage,
 };
 // Runtime — the agent session and the streaming turn loop.
 pub use runtime::{AgentSession, TurnEvent, TurnResult};

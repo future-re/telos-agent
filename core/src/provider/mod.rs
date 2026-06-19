@@ -22,7 +22,9 @@ mod types;
 pub use deepseek::{DeepSeekConfig, DeepSeekProvider};
 pub use routed::{RoutedModelConfig, RoutedProvider};
 pub use traits::{ErasedProvider, ModelProvider};
-pub use types::{CompletionRequest, CompletionResponse, ProviderEvent, StopReason, TokenUsage};
+pub use types::{
+    CompletionRequest, CompletionResponse, ModelHint, ProviderEvent, StopReason, TokenUsage,
+};
 
 // Implement ModelProvider for reference-to-dyn-trait-object so that
 // `run_turn_stream` can accept `&dyn ModelProvider` through `ErasedProvider`.

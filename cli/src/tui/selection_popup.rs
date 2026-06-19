@@ -9,6 +9,9 @@ use std::borrow::Cow;
 use crate::tui::overlay::{Overlay, OverlayAction};
 use crate::tui::theme::Theme;
 
+/// Maximum visible items in the popup before scrolling kicks in.
+const MAX_VISIBLE: usize = 12;
+
 /// A generic list selection popup.
 ///
 /// Shows a scrollable list of items. User navigates with Up/Down.
@@ -38,7 +41,7 @@ impl<'a> SelectionPopup<'a> {
 
     /// The selected item text (useful for display).
     pub fn selected_item(&self) -> Option<&str> {
-        self.selected_index().map(|i| self.items[i].as_ref())
+        self.selected_index().and_then(|i| self.items.get(i).map(|s| s.as_ref()))
     }
 
     fn visible_items(&self, max_height: usize) -> &[Cow<'a, str>] {
@@ -51,7 +54,7 @@ impl<'a> SelectionPopup<'a> {
 impl Overlay for SelectionPopup<'_> {
     fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let popup_w = area.width.saturating_sub(10).clamp(30, 50);
-        let max_visible = (area.height.saturating_sub(6) as usize).min(12);
+        let max_visible = (area.height.saturating_sub(6) as usize).min(MAX_VISIBLE);
         let popup_h = (self.items.len().min(max_visible) as u16).saturating_add(3).max(5);
 
         let popup_area = Rect {
@@ -99,7 +102,7 @@ impl Overlay for SelectionPopup<'_> {
             KeyCode::Down => {
                 if self.selected + 1 < self.items.len() {
                     self.selected += 1;
-                    let max_visible: usize = 12; // matches max_visible in render
+                    let max_visible = MAX_VISIBLE;
                     if self.selected >= self.scroll_offset + max_visible {
                         self.scroll_offset =
                             self.selected.saturating_sub(max_visible.saturating_sub(1));

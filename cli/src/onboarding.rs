@@ -10,7 +10,10 @@ use crate::config::FileConfig;
 pub struct OnboardingResult {
     pub provider: ProviderArg,
     pub api_key: String,
-    pub model: String,
+    /// Thinking/reasoning model (planning, complex decisions).
+    pub thinking_model: String,
+    /// Fast/execution model (tool calls, simple operations).
+    pub fast_model: String,
 }
 
 // ── Model catalogue ────────────────────────────────────────────────────────

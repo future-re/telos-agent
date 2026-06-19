@@ -57,6 +57,10 @@ pub struct App {
     /// Tokens consumed in the current turn.
     turn_input_tokens: u64,
     turn_output_tokens: u64,
+    /// Spinner animation frame (incremented on Tick).
+    spinner_frame: usize,
+    /// Maximum tokens for the budget progress bar.
+    token_budget_max: Option<u64>,
     /// Shared memory store for tools, prompt injection, and automatic feedback.
     memory: Arc<Mutex<MemoryStore>>,
     /// Send prompts to the background agent task.
@@ -86,6 +90,7 @@ impl App {
 
         // Extract the cancellation flag before moving config into the spawned task.
         let cancel_flag = Arc::clone(&config.cancelled);
+        let token_budget_max = config.token_budget.as_ref().map(|b| b.max_tokens as u64);
 
         // Auto-approve mode — shared between UI and approval handler.
         let auto_mode = Arc::new(AtomicBool::new(auto_mode_on));
@@ -154,6 +159,8 @@ impl App {
             turn_input_tokens: 0,
             turn_output_tokens: 0,
             memory,
+            spinner_frame: 0,
+            token_budget_max,
             turn_tx: prompt_tx,
             turn_rx: event_rx,
             approval_rx,
@@ -264,6 +271,7 @@ impl App {
                 }
             }
             Event::Tick => {
+                self.spinner_frame = self.spinner_frame.wrapping_add(1);
                 while let Ok(event) = self.turn_rx.try_recv() {
                     match event {
                         Event::Turn(turn_event) => self.handle_turn_event(turn_event).await,
@@ -524,7 +532,14 @@ Available commands:\n\n  /tool   — configure tools\n\
             self.status_text.clone()
         };
 
-        status_bar::render(frame, layout[2], &status);
+        status_bar::render(
+            frame,
+            layout[2],
+            &status,
+            self.spinner_frame,
+            self.turn_input_tokens + self.turn_output_tokens,
+            self.token_budget_max,
+        );
 
         // ── Render active overlay on top ─────────────────────────────
         if let Some(overlay) = self.overlays.last() {

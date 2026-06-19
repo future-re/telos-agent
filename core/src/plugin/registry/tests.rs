@@ -227,3 +227,44 @@ fn apply_registers_plugin_tools_with_namespace() {
     let tool = tools.get("plugin__test-plugin__hello");
     assert!(tool.is_ok(), "plugin tool should be registered with namespace prefix");
 }
+
+#[test]
+fn apply_subagents_registers_plugin_agents_with_namespace() {
+    let tmp = TempDir::new().unwrap();
+    let plugin_dir = tmp.path().join("installed").join("agent-plugin@mkt");
+    std::fs::create_dir_all(plugin_dir.join("agents")).unwrap();
+
+    let manifest = serde_json::json!({
+        "name": "agent-plugin",
+        "version": "1.0.0",
+        "agents": ["./agents/auditor.md"]
+    });
+    std::fs::write(
+        plugin_dir.join("plugin.json"),
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        plugin_dir.join("agents").join("auditor.md"),
+        r#"---
+name: auditor
+description: Audit plugin-provided behavior.
+tools: [Read]
+---
+You audit plugin behavior.
+"#,
+    )
+    .unwrap();
+
+    let mut plugins = PluginRegistry::new(tmp.path());
+    plugins.discover_installed().unwrap();
+    let id = PluginId::parse("agent-plugin@mkt").unwrap();
+    plugins.enable(&id).unwrap();
+
+    let mut subagents = crate::subagent::SubagentRegistry::new();
+    plugins.apply_subagents(&mut subagents).unwrap();
+
+    let agent = subagents.get("agent-plugin:auditor").unwrap();
+    assert_eq!(agent.description, "Audit plugin-provided behavior.");
+    assert_eq!(agent.system_prompt, "You audit plugin behavior.");
+}

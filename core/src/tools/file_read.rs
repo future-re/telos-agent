@@ -167,6 +167,7 @@ mod tests {
         ToolContext {
             session_id: "test".into(),
             turn_id: 1,
+            tool_call_id: None,
             cwd,
             env: HashMap::new(),
             messages: std::sync::Arc::new(vec![]),

@@ -8,7 +8,7 @@
 use async_trait::async_trait;
 use jsonschema::Validator;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -111,6 +111,8 @@ pub enum PermissionDecision {
 pub struct ToolContext {
     pub session_id: String,
     pub turn_id: u64,
+    /// Current parent tool call id, when this context is attached to a model tool call.
+    pub tool_call_id: Option<String>,
     pub cwd: PathBuf,
     pub env: HashMap<String, String>,
     /// Snapshot of the conversation up to (but not including) this tool call.
@@ -133,6 +135,7 @@ impl ToolContext {
         Self {
             session_id: "test-session".into(),
             turn_id: 0,
+            tool_call_id: None,
             cwd: std::path::PathBuf::from("."),
             env: std::collections::HashMap::new(),
             messages: std::sync::Arc::new(Vec::new()),
@@ -275,9 +278,59 @@ impl ToolRegistry {
             .collect::<Vec<_>>()
     }
 
+    /// Return a registry containing only tools allowed by `allowed` and not denied by `denied`.
+    ///
+    /// Empty `allowed` means all canonical tools. A literal `"*"` also means all tools.
+    /// Names may be canonical names or aliases.
+    pub fn filtered(&self, allowed: &[String], denied: &[String]) -> Self {
+        let allowed_all = allowed.is_empty() || allowed.iter().any(|name| name == "*");
+        let allowed_canonical = self.resolve_name_set(allowed);
+        let denied_canonical = self.resolve_name_set(denied);
+
+        let mut next = ToolRegistry::new();
+        for canonical in &self.canonical_names {
+            if !allowed_all && !allowed_canonical.contains(canonical) {
+                continue;
+            }
+            if denied_canonical.contains(canonical) {
+                continue;
+            }
+            if let Some(tool) = self.tools.get(canonical) {
+                next.tools.insert(canonical.clone(), tool.clone());
+                next.canonical_names.push(canonical.clone());
+                if let Some(validator) = self.validators.get(canonical) {
+                    next.validators.insert(canonical.clone(), validator.clone());
+                }
+                for alias in tool.aliases() {
+                    if !self.canonical_names.contains(&alias.to_string()) {
+                        next.tools.insert(alias.to_string(), tool.clone());
+                    }
+                }
+            }
+        }
+        next
+    }
+
     /// Look up a tool by name. Returns [`AgentError::ToolNotFound`] if absent.
     pub fn get(&self, name: &str) -> Result<Arc<dyn Tool>, AgentError> {
         self.tools.get(name).cloned().ok_or_else(|| AgentError::ToolNotFound(name.to_string()))
+    }
+
+    fn resolve_name_set(&self, names: &[String]) -> HashSet<String> {
+        names.iter().filter_map(|name| self.canonical_name_for(name)).collect::<HashSet<_>>()
+    }
+
+    fn canonical_name_for(&self, name: &str) -> Option<String> {
+        self.canonical_names
+            .iter()
+            .find(|canonical| {
+                canonical.as_str() == name
+                    || self
+                        .tools
+                        .get(*canonical)
+                        .is_some_and(|tool| tool.aliases().iter().any(|alias| alias == &name))
+            })
+            .cloned()
     }
 
     /// Validate `arguments` against the cached JSON Schema validator for the

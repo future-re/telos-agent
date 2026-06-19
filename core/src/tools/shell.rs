@@ -211,6 +211,7 @@ mod tests {
         ToolContext {
             session_id: "test".into(),
             turn_id: 1,
+            tool_call_id: None,
             cwd,
             env,
             messages: std::sync::Arc::new(vec![]),

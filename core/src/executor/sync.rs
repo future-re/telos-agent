@@ -31,6 +31,7 @@ pub async fn execute_tool_calls(
         let context = ToolContext {
             session_id: session_id.to_string(),
             turn_id,
+            tool_call_id: Some(call.id.clone()),
             cwd: config.cwd.clone(),
             env: config.env.clone(),
             messages: Arc::clone(&messages),

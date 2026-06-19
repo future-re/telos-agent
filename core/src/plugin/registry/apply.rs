@@ -2,6 +2,8 @@
 
 use crate::plugin::PluginError;
 use crate::plugin::registry::lifecycle::PluginRegistry;
+use crate::subagent::{AgentDefinition, AgentSource, SubagentRegistry};
+use std::path::Path;
 
 impl PluginRegistry {
     /// Apply all enabled plugins' components into the agent extension registries.
@@ -69,12 +71,6 @@ impl PluginRegistry {
                 tracing::warn!(
                     plugin = %plugin.id,
                     "plugin declares LSP servers but LSP server support is not yet implemented"
-                );
-            }
-            if plugin.manifest.agents.is_some() {
-                tracing::warn!(
-                    plugin = %plugin.id,
-                    "plugin declares agents but agent support is not yet implemented"
                 );
             }
             if plugin.manifest.output_styles.is_some() {
@@ -163,4 +159,99 @@ impl PluginRegistry {
 
         if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
+
+    /// Apply enabled plugin agent definitions into a subagent registry.
+    ///
+    /// Plugin agents are registered as `<plugin_name>:<agent_name>` so they do
+    /// not collide with built-in, project, or user agent names.
+    pub fn apply_subagents(
+        &self,
+        subagents: &mut SubagentRegistry,
+    ) -> Result<(), Vec<PluginError>> {
+        let mut errors = Vec::new();
+
+        for entry in self.list_enabled() {
+            let plugin = &entry.plugin;
+            let mut component_count = 0;
+            let mut loaded_count = 0;
+
+            for agent_path in &plugin.resolved_agents {
+                if agent_path.is_dir() {
+                    let paths = match markdown_files(agent_path) {
+                        Ok(paths) => paths,
+                        Err(err) => {
+                            errors.push(PluginError::ComponentLoadFailed(
+                                plugin.id.clone(),
+                                format!("failed to read agent dir {}: {err}", agent_path.display()),
+                            ));
+                            continue;
+                        }
+                    };
+                    component_count += paths.len();
+                    for path in paths {
+                        match load_plugin_agent(&path, &plugin.id.name) {
+                            Ok(agent) => {
+                                subagents.register(agent);
+                                loaded_count += 1;
+                            }
+                            Err(err) => {
+                                errors.push(PluginError::ComponentLoadFailed(
+                                    plugin.id.clone(),
+                                    format!("failed to load agent {}: {err}", path.display()),
+                                ));
+                            }
+                        }
+                    }
+                } else {
+                    component_count += 1;
+                    match load_plugin_agent(agent_path, &plugin.id.name) {
+                        Ok(agent) => {
+                            subagents.register(agent);
+                            loaded_count += 1;
+                        }
+                        Err(err) => {
+                            errors.push(PluginError::ComponentLoadFailed(
+                                plugin.id.clone(),
+                                format!("failed to load agent {}: {err}", agent_path.display()),
+                            ));
+                        }
+                    }
+                }
+            }
+
+            if component_count > 0 && loaded_count < component_count {
+                errors.push(PluginError::Degraded {
+                    id: plugin.id.clone(),
+                    loaded: loaded_count,
+                    total: component_count,
+                });
+            }
+        }
+
+        if errors.is_empty() { Ok(()) } else { Err(errors) }
+    }
+}
+
+fn load_plugin_agent(path: &Path, plugin_name: &str) -> Result<AgentDefinition, crate::AgentError> {
+    let content = std::fs::read_to_string(path).map_err(|err| {
+        crate::AgentError::Config(format!("failed to read agent file {}: {err}", path.display()))
+    })?;
+    let mut agent = AgentDefinition::from_markdown(
+        &content,
+        AgentSource::Plugin { plugin: plugin_name.to_string(), path: path.display().to_string() },
+    )?;
+    agent.name = format!("{plugin_name}:{}", agent.name);
+    Ok(agent)
+}
+
+fn markdown_files(dir: &Path) -> Result<Vec<std::path::PathBuf>, std::io::Error> {
+    let mut paths = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext == "md") {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    Ok(paths)
 }

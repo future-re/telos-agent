@@ -575,7 +575,7 @@ impl Tool for ProgressTool {
     ) -> Result<ToolOutput, AgentError> {
         if let Some(tx) = &context.progress {
             let _ = tx.send(telos_agent::ToolProgress {
-                tool_call_id: None,
+                tool_call_id: context.tool_call_id.clone(),
                 message: "halfway".into(),
                 data: None,
             });
@@ -1327,6 +1327,16 @@ fn tool_progress_streams_before_tool_result() {
             .iter()
             .position(|event| matches!(event, TurnEvent::ToolProgress { message, .. } if message == "halfway"))
             .unwrap();
+        assert!(events.iter().any(|event| {
+            matches!(
+                event,
+                TurnEvent::ToolProgress {
+                    tool_call_id: Some(tool_call_id),
+                    message,
+                    ..
+                } if tool_call_id == "call-1" && message == "halfway"
+            )
+        }));
         let result_idx = events
             .iter()
             .position(|event| matches!(event, TurnEvent::ToolResult(_)))
@@ -1705,6 +1715,7 @@ async fn skill_tool_invokes_and_returns_prompt() {
     let ctx = ToolContext {
         session_id: "test".into(),
         turn_id: 1,
+        tool_call_id: None,
         cwd: std::env::current_dir().unwrap(),
         env: Default::default(),
         messages: Arc::new(vec![]),
@@ -2046,6 +2057,7 @@ async fn memory_write_and_read_tools_roundtrip() {
     let ctx = ToolContext {
         session_id: "test".into(),
         turn_id: 1,
+        tool_call_id: None,
         cwd: std::env::current_dir().unwrap(),
         env: Default::default(),
         messages: Arc::new(vec![]),
@@ -2213,6 +2225,7 @@ async fn web_fetch_tool_returns_html_as_text() {
     let ctx = ToolContext {
         session_id: "test".into(),
         turn_id: 1,
+        tool_call_id: None,
         cwd: std::env::current_dir().unwrap(),
         env: Default::default(),
         messages: Arc::new(vec![]),
@@ -2238,6 +2251,7 @@ async fn web_search_tool_returns_results() {
     let ctx = ToolContext {
         session_id: "test".into(),
         turn_id: 1,
+        tool_call_id: None,
         cwd: std::env::current_dir().unwrap(),
         env: Default::default(),
         messages: Arc::new(vec![]),
@@ -2272,6 +2286,7 @@ async fn ask_user_question_validates_and_returns_questions() {
     let ctx = ToolContext {
         session_id: "test".into(),
         turn_id: 1,
+        tool_call_id: None,
         cwd: std::env::current_dir().unwrap(),
         env: Default::default(),
         messages: Arc::new(vec![]),
@@ -2313,6 +2328,7 @@ async fn ask_user_question_rejects_empty_questions() {
     let ctx = ToolContext {
         session_id: "test".into(),
         turn_id: 1,
+        tool_call_id: None,
         cwd: std::env::current_dir().unwrap(),
         env: Default::default(),
         messages: Arc::new(vec![]),

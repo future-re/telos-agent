@@ -32,6 +32,7 @@ pub struct SubagentTool {
     provider: Arc<dyn ModelProvider + Send + Sync>,
     tools: ToolRegistry,
     config: AgentConfig,
+    registry: SubagentRegistry,
 }
 
 impl SubagentTool {
@@ -40,7 +41,16 @@ impl SubagentTool {
         tools: ToolRegistry,
         config: AgentConfig,
     ) -> Self {
-        Self { provider, tools, config }
+        Self { provider, tools, config, registry: SubagentRegistry::with_builtin_agents() }
+    }
+
+    pub fn with_registry(
+        provider: Arc<dyn ModelProvider + Send + Sync>,
+        tools: ToolRegistry,
+        config: AgentConfig,
+        registry: SubagentRegistry,
+    ) -> Self {
+        Self { provider, tools, config, registry }
     }
 
     /// Execute a fork run: run each lens through the provider concurrently.
@@ -122,9 +132,26 @@ impl Tool for SubagentTool {
             input_schema: json!({
                 "type": "object",
                 "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "Short 3-5 word description of what the agent will do"
+                    },
                     "prompt": { "type": "string" },
+                    "subagent_type": {
+                        "type": "string",
+                        "description": "Specialized agent type to use; defaults to general-purpose"
+                    },
                     "system_prompt": { "type": "string" },
                     "max_iterations": { "type": "integer" },
+                    "model": {
+                        "type": "string",
+                        "enum": ["thinking", "execution", "recovery", "summarization", "inherit"]
+                    },
+                    "run_in_background": { "type": "boolean" },
+                    "isolation": {
+                        "type": "string",
+                        "enum": ["none", "worktree"]
+                    },
                     "mode": {
                         "type": "string",
                         "enum": ["agent", "fork"],
@@ -165,6 +192,21 @@ Provide a clear prompt and optional system_prompt. Do not duplicate work already
             .get("prompt")
             .and_then(|value| value.as_str())
             .ok_or_else(|| AgentError::Validation("missing string `prompt`".into()))?;
+
+        if let Some(agent_type) = arguments.get("subagent_type").and_then(|v| v.as_str())
+            && self.registry.get(agent_type).is_none()
+        {
+            let available = self
+                .registry
+                .definitions()
+                .into_iter()
+                .map(|agent| agent.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(AgentError::Validation(format!(
+                "unknown subagent_type `{agent_type}`. Available agents: {available}"
+            )));
+        }
 
         let mode = arguments.get("mode").and_then(|v| v.as_str()).unwrap_or("agent");
 
@@ -223,6 +265,18 @@ Provide a clear prompt and optional system_prompt. Do not duplicate work already
                     .get("prompt")
                     .and_then(|value| value.as_str())
                     .ok_or_else(|| AgentError::Validation("missing string `prompt`".into()))?;
+                let agent_type = arguments
+                    .get("subagent_type")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("general-purpose");
+                let agent = self.registry.get(agent_type).ok_or_else(|| {
+                    AgentError::Validation(format!("unknown subagent_type `{agent_type}`"))
+                })?;
+                let description = arguments
+                    .get("description")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or(agent.description.as_str());
+                let agent_id = new_agent_id(agent_type);
 
                 // Clone the parent config and override the runtime-specific bits.
                 // Storage is disabled because the subagent is ephemeral; permissions
@@ -231,23 +285,29 @@ Provide a clear prompt and optional system_prompt. Do not duplicate work already
                 config.cwd = context.cwd;
                 config.env = context.env;
                 config.storage = None;
-                if let Some(system_prompt) =
-                    arguments.get("system_prompt").and_then(|value| value.as_str())
-                {
-                    config.base_system_prompt = Some(system_prompt.to_string());
-                }
-                if let Some(max_iterations) =
-                    arguments.get("max_iterations").and_then(|value| value.as_u64())
+                config.base_system_prompt = Some(
+                    arguments
+                        .get("system_prompt")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or(agent.system_prompt.as_str())
+                        .to_string(),
+                );
+                config.prompt_assembly = None;
+                if let Some(max_iterations) = arguments
+                    .get("max_iterations")
+                    .and_then(|value| value.as_u64())
+                    .or(agent.max_iterations.map(|value| value as u64))
                 {
                     config.max_iterations = max_iterations.max(1) as usize;
                 }
 
                 let mut session = AgentSession::new(config)?;
+                let child_tools = filter_tools_for_agent(&self.tools, agent);
                 let mut events = Vec::new();
                 {
                     let mut stream = Box::pin(session.run_turn_stream(
                         &self.provider,
-                        &self.tools,
+                        &child_tools,
                         prompt.to_string(),
                     ));
                     while let Some(event) = stream.next().await {
@@ -258,7 +318,7 @@ Provide a clear prompt and optional system_prompt. Do not duplicate work already
                             && let Some(tx) = &context.progress
                         {
                             let _ = tx.send(crate::tool::ToolProgress {
-                                tool_call_id: None,
+                                tool_call_id: context.tool_call_id.clone(),
                                 message: progress,
                                 data: None,
                             });
@@ -277,6 +337,10 @@ Provide a clear prompt and optional system_prompt. Do not duplicate work already
                     .unwrap_or_default();
 
                 Ok(ToolOutput::json(json!({
+                    "agent_id": agent_id,
+                    "agent_type": agent.name,
+                    "description": description,
+                    "status": "completed",
                     "session_id": session.session_id(),
                     "final_text": final_text,
                     "event_count": events.len(),
@@ -284,6 +348,20 @@ Provide a clear prompt and optional system_prompt. Do not duplicate work already
             }
         }
     }
+}
+
+fn filter_tools_for_agent(tools: &ToolRegistry, agent: &AgentDefinition) -> ToolRegistry {
+    tools.filtered(&agent.allowed_tools, &agent.disallowed_tools)
+}
+
+fn new_agent_id(agent_type: &str) -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let safe_type: String = agent_type
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '_' })
+        .collect();
+    format!("agent_{safe_type}_{:x}", now.as_nanos())
 }
 
 /// Translate a subset of subagent events into human-readable progress strings
@@ -298,5 +376,144 @@ fn progress_summary(event: &TurnEvent) -> Option<String> {
             Some(format!("subagent finished with {stop_reason:?}"))
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mock::MockProvider;
+    use async_trait::async_trait;
+    use serde_json::json;
+    use std::sync::Arc;
+
+    struct NamedTool(&'static str);
+
+    #[async_trait]
+    impl Tool for NamedTool {
+        fn definition(&self) -> ToolDefinition {
+            ToolDefinition {
+                name: self.0.into(),
+                description: "test".into(),
+                input_schema: json!({"type": "object"}),
+            }
+        }
+
+        async fn invoke(
+            &self,
+            _arguments: Value,
+            _context: ToolContext,
+        ) -> Result<ToolOutput, AgentError> {
+            Ok(ToolOutput::text("ok"))
+        }
+    }
+
+    #[test]
+    fn subagent_tool_schema_exposes_agent_tool_fields() {
+        let tool = SubagentTool::new(
+            Arc::new(MockProvider::new(vec![])),
+            ToolRegistry::new(),
+            AgentConfig::default(),
+        );
+        let schema = tool.definition().input_schema;
+        let properties = schema["properties"].as_object().unwrap();
+        assert!(properties.contains_key("description"));
+        assert!(properties.contains_key("subagent_type"));
+        assert!(properties.contains_key("model"));
+        assert!(properties.contains_key("run_in_background"));
+        assert!(properties.contains_key("isolation"));
+    }
+
+    #[tokio::test]
+    async fn validate_rejects_unknown_subagent_type_with_available_agents() {
+        let tool = SubagentTool::new(
+            Arc::new(MockProvider::new(vec![])),
+            ToolRegistry::new(),
+            AgentConfig::default(),
+        );
+
+        let err = tool
+            .validate(
+                &json!({
+                    "prompt": "inspect",
+                    "subagent_type": "Nope"
+                }),
+                &ToolContext::dummy(),
+            )
+            .await
+            .unwrap_err();
+
+        let message = err.to_string();
+        assert!(message.contains("unknown subagent_type `Nope`"));
+        assert!(message.contains("Explore"));
+    }
+
+    #[tokio::test]
+    async fn subagent_type_selects_agent_prompt_and_result_metadata() {
+        let provider = Arc::new(MockProvider::new(vec![crate::provider::CompletionResponse {
+            message: crate::Message::assistant("explore result"),
+            stop_reason: crate::provider::StopReason::EndTurn,
+            usage: None,
+        }]));
+        let tool = SubagentTool::new(provider.clone(), ToolRegistry::new(), AgentConfig::default());
+
+        let output = tool
+            .invoke(
+                json!({
+                    "description": "Explore code",
+                    "prompt": "Find the runtime loop",
+                    "subagent_type": "Explore"
+                }),
+                ToolContext::dummy(),
+            )
+            .await
+            .unwrap();
+
+        let requests = provider.requests.lock().await;
+        let system_prompt = requests[0].system_prompt.as_deref().unwrap_or_default();
+        assert!(system_prompt.contains("You are an explore agent"), "{system_prompt}");
+        drop(requests);
+
+        assert_eq!(output.content["agent_type"], "Explore");
+        assert_eq!(output.content["description"], "Explore code");
+        assert_eq!(output.content["status"], "completed");
+        assert_eq!(output.content["final_text"], "explore result");
+        assert!(output.content["agent_id"].as_str().unwrap().starts_with("agent_"));
+    }
+
+    #[test]
+    fn filters_child_tools_with_agent_allowlist_and_denylist() {
+        let mut tools = ToolRegistry::new();
+        tools.register(NamedTool("Read"));
+        tools.register(NamedTool("Write"));
+        tools.register(NamedTool("Grep"));
+
+        let mut agent = AgentDefinition::new("limited", "limited", "prompt", AgentSource::BuiltIn);
+        agent.allowed_tools = vec!["Read".into(), "Write".into()];
+        agent.disallowed_tools = vec!["Write".into()];
+
+        let filtered = filter_tools_for_agent(&tools, &agent);
+        let names = filtered.definitions().into_iter().map(|def| def.name).collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["Read"]);
+        assert!(filtered.get("Read").is_ok());
+        assert!(filtered.get("Write").is_err());
+        assert!(filtered.get("Grep").is_err());
+    }
+
+    #[test]
+    fn wildcard_allowlist_keeps_all_tools_before_denylist() {
+        let mut tools = ToolRegistry::new();
+        tools.register(NamedTool("Read"));
+        tools.register(NamedTool("Write"));
+
+        let mut agent = AgentDefinition::new("wild", "wild", "prompt", AgentSource::BuiltIn);
+        agent.allowed_tools = vec!["*".into()];
+        agent.disallowed_tools = vec!["Write".into()];
+
+        let filtered = filter_tools_for_agent(&tools, &agent);
+
+        assert!(filtered.get("Read").is_ok());
+        assert!(filtered.get("Write").is_err());
     }
 }

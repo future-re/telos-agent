@@ -1053,6 +1053,12 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
                 self.turn_input_tokens = input_tokens as u64;
                 self.turn_output_tokens = output_tokens as u64;
             }
+            TurnEvent::ApprovalRequested { tool_call_id, name, reason } => {
+                self.tool_activity.approval_requested(&tool_call_id, name, reason);
+            }
+            TurnEvent::ApprovalResolved { tool_call_id, name, decision } => {
+                self.tool_activity.approval_resolved(&tool_call_id, name, decision);
+            }
             _ => {}
         }
     }
@@ -1269,6 +1275,50 @@ mod tests {
         .unwrap();
 
         assert_eq!(app.tool_activity.height(80), before);
+    }
+
+    #[tokio::test]
+    async fn approval_events_update_live_tool_activity() {
+        let config = telos_agent::AgentConfig::default();
+        let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
+        let tools = telos_agent::ToolRegistry::new();
+        let temp = tempfile::tempdir().unwrap();
+        let memory = Arc::new(Mutex::new(MemoryStore::new(temp.path().join("memory"))));
+
+        let mut app = App::new(
+            config,
+            provider,
+            tools,
+            "telos".into(),
+            Some(temp.path()),
+            false,
+            memory,
+            ModelSwitchConfig::default(),
+        )
+        .unwrap();
+
+        app.handle_turn_event(TurnEvent::ToolCall {
+            tool_call_id: "call-1".into(),
+            name: "Bash".into(),
+            detail: "rm important-file".into(),
+        })
+        .await;
+        app.handle_turn_event(TurnEvent::ApprovalRequested {
+            tool_call_id: "call-1".into(),
+            name: "Bash".into(),
+            reason: "requires approval".into(),
+        })
+        .await;
+        app.handle_turn_event(TurnEvent::ApprovalResolved {
+            tool_call_id: "call-1".into(),
+            name: "Bash".into(),
+            decision: "approved".into(),
+        })
+        .await;
+
+        let compact_height = app.tool_activity.height(80);
+        assert!(app.tool_activity.toggle_selected());
+        assert!(app.tool_activity.height(80) > compact_height);
     }
 
     #[test]

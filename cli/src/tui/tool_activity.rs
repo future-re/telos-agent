@@ -9,6 +9,9 @@ use crate::tui::theme::Theme;
 
 const MAX_ITEMS: usize = 24;
 const MAX_VISIBLE_LINES: u16 = 10;
+const MAX_VISIBLE_ITEM_LINES: usize = MAX_VISIBLE_LINES as usize;
+const MAX_EXPANDED_PROGRESS_LINES: usize = 2;
+const MAX_COMPACT_RESULT_LINES: usize = 2;
 
 #[derive(Debug, Clone)]
 struct ToolActivityItem {
@@ -24,7 +27,6 @@ struct ToolActivityItem {
 
 impl ToolActivityItem {
     fn new(id: String, name: String, detail: String) -> Self {
-        let expanded = !is_shell_name(&name);
         Self {
             id,
             name,
@@ -32,7 +34,7 @@ impl ToolActivityItem {
             state: ToolState::Pending,
             progress_messages: Vec::new(),
             result_lines: Vec::new(),
-            expanded,
+            expanded: false,
             selected: false,
         }
     }
@@ -42,7 +44,7 @@ impl ToolActivityItem {
     }
 
     fn can_expand(&self) -> bool {
-        self.is_shell() && (!self.progress_messages.is_empty() || !self.result_lines.is_empty())
+        !self.progress_messages.is_empty() || !self.result_lines.is_empty()
     }
 
     fn set_running(&mut self) {
@@ -92,13 +94,34 @@ impl ToolActivityItem {
             Span::styled(self.title(width), style),
         ])];
 
-        if self.is_shell() {
-            let preview_lines = if self.expanded { 8 } else { 2 };
-            if self.expanded {
-                for msg in self.progress_messages.iter().take(2) {
-                    lines.push(transcript_line(msg, width, theme));
+        if self.can_expand() {
+            if !self.expanded {
+                if self.is_shell() {
+                    push_result_preview(
+                        &mut lines,
+                        &self.result_lines,
+                        MAX_COMPACT_RESULT_LINES,
+                        width,
+                        theme,
+                        self.expanded,
+                    );
                 }
+                return lines;
             }
+
+            if !self.is_shell() && !self.detail.trim().is_empty() {
+                lines.push(transcript_line(
+                    &format!("detail: {}", self.detail.trim()),
+                    width,
+                    theme,
+                ));
+            }
+
+            for msg in self.progress_messages.iter().take(MAX_EXPANDED_PROGRESS_LINES) {
+                lines.push(transcript_line(msg, width, theme));
+            }
+
+            let preview_lines = expanded_result_line_budget(lines.len(), self.result_lines.len());
             push_result_preview(
                 &mut lines,
                 &self.result_lines,
@@ -172,6 +195,14 @@ impl ToolActivityPanel {
         }
     }
 
+    pub fn approval_requested(&mut self, id: &str, name: String, reason: String) {
+        self.annotate(id, name, format!("approval requested: {}", reason.trim()));
+    }
+
+    pub fn approval_resolved(&mut self, id: &str, name: String, decision: String) {
+        self.annotate(id, name, format!("approval resolved: {}", decision.trim()));
+    }
+
     pub fn select_next(&mut self) {
         self.move_selection(1);
     }
@@ -206,6 +237,22 @@ impl ToolActivityPanel {
 
     fn find_mut(&mut self, id: &str) -> Option<&mut ToolActivityItem> {
         self.items.iter_mut().find(|item| item.id == id)
+    }
+
+    fn annotate(&mut self, id: &str, name: String, message: String) {
+        if let Some(item) = self.find_mut(id) {
+            item.progress_messages.push(message);
+            return;
+        }
+
+        let mut item = ToolActivityItem::new(id.to_string(), name, String::new());
+        item.progress_messages.push(message);
+        self.items.push(item);
+        if self.items.len() > MAX_ITEMS {
+            self.items.remove(0);
+            self.selected_idx = self.selected_idx.and_then(|idx| idx.checked_sub(1));
+        }
+        self.select_last_expandable();
     }
 
     fn render_lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -375,6 +422,11 @@ fn is_shell_name(name: &str) -> bool {
     matches!(name.to_lowercase().as_str(), "bash" | "shell")
 }
 
+fn expanded_result_line_budget(current_lines: usize, result_line_count: usize) -> usize {
+    let remaining = MAX_VISIBLE_ITEM_LINES.saturating_sub(current_lines);
+    if result_line_count > remaining { remaining.saturating_sub(1) } else { remaining }
+}
+
 fn push_result_preview(
     lines: &mut Vec<Line<'static>>,
     result_lines: &[String],
@@ -438,6 +490,46 @@ mod tests {
         panel.complete("call-1", "Read".into(), true);
 
         assert_eq!(panel.render_lines(80, &Theme::default()).len(), 1);
+    }
+
+    #[test]
+    fn non_shell_activity_can_expand_detail_progress_and_result_preview() {
+        let mut panel = ToolActivityPanel::new();
+        panel.push_call("call-1".into(), "Read".into(), "cli/README.md".into());
+        panel.set_progress("call-1", "reading file".into());
+        panel.complete("call-1", "Read".into(), true);
+        panel.add_result_content(
+            "call-1",
+            &serde_json::json!({"text": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n"}),
+            false,
+        );
+
+        let compact = panel.render_lines(80, &Theme::default());
+        assert_eq!(compact.len(), 1);
+        assert!(panel.toggle_selected());
+
+        let expanded = panel.render_lines(80, &Theme::default());
+        assert_eq!(expanded.len(), MAX_VISIBLE_LINES as usize);
+        let rendered = format!("{expanded:?}");
+        assert!(rendered.contains("detail: cli/README.md"));
+        assert!(rendered.contains("reading file"));
+        assert!(rendered.contains("line 1"));
+        assert!(rendered.contains("+4 lines"));
+    }
+
+    #[test]
+    fn approval_events_annotate_live_activity() {
+        let mut panel = ToolActivityPanel::new();
+        panel.push_call("call-1".into(), "Bash".into(), "rm important-file".into());
+
+        panel.approval_requested("call-1", "Bash".into(), "requires approval".into());
+        panel.approval_resolved("call-1", "Bash".into(), "approved".into());
+
+        assert!(panel.toggle_selected());
+        let expanded = panel.render_lines(80, &Theme::default());
+        let rendered = format!("{expanded:?}");
+        assert!(rendered.contains("approval requested: requires approval"));
+        assert!(rendered.contains("approval resolved: approved"));
     }
 
     #[test]

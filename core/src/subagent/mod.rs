@@ -1,7 +1,12 @@
 //! Subagent module — in-process nested agents and the Fork concurrent-execution engine.
 
+pub mod builtins;
+pub mod definition;
 pub mod fork;
+pub mod registry;
+pub use definition::{AgentDefinition, AgentIsolation, AgentSource};
 pub use fork::{ForkExecution, ForkLens, ForkResult, ForkShared, Synapse};
+pub use registry::SubagentRegistry;
 
 // In-process subagent tool — runs a nested agent session as a tool call.
 // Useful when the parent agent wants to delegate a self-contained sub-task

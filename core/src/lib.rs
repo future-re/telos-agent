@@ -98,7 +98,10 @@ pub use skills::{Skill, SkillArg, SkillLoader, SkillRegistry, SkillSource};
 // Storage — persistence backends for saving and resuming sessions.
 pub use storage::{JsonlStorage, NoopStorage, Storage};
 // Subagent — nested agent run exposed as a tool and Fork concurrent-execution engine.
-pub use subagent::{ForkExecution, ForkLens, ForkResult, ForkShared, SubagentTool, Synapse};
+pub use subagent::{
+    AgentDefinition, AgentIsolation, AgentSource, ForkExecution, ForkLens, ForkResult, ForkShared,
+    SubagentRegistry, SubagentTool, Synapse,
+};
 // Tasks — task management system with tracking, persistence, and tool integration.
 pub use tasks::{Task, TaskManager, TaskStatus};
 // MCP — stdio-based Model Context Protocol client + manager + bridge.

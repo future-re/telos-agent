@@ -1,6 +1,7 @@
 //! Tool invocation pipeline: validate → permission → approval → invoke.
 
 use crate::config::AgentConfig;
+use crate::diagnostics::{ToolFailureKind, sanitized_event_for_failure};
 use crate::error::AgentError;
 use crate::message::{ToolCall, ToolResult};
 use crate::permissions::RuleDecision;
@@ -117,8 +118,9 @@ pub(crate) async fn invoke_existing_tool(
                     let invoke_span =
                         info_span!("tool_execution", tool = %call.name, tool_call_id = %call.id);
                     let tool_name = call.name.clone();
+                    let invoke_context = context.clone();
                     let invoke_result = {
-                        let invoke_fut = tool.invoke(call.arguments.clone(), context);
+                        let invoke_fut = tool.invoke(call.arguments.clone(), invoke_context);
                         // A timeout of 0ms is treated as "no timeout" to avoid
                         // immediately failing every tool call.
                         let timeout = config.tool_timeout_ms.filter(|&ms| ms > 0);
@@ -161,6 +163,14 @@ pub(crate) async fn invoke_existing_tool(
                         }
                         Err(err) => {
                             error!(error = %err, "tool failed");
+                            record_tool_failure(
+                                config,
+                                &context,
+                                &call,
+                                ToolFailureKind::ExecutionError,
+                                &err.to_string(),
+                            )
+                            .await;
                             (
                                 events,
                                 ToolResult {
@@ -174,7 +184,17 @@ pub(crate) async fn invoke_existing_tool(
                     }
                 }
                 Ok(PermissionDecision::Deny { reason }) => (
-                    events,
+                    {
+                        record_tool_failure(
+                            config,
+                            &context,
+                            &call,
+                            ToolFailureKind::PermissionDenied,
+                            &reason,
+                        )
+                        .await;
+                        events
+                    },
                     ToolResult {
                         tool_call_id: call.id,
                         name: call.name.clone(),
@@ -183,7 +203,17 @@ pub(crate) async fn invoke_existing_tool(
                     },
                 ),
                 Ok(PermissionDecision::Ask { reason }) => (
-                    events,
+                    {
+                        record_tool_failure(
+                            config,
+                            &context,
+                            &call,
+                            ToolFailureKind::PermissionRequired,
+                            &reason,
+                        )
+                        .await;
+                        events
+                    },
                     ToolResult {
                         tool_call_id: call.id,
                         name: call.name.clone(),
@@ -192,7 +222,17 @@ pub(crate) async fn invoke_existing_tool(
                     },
                 ),
                 Err(err) => (
-                    events,
+                    {
+                        record_tool_failure(
+                            config,
+                            &context,
+                            &call,
+                            ToolFailureKind::PermissionError,
+                            &err.to_string(),
+                        )
+                        .await;
+                        events
+                    },
                     ToolResult {
                         tool_call_id: call.id,
                         name: call.name.clone(),
@@ -202,15 +242,51 @@ pub(crate) async fn invoke_existing_tool(
                 ),
             }
         }
-        Err(err) => (
-            Vec::new(),
-            ToolResult {
-                tool_call_id: call.id,
-                name: call.name.clone(),
-                content: json_error_payload("validation_error", err.to_string()),
-                is_error: true,
-            },
-        ),
+        Err(err) => {
+            record_tool_failure(
+                config,
+                &context,
+                &call,
+                ToolFailureKind::ValidationError,
+                &err.to_string(),
+            )
+            .await;
+            (
+                Vec::new(),
+                ToolResult {
+                    tool_call_id: call.id,
+                    name: call.name.clone(),
+                    content: json_error_payload("validation_error", err.to_string()),
+                    is_error: true,
+                },
+            )
+        }
+    }
+}
+
+pub(crate) async fn record_tool_failure(
+    config: &AgentConfig,
+    context: &ToolContext,
+    call: &ToolCall,
+    failure_kind: ToolFailureKind,
+    error: &str,
+) {
+    let Some(sink) = &config.tool_diagnostics else {
+        return;
+    };
+    let event = sanitized_event_for_failure(
+        &context.session_id,
+        context.turn_id,
+        &call.id,
+        &call.name,
+        failure_kind,
+        &call.arguments,
+        error,
+        &context.cwd,
+        &context.env,
+    );
+    if let Err(err) = sink.record(event).await {
+        warn!(error = %err, "failed to record tool diagnostics");
     }
 }
 

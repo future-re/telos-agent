@@ -2,6 +2,7 @@ pub mod cli;
 pub mod codeql_runtime;
 pub mod config;
 pub mod context;
+pub mod diagnostics;
 pub mod memory_runtime;
 pub mod project;
 pub mod runner;
@@ -139,6 +140,11 @@ pub async fn run() -> Result<()> {
                     });
                 }
                 let mut tui_config = config;
+                let _diagnostics_runtime = crate::diagnostics::configure_tool_diagnostics(
+                    &mut tui_config,
+                    &merged,
+                    project_root.as_deref(),
+                )?;
                 tui_config.prompt_assembly = Some(Arc::new(assembly));
 
                 let model_display =
@@ -146,7 +152,7 @@ pub async fn run() -> Result<()> {
                 let status =
                     crate::context::build_status_text(model_display, project_root.as_deref(), &ctx);
 
-                return tui::run(
+                let result = tui::run(
                     tui_config,
                     provider,
                     tools,
@@ -163,6 +169,13 @@ pub async fn run() -> Result<()> {
                     },
                 )
                 .await;
+                if let Some(runtime) = &_diagnostics_runtime
+                    && let Err(err) =
+                        crate::diagnostics::process_diagnostics(runtime, &merged).await
+                {
+                    tracing::warn!("failed to process diagnostics: {err}");
+                }
+                return result;
             }
             let onboarding = match check_onboarding(&cli.shared, &merged) {
                 Ok(o) => o,

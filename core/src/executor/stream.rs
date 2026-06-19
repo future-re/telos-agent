@@ -1,6 +1,7 @@
 //! Streaming tool execution path.
 
 use crate::config::AgentConfig;
+use crate::diagnostics::ToolFailureKind;
 use crate::message::{ToolCall, ToolResult};
 use crate::tool::{ToolContext, ToolProgress, ToolRegistry};
 use async_stream::stream;
@@ -10,7 +11,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use tracing::warn;
 
-use super::invoke::{invoke_existing_tool, json_error_payload};
+use super::invoke::{invoke_existing_tool, json_error_payload, record_tool_failure};
 use super::types::{Batch, PreparedCall, ToolExecutionEvent, ToolExecutionStreamItem};
 
 pub fn execute_tool_calls_stream<'a>(
@@ -159,6 +160,9 @@ fn spawn_live_tool(
     let index = prepared.index;
     let tool_call_id = prepared.call.id.clone();
     let name = prepared.call.name.clone();
+    let panic_call = prepared.call.clone();
+    let panic_context = prepared.context.clone();
+    let panic_config = config.clone();
 
     join_set.spawn(async move {
         let result = AssertUnwindSafe(run_live_tool_inner(prepared, tools, config, tx.clone()))
@@ -174,6 +178,14 @@ fn spawn_live_tool(
                 "tool invocation panicked".to_string()
             };
             warn!(tool = %name, tool_call_id = %tool_call_id, "tool invocation panicked: {message}");
+            record_tool_failure(
+                &panic_config,
+                &panic_context,
+                &panic_call,
+                ToolFailureKind::ExecutionPanic,
+                &message,
+            )
+            .await;
             let _ = tx.send((
                 index,
                 ToolExecutionStreamItem::Event(ToolExecutionEvent::ToolCompleted {
@@ -218,18 +230,29 @@ async fn run_live_tool_inner(
 
     let call = prepared.call.clone();
     let tool = tools.get(&prepared.call.name);
+    let context_for_not_found = context.clone();
     let result_task = async move {
         match tool {
             Ok(tool) => invoke_existing_tool(call, tool, context, &config, &tools).await,
-            Err(err) => (
-                Vec::new(),
-                ToolResult {
-                    tool_call_id: call.id.clone(),
-                    name: call.name.clone(),
-                    content: json_error_payload("tool_not_found", err.to_string()),
-                    is_error: true,
-                },
-            ),
+            Err(err) => {
+                record_tool_failure(
+                    &config,
+                    &context_for_not_found,
+                    &call,
+                    ToolFailureKind::ToolNotFound,
+                    &err.to_string(),
+                )
+                .await;
+                (
+                    Vec::new(),
+                    ToolResult {
+                        tool_call_id: call.id.clone(),
+                        name: call.name.clone(),
+                        content: json_error_payload("tool_not_found", err.to_string()),
+                        is_error: true,
+                    },
+                )
+            }
         }
     };
     tokio::pin!(result_task);

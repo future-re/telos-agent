@@ -22,6 +22,7 @@ pub mod bash_security;
 pub mod codeql;
 pub mod compaction;
 pub mod config;
+pub mod diagnostics;
 pub mod error;
 pub mod executor;
 pub mod hooks;
@@ -51,6 +52,11 @@ pub use approval::{
 pub use compaction::{CompactionStrategy, SummaryCompaction};
 // Configuration — the session config aggregate, task path, and token-budget knob.
 pub use config::{AgentConfig, TaskPath, TokenBudget};
+// Diagnostics — sanitized local recording of tool execution failures.
+pub use diagnostics::{
+    JsonlToolDiagnosticsSink, NoopToolDiagnosticsSink, SanitizedToolFailure, ToolDiagnosticsSink,
+    ToolFailureEvent, ToolFailureKind, ToolFailureSanitizer,
+};
 // Errors — the single failure type used across the crate.
 pub use error::{AgentError, ProviderError};
 // Tool executor — direct entry points for callers that bypass the turn loop.
@@ -112,8 +118,10 @@ pub use tool::{
 };
 // Built-in tools — filesystem, shell, search, web, user interaction.
 pub use tools::{
-    AskUserQuestionTool, FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ShellTool,
-    SkillTool, TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool, WebFetchTool,
-    WebSearchTool, register_codeql_tools, register_core_tools, register_memory_tools,
-    register_task_tools,
+    AskUserQuestionTool, BrowserBackTool, BrowserClickTool, BrowserCloseTool, BrowserFindUrlTool,
+    BrowserManager, BrowserNavigateTool, BrowserScreenshotTool, BrowserScrollTool,
+    BrowserSelectTool, BrowserStartTool, BrowserStateTool, BrowserTypeTool, FileEditTool,
+    FileReadTool, FileWriteTool, GlobTool, GrepTool, ShellTool, SkillTool, TaskCreateTool,
+    TaskGetTool, TaskListTool, TaskUpdateTool, WebFetchTool, WebSearchTool, register_codeql_tools,
+    register_core_tools, register_memory_tools, register_task_tools,
 };

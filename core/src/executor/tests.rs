@@ -1,14 +1,17 @@
 //! Tests for the tool execution engine.
 
 use crate::config::AgentConfig;
+use crate::diagnostics::{ToolDiagnosticsSink, ToolFailureEvent, ToolFailureKind};
 use crate::error::AgentError;
 use crate::executor::execute_tool_calls;
 use crate::message::ToolCall;
 use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry};
 use async_trait::async_trait;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::sync::Mutex;
 
 /// Probe tool that tracks how many invocations run at the same time.
 #[derive(Debug)]
@@ -72,12 +75,76 @@ impl Tool for PanickingTool {
     }
 }
 
+#[derive(Debug)]
+struct FailingTool;
+
+#[async_trait]
+impl Tool for FailingTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "Fail".into(),
+            description: "fails on invoke".into(),
+            input_schema: serde_json::json!({"type": "object"}),
+        }
+    }
+
+    async fn invoke(
+        &self,
+        _arguments: Value,
+        _context: ToolContext,
+    ) -> Result<ToolOutput, AgentError> {
+        Err(AgentError::ToolExecution { tool: "Fail".into(), message: "simulated failure".into() })
+    }
+}
+
+#[derive(Debug, Default)]
+struct MemoryDiagnosticsSink {
+    events: Mutex<Vec<ToolFailureEvent>>,
+}
+
+#[async_trait]
+impl ToolDiagnosticsSink for MemoryDiagnosticsSink {
+    async fn record(&self, event: ToolFailureEvent) -> Result<(), AgentError> {
+        self.events.lock().await.push(event);
+        Ok(())
+    }
+}
+
 fn test_config(limit: usize) -> AgentConfig {
     AgentConfig { tool_concurrency_limit: limit, ..Default::default() }
 }
 
 fn make_call(id: &str, name: &str) -> ToolCall {
     ToolCall { id: id.into(), name: name.into(), arguments: serde_json::json!({}) }
+}
+
+#[tokio::test]
+async fn executor_records_tool_execution_failure() {
+    let sink = Arc::new(MemoryDiagnosticsSink::default());
+    let mut registry = ToolRegistry::new();
+    registry.register(FailingTool);
+
+    let config = AgentConfig { tool_diagnostics: Some(sink.clone()), ..test_config(1) };
+
+    let output = execute_tool_calls(
+        vec![make_call("call-1", "Fail")],
+        &registry,
+        &config,
+        "session-1",
+        1,
+        Arc::new(vec![]),
+        Arc::new(Mutex::new(HashMap::new())),
+    )
+    .await;
+
+    assert_eq!(output.results.len(), 1);
+    assert!(output.results[0].is_error);
+    let events = sink.events.lock().await;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].tool_name, "Fail");
+    assert_eq!(events[0].failure_kind, ToolFailureKind::ExecutionError);
+    assert_eq!(events[0].session_id, "session-1");
+    assert_eq!(events[0].turn_id, 1);
 }
 
 #[tokio::test]

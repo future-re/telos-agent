@@ -11,6 +11,7 @@ use std::sync::atomic::AtomicBool;
 
 use crate::approval::ApprovalHandler;
 use crate::compaction::CompactionStrategy;
+use crate::diagnostics::ToolDiagnosticsSink;
 use crate::error::AgentError;
 use crate::hooks::HookRegistry;
 use crate::storage::Storage;
@@ -68,6 +69,8 @@ pub struct AgentConfig {
     pub hooks: Arc<HookRegistry>,
     /// Optional persistent backing store for session messages.
     pub storage: Option<Arc<dyn Storage>>,
+    /// Optional sink for sanitized tool failure diagnostics.
+    pub tool_diagnostics: Option<Arc<dyn ToolDiagnosticsSink>>,
     /// Optional history-level compaction strategy (summarisation, etc.).
     pub compaction: Option<Arc<dyn CompactionStrategy>>,
     /// Optional rule-based permission engine consulted before every tool call.
@@ -117,6 +120,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("max_tool_result_chars", &self.max_tool_result_chars)
             .field("hooks", &self.hooks)
             .field("storage", &self.storage)
+            .field("tool_diagnostics", &self.tool_diagnostics.as_ref().map(|_| "<set>"))
             .field("compaction", &self.compaction)
             .field("permission_engine", &self.permission_engine)
             .field("approval_handler", &self.approval_handler)
@@ -149,6 +153,7 @@ impl Default for AgentConfig {
             max_tool_result_chars: usize::MAX,
             hooks: Arc::new(HookRegistry::new()),
             storage: None,
+            tool_diagnostics: None,
             compaction: None,
             permission_engine: None,
             approval_handler: None,

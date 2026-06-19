@@ -83,6 +83,16 @@ default_policy = "ask"
 read = "allow"
 shell = "ask"
 write = "deny"
+
+[diagnostics]
+enabled = true
+retention_days = 14
+
+[diagnostics.github]
+enabled = false
+repository = "future-re/telos-agent"
+interval_hours = 24
+min_occurrences = 3
 ```
 
 **Project config** (`.telos.toml` at project root):
@@ -136,6 +146,14 @@ timeout_secs = 120
 | `deny` | Auto-deny |
 
 Configured per-tool under `[approval.policies]`.
+
+### Diagnostics
+
+The CLI records sanitized tool failures locally by default under `.telos/diagnostics/` for project sessions, or the platform data directory when no project root is detected. These records are structured JSONL events intended for local analysis.
+
+GitHub issue reporting is opt-in. Set `[diagnostics.github].enabled = true` and provide `GITHUB_TOKEN` through the process environment or `[env].GITHUB_TOKEN` to report recurring sanitized failures to `future-re/telos-agent`.
+
+Diagnostics do not store or upload raw commands, full stdout/stderr, environment values, model messages, user prompts, or session transcripts. Paths, token-like values, emails, URL query strings, and configured environment values are redacted before persistence and reporting.
 
 ## Keyboard shortcuts
 

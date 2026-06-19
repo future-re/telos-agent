@@ -13,6 +13,7 @@ use crate::tasks::TaskManager;
 use crate::tool::ToolRegistry;
 
 mod ask_user_question;
+mod browser;
 mod file_edit;
 mod file_read;
 mod file_write;
@@ -27,6 +28,11 @@ mod web_fetch;
 mod web_search;
 
 pub use ask_user_question::AskUserQuestionTool;
+pub use browser::{
+    BrowserBackTool, BrowserClickTool, BrowserCloseTool, BrowserFindUrlTool, BrowserManager,
+    BrowserNavigateTool, BrowserScreenshotTool, BrowserScrollTool, BrowserSelectTool,
+    BrowserStartTool, BrowserStateTool, BrowserTypeTool,
+};
 pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
 pub use file_write::FileWriteTool;
@@ -43,6 +49,7 @@ pub use web_search::WebSearchTool;
 
 /// Register every built-in tool with the supplied registry.
 pub fn register_core_tools(registry: &mut ToolRegistry) {
+    let browser_manager = BrowserManager::new();
     registry.register(ShellTool);
     registry.register(FileReadTool);
     registry.register(FileWriteTool);
@@ -51,6 +58,17 @@ pub fn register_core_tools(registry: &mut ToolRegistry) {
     registry.register(GrepTool);
     registry.register(WebFetchTool::new());
     registry.register(WebSearchTool);
+    registry.register(BrowserStartTool::new(browser_manager.clone()));
+    registry.register(BrowserNavigateTool::new(browser_manager.clone()));
+    registry.register(BrowserStateTool::new(browser_manager.clone()));
+    registry.register(BrowserClickTool::new(browser_manager.clone()));
+    registry.register(BrowserTypeTool::new(browser_manager.clone()));
+    registry.register(BrowserSelectTool::new(browser_manager.clone()));
+    registry.register(BrowserScrollTool::new(browser_manager.clone()));
+    registry.register(BrowserBackTool::new(browser_manager.clone()));
+    registry.register(BrowserScreenshotTool::new(browser_manager.clone()));
+    registry.register(BrowserCloseTool::new(browser_manager));
+    registry.register(BrowserFindUrlTool);
 }
 
 /// Register task tracking tools with the supplied registry.

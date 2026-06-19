@@ -165,7 +165,21 @@ default_policy = "ask"
 read = "allow"
 shell = "ask"
 write = "deny"
+
+[diagnostics]
+# CLI 默认启用本地工具失败诊断，写入 .telos/diagnostics/
+enabled = true
+retention_days = 14
+
+[diagnostics.github]
+# GitHub issue 上报默认关闭；开启后需要 GITHUB_TOKEN
+enabled = false
+repository = "future-re/telos-agent"
+interval_hours = 24
+min_occurrences = 3
 ```
+
+诊断日志只保存脱敏后的工具失败摘要，用于本地分析；不会保存原始命令、完整 stdout/stderr、环境变量值、模型消息或会话转录。开启 `[diagnostics.github].enabled = true` 后，CLI 会按间隔把重复失败聚合成隐私清洗后的 GitHub Issue。
 
 ## 开发
 

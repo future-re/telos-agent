@@ -19,6 +19,7 @@ pub struct FileConfig {
     pub agent: Option<AgentSection>,
     pub approval: Option<ApprovalSection>,
     pub codeql: Option<CodeqlConfigSection>,
+    pub diagnostics: Option<DiagnosticsSection>,
     pub env: Option<HashMap<String, String>>,
     /// Whether to auto-approve tool calls by default.
     pub auto_mode: Option<bool>,
@@ -33,6 +34,23 @@ pub struct CodeqlConfigSection {
     pub timeout_secs: Option<u64>,
     pub language: Option<String>,
     pub database_path: Option<String>,
+}
+
+/// Local diagnostics and optional external reporting configuration.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct DiagnosticsSection {
+    pub enabled: Option<bool>,
+    pub retention_days: Option<u64>,
+    pub github: Option<DiagnosticsGithubSection>,
+}
+
+/// GitHub issue reporter configuration for sanitized diagnostics summaries.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct DiagnosticsGithubSection {
+    pub enabled: Option<bool>,
+    pub repository: Option<String>,
+    pub interval_hours: Option<u64>,
+    pub min_occurrences: Option<usize>,
 }
 
 /// Model routing configuration from [agent.models] TOML section.
@@ -107,6 +125,10 @@ pub fn merge_configs(user: Option<FileConfig>, project: Option<FileConfig>) -> F
         user.as_ref().and_then(|c| c.codeql.as_ref()),
         project.as_ref().and_then(|c| c.codeql.as_ref()),
     );
+    let diagnostics = merge_diagnostics(
+        user.as_ref().and_then(|c| c.diagnostics.as_ref()),
+        project.as_ref().and_then(|c| c.diagnostics.as_ref()),
+    );
     let env = match (user.and_then(|c| c.env), project.and_then(|c| c.env)) {
         (Some(mut u), Some(p)) => {
             u.extend(p);
@@ -117,7 +139,7 @@ pub fn merge_configs(user: Option<FileConfig>, project: Option<FileConfig>) -> F
         (None, None) => None,
     };
 
-    FileConfig { agent, approval, codeql, env, auto_mode }
+    FileConfig { agent, approval, codeql, diagnostics, env, auto_mode }
 }
 
 fn merge_agent(
@@ -183,6 +205,39 @@ fn merge_codeql(
             timeout_secs: p.timeout_secs.or(u.timeout_secs),
             language: p.language.clone().or_else(|| u.language.clone()),
             database_path: p.database_path.clone().or_else(|| u.database_path.clone()),
+        }),
+    }
+}
+
+fn merge_diagnostics(
+    user: Option<&DiagnosticsSection>,
+    project: Option<&DiagnosticsSection>,
+) -> Option<DiagnosticsSection> {
+    match (user, project) {
+        (None, None) => None,
+        (Some(u), None) => Some(u.clone()),
+        (None, Some(p)) => Some(p.clone()),
+        (Some(u), Some(p)) => Some(DiagnosticsSection {
+            enabled: p.enabled.or(u.enabled),
+            retention_days: p.retention_days.or(u.retention_days),
+            github: merge_diagnostics_github(u.github.as_ref(), p.github.as_ref()),
+        }),
+    }
+}
+
+fn merge_diagnostics_github(
+    user: Option<&DiagnosticsGithubSection>,
+    project: Option<&DiagnosticsGithubSection>,
+) -> Option<DiagnosticsGithubSection> {
+    match (user, project) {
+        (None, None) => None,
+        (Some(u), None) => Some(u.clone()),
+        (None, Some(p)) => Some(p.clone()),
+        (Some(u), Some(p)) => Some(DiagnosticsGithubSection {
+            enabled: p.enabled.or(u.enabled),
+            repository: p.repository.clone().or_else(|| u.repository.clone()),
+            interval_hours: p.interval_hours.or(u.interval_hours),
+            min_occurrences: p.min_occurrences.or(u.min_occurrences),
         }),
     }
 }
@@ -453,6 +508,32 @@ mod tests {
         let config = FileConfig::default();
         let agent = build_agent_config(&options, &config, None).unwrap();
         assert_eq!(agent.max_iterations, 30);
+    }
+
+    #[test]
+    fn parses_diagnostics_config() {
+        let cfg: FileConfig = toml::from_str(
+            r#"
+[diagnostics]
+enabled = true
+retention_days = 7
+
+[diagnostics.github]
+enabled = true
+repository = "future-re/telos-agent"
+interval_hours = 12
+min_occurrences = 2
+"#,
+        )
+        .unwrap();
+        let diagnostics = cfg.diagnostics.unwrap();
+        assert_eq!(diagnostics.enabled, Some(true));
+        assert_eq!(diagnostics.retention_days, Some(7));
+        let github = diagnostics.github.unwrap();
+        assert_eq!(github.enabled, Some(true));
+        assert_eq!(github.repository.as_deref(), Some("future-re/telos-agent"));
+        assert_eq!(github.interval_hours, Some(12));
+        assert_eq!(github.min_occurrences, Some(2));
     }
 
     #[test]

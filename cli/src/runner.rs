@@ -28,6 +28,11 @@ pub async fn run_single(
     let memory_store = crate::memory_runtime::open_memory_store(project_root.as_deref())?;
 
     let mut agent_config = config::build_agent_config(options, config, approval_handler)?;
+    let _diagnostics_runtime = crate::diagnostics::configure_tool_diagnostics(
+        &mut agent_config,
+        config,
+        project_root.as_deref(),
+    )?;
     let mut tools = ToolRegistry::new();
     telos_agent::register_core_tools(&mut tools);
     let mut assembly = crate::context::build_prompt_assembly(&ctx);
@@ -75,6 +80,12 @@ pub async fn run_single(
         }
     }
 
+    if let Some(runtime) = &_diagnostics_runtime
+        && let Err(err) = crate::diagnostics::process_diagnostics(runtime, config).await
+    {
+        tracing::warn!("failed to process diagnostics: {err}");
+    }
+
     Ok(())
 }
 
@@ -96,6 +107,11 @@ pub async fn run_chat(
     let current_dir = std::env::current_dir()?;
     let cwd = options.cwd.as_deref().unwrap_or(&current_dir);
     let project_root = crate::project::find_project_root(cwd).ok();
+    let _diagnostics_runtime = crate::diagnostics::configure_tool_diagnostics(
+        &mut agent_config,
+        config,
+        project_root.as_deref(),
+    )?;
     let ctx = match &project_root {
         Some(root) => crate::context::load_project_context(root),
         None => crate::context::ProjectContext::empty(),
@@ -126,7 +142,7 @@ pub async fn run_chat(
         crate::context::build_status_text(options.model.as_deref(), project_root.as_deref(), &ctx);
 
     let auto_mode = config.auto_mode.unwrap_or(false);
-    crate::tui::run(
+    let result = crate::tui::run(
         agent_config,
         provider,
         tools,
@@ -142,7 +158,13 @@ pub async fn run_chat(
             ),
         },
     )
-    .await
+    .await;
+    if let Some(runtime) = &_diagnostics_runtime
+        && let Err(err) = crate::diagnostics::process_diagnostics(runtime, config).await
+    {
+        tracing::warn!("failed to process diagnostics: {err}");
+    }
+    result
 }
 
 async fn run_with_provider<P: telos_agent::ModelProvider>(

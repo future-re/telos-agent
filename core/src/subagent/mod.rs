@@ -194,6 +194,18 @@ Do not duplicate work already being performed in the parent session.",
             .and_then(|value| value.as_str())
             .ok_or_else(|| AgentError::Validation("missing string `prompt`".into()))?;
 
+        if arguments.get("run_in_background").and_then(|value| value.as_bool()).unwrap_or(false) {
+            return Err(AgentError::Validation(
+                "run_in_background is not supported by the in-process SubagentTool yet".into(),
+            ));
+        }
+
+        if matches!(arguments.get("isolation").and_then(|value| value.as_str()), Some("worktree")) {
+            return Err(AgentError::Validation(
+                "worktree isolation is not supported by the in-process SubagentTool yet".into(),
+            ));
+        }
+
         if let Some(agent_type) = arguments.get("subagent_type").and_then(|v| v.as_str())
             && self.registry.get(agent_type).is_none()
         {
@@ -492,6 +504,39 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("unknown subagent_type `Nope`"));
         assert!(message.contains("Explore"));
+    }
+
+    #[tokio::test]
+    async fn validate_rejects_background_and_worktree_until_supported() {
+        let tool = SubagentTool::new(
+            Arc::new(MockProvider::new(vec![])),
+            ToolRegistry::new(),
+            AgentConfig::default(),
+        );
+
+        let background = tool
+            .validate(
+                &json!({
+                    "prompt": "inspect",
+                    "run_in_background": true
+                }),
+                &ToolContext::dummy(),
+            )
+            .await
+            .unwrap_err();
+        assert!(background.to_string().contains("run_in_background is not supported"));
+
+        let worktree = tool
+            .validate(
+                &json!({
+                    "prompt": "inspect",
+                    "isolation": "worktree"
+                }),
+                &ToolContext::dummy(),
+            )
+            .await
+            .unwrap_err();
+        assert!(worktree.to_string().contains("worktree isolation is not supported"));
     }
 
     #[tokio::test]

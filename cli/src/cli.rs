@@ -47,6 +47,14 @@ pub struct SharedOptions {
     #[clap(long, env = "TELOS_MODEL")]
     pub model: Option<String>,
 
+    /// Model name for the thinking/reasoning model (planning, complex decisions).
+    #[clap(long, env = "TELOS_THINKING_MODEL")]
+    pub thinking_model: Option<String>,
+
+    /// Model name for the fast/execution model (tool calls, file ops, simple tasks).
+    #[clap(long, env = "TELOS_FAST_MODEL")]
+    pub fast_model: Option<String>,
+
     /// API key for the selected provider.
     #[clap(long, env = "TELOS_API_KEY")]
     pub api_key: Option<String>,

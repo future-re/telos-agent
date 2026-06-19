@@ -66,25 +66,17 @@ impl ApprovalHandler for TuiApprovalHandler {
 
 /// Decide whether a shell command should run without explicit approval.
 fn is_auto_allowed(cmd: &str) -> bool {
-    if telos_agent::bash_security::analyze(cmd).is_safe() {
-        return true;
-    }
+    telos_agent::bash_security::analyze(cmd).is_safe()
+}
 
-    let cmd_trimmed = cmd.trim();
-    let first_word = cmd_trimmed.split_whitespace().next().unwrap_or("");
+#[cfg(test)]
+mod tests {
+    use super::is_auto_allowed;
 
-    match first_word {
-        "git" | "cargo" | "make" | "just" | "npm" | "yarn" | "pnpm" | "pnpx" | "go" | "rustc"
-        | "rustup" | "docker" | "podman" | "ls" | "cat" | "head" | "tail" | "less" | "find"
-        | "du" | "df" | "echo" | "printf" | "date" | "env" | "printenv" | "pwd" | "whoami"
-        | "wc" | "sort" | "uniq" | "cut" | "tr" | "tee" | "basename" | "dirname" | "which"
-        | "type" | "file" | "stat" | "tree" | "bat" | "rg" | "fd" | "rustfmt" | "clippy"
-        | "clippy-driver" | "pgrep" | "ps" | "top" | "htop" | "free" | "uname" | "pip" | "pip3"
-        | "python" | "python3" | "node" | "npx" => true,
-        "apt" | "brew" | "dnf" | "pacman" | "snap" | "flatpak" => {
-            let second = cmd_trimmed.split_whitespace().nth(1).unwrap_or("");
-            matches!(second, "list" | "search" | "info" | "show" | "cache")
-        }
-        _ => false,
+    #[test]
+    fn auto_allow_uses_bash_security_analysis_only() {
+        assert!(is_auto_allowed("git status"));
+        assert!(!is_auto_allowed("git status; rm -rf /"));
+        assert!(!is_auto_allowed("python -c 'print(1)'"));
     }
 }

@@ -50,11 +50,34 @@ pub struct PolicyConfig {
 }
 
 impl PolicyConfig {
+    fn lookup_policy(&self, tool_name: &str) -> Option<ApprovalPolicy> {
+        self.policies
+            .get(tool_name)
+            .copied()
+            .or_else(|| self.policies.get(&tool_name.to_lowercase()).copied())
+    }
+
     /// Returns the effective policy for the given tool name.
     ///
     /// Looks up a tool-specific override first; falls back to `default`.
     pub fn policy_for(&self, tool_name: &str) -> ApprovalPolicy {
-        self.policies.get(tool_name).copied().unwrap_or(self.default)
+        self.lookup_policy(tool_name).unwrap_or(self.default)
+    }
+
+    /// Returns the effective policy for any accepted name for a tool.
+    ///
+    /// This lets config use either canonical names (`Bash`) or aliases
+    /// (`shell`), with case-insensitive matching for documented examples.
+    pub fn policy_for_any<'a>(
+        &self,
+        tool_names: impl IntoIterator<Item = &'a str>,
+    ) -> ApprovalPolicy {
+        for name in tool_names {
+            if let Some(policy) = self.lookup_policy(name) {
+                return policy;
+            }
+        }
+        self.default
     }
 }
 
@@ -90,7 +113,9 @@ impl ApprovalHandler for TerminalApprovalHandler {
     async fn ask(&self, request: ApprovalRequest) -> ApprovalDecision {
         // Check policy first for a fast-path decision.
         if let Some(ref config) = self.policy {
-            let tool_policy = config.policy_for(&request.tool_name);
+            let names = std::iter::once(request.tool_name.as_str())
+                .chain(request.invocation_names.iter().map(String::as_str));
+            let tool_policy = config.policy_for_any(names);
             if let Some(decision) =
                 tool_policy.decide(&request.tool_name, request.arguments.clone())
             {

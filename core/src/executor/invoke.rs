@@ -18,66 +18,21 @@ pub(crate) async fn invoke_existing_tool(
     config: &AgentConfig,
     tools: &ToolRegistry,
 ) -> (Vec<ToolExecutionEvent>, ToolResult) {
-    match tool.validate(&call.arguments, &context).await {
-        Ok(()) => {
-            // Run JSON Schema validation after the tool's custom validation so
-            // both business rules and schema shape are enforced.
-            if config.auto_validate_schema
-                && let Err(err) = tools.validate_arguments(&call.name, &call.arguments)
-            {
-                return (
-                    Vec::new(),
-                    ToolResult {
-                        tool_call_id: call.id,
-                        name: call.name,
-                        content: json_error_payload("validation_error", err.to_string()),
-                        is_error: true,
-                    },
-                );
-            }
+    let canonical_name = tool.definition().name;
+    let mut permission_names = vec![call.name.clone()];
+    if canonical_name != call.name {
+        permission_names.push(canonical_name.clone());
+    }
+    for alias in tool.aliases() {
+        if !permission_names.iter().any(|n| n == alias) {
+            permission_names.push((*alias).to_string());
+        }
+    }
 
-            // The global permission engine wins if it has a rule for this
-            // call; otherwise we ask the tool itself.
-            let canonical_name = tool.definition().name;
-            let mut permission_names = vec![call.name.clone()];
-            if canonical_name != call.name {
-                permission_names.push(canonical_name.clone());
-            }
-            for alias in tool.aliases() {
-                if !permission_names.iter().any(|n| n == alias) {
-                    permission_names.push((*alias).to_string());
-                }
-            }
-            let permission_names_ref: Vec<&str> =
-                permission_names.iter().map(|s| s.as_str()).collect();
-            let is_shell_tool = canonical_name == "Bash";
-            let engine_decision = config.permission_engine.as_ref().and_then(|engine| {
-                if is_shell_tool {
-                    let command = call
-                        .arguments
-                        .get("command")
-                        .and_then(|value| value.as_str())
-                        .unwrap_or("");
-                    engine.evaluate_shell_call(
-                        &permission_names_ref,
-                        command,
-                        &call.arguments,
-                        &context.cwd,
-                    )
-                } else {
-                    engine.evaluate_call_any(&permission_names_ref, &call.arguments, &context.cwd)
-                }
-            });
-            let permission = match engine_decision {
-                Some(RuleDecision::Allow) => Ok(PermissionDecision::Allow),
-                Some(RuleDecision::Deny) => {
-                    Ok(PermissionDecision::Deny { reason: "denied by permission rule".into() })
-                }
-                Some(RuleDecision::Ask) => Ok(PermissionDecision::Ask {
-                    reason: "approval required by permission rule".into(),
-                }),
-                None => tool.check_permission(&call.arguments, &context).await,
-            };
+    match validate_tool_call(&call, &tool, &context, config, tools).await {
+        Ok(()) => {
+            let permission =
+                evaluate_permission(&call, &tool, &context, config, &permission_names).await;
 
             let mut events = Vec::new();
             let permission = match permission {
@@ -114,7 +69,40 @@ pub(crate) async fn invoke_existing_tool(
                             }
                             crate::approval::ApprovalDecision::Modify { arguments } => {
                                 call.arguments = arguments;
-                                Ok(PermissionDecision::Allow)
+                                match validate_tool_call(&call, &tool, &context, config, tools)
+                                    .await
+                                {
+                                    Ok(()) => {
+                                        match evaluate_permission(
+                                            &call,
+                                            &tool,
+                                            &context,
+                                            config,
+                                            &permission_names,
+                                        )
+                                        .await
+                                        {
+                                            Ok(PermissionDecision::Deny { reason }) => {
+                                                Ok(PermissionDecision::Deny { reason })
+                                            }
+                                            Err(err) => Err(err),
+                                            Ok(PermissionDecision::Ask { reason })
+                                                if canonical_name == "Bash" =>
+                                            {
+                                                Ok(PermissionDecision::Ask {
+                                                    reason: format!(
+                                                        "modified shell command requires separate approval: {reason}"
+                                                    ),
+                                                })
+                                            }
+                                            Ok(PermissionDecision::Ask { .. })
+                                            | Ok(PermissionDecision::Allow) => {
+                                                Ok(PermissionDecision::Allow)
+                                            }
+                                        }
+                                    }
+                                    Err(err) => Err(err),
+                                }
                             }
                         }
                     } else {
@@ -223,6 +211,61 @@ pub(crate) async fn invoke_existing_tool(
                 is_error: true,
             },
         ),
+    }
+}
+
+async fn validate_tool_call(
+    call: &ToolCall,
+    tool: &Arc<dyn crate::tool::Tool>,
+    context: &ToolContext,
+    config: &AgentConfig,
+    tools: &ToolRegistry,
+) -> Result<(), AgentError> {
+    tool.validate(&call.arguments, context).await?;
+    // Run JSON Schema validation after the tool's custom validation so both
+    // business rules and schema shape are enforced.
+    if config.auto_validate_schema {
+        tools.validate_arguments(&call.name, &call.arguments)?;
+    }
+    Ok(())
+}
+
+async fn evaluate_permission(
+    call: &ToolCall,
+    tool: &Arc<dyn crate::tool::Tool>,
+    context: &ToolContext,
+    config: &AgentConfig,
+    permission_names: &[String],
+) -> Result<PermissionDecision, AgentError> {
+    // The global permission engine wins if it has a rule for this call;
+    // otherwise we ask the tool itself.
+    let canonical_name = tool.definition().name;
+    let permission_names_ref: Vec<&str> = permission_names.iter().map(|s| s.as_str()).collect();
+    let is_shell_tool = canonical_name == "Bash";
+    let engine_decision = config.permission_engine.as_ref().and_then(|engine| {
+        if is_shell_tool {
+            let command =
+                call.arguments.get("command").and_then(|value| value.as_str()).unwrap_or("");
+            engine.evaluate_shell_call(
+                &permission_names_ref,
+                command,
+                &call.arguments,
+                &context.cwd,
+            )
+        } else {
+            engine.evaluate_call_any(&permission_names_ref, &call.arguments, &context.cwd)
+        }
+    });
+
+    match engine_decision {
+        Some(RuleDecision::Allow) => Ok(PermissionDecision::Allow),
+        Some(RuleDecision::Deny) => {
+            Ok(PermissionDecision::Deny { reason: "denied by permission rule".into() })
+        }
+        Some(RuleDecision::Ask) => {
+            Ok(PermissionDecision::Ask { reason: "approval required by permission rule".into() })
+        }
+        None => tool.check_permission(&call.arguments, context).await,
     }
 }
 

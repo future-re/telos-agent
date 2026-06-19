@@ -177,6 +177,7 @@ impl Tool for CommandTool {
 
         let mut child = TokioCommand::new(&self.command)
             .args(&self.args)
+            .env_clear()
             .envs(&self.env)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -335,6 +336,35 @@ mod tests {
 
         let result = tool.invoke(json!({}), ToolContext::dummy()).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn command_tool_runs_with_clean_environment() {
+        unsafe { std::env::set_var("TELOS_PLUGIN_SECRET", "leaked") };
+        let definition = ToolDefinition {
+            name: "env_test".into(),
+            description: "Env test".into(),
+            input_schema: json!({"type": "object"}),
+        };
+
+        let tool = CommandTool::new(
+            definition,
+            "/bin/sh".into(),
+            vec![
+                "-c".into(),
+                "cat >/dev/null; printf '{\"secret\":\"%s\",\"configured\":\"%s\"}' \"$TELOS_PLUGIN_SECRET\" \"$PLUGIN_VISIBLE\"".into(),
+            ],
+            HashMap::from([("PLUGIN_VISIBLE".into(), "yes".into())]),
+            std::time::Duration::from_secs(5),
+            true,
+            PermissionDecision::Allow,
+        );
+
+        let result = tool.invoke(json!({}), ToolContext::dummy()).await.unwrap();
+        unsafe { std::env::remove_var("TELOS_PLUGIN_SECRET") };
+
+        assert_eq!(result.content["secret"], "");
+        assert_eq!(result.content["configured"], "yes");
     }
 
     #[test]

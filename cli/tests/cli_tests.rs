@@ -149,8 +149,18 @@ fn policy_per_tool_lookup() {
     let config = PolicyConfig { default: ApprovalPolicy::AlwaysAsk, policies };
 
     assert!(config.policy_for("read").is_allow());
+    assert!(config.policy_for("Read").is_allow());
     assert!(!config.policy_for("write").is_allow());
     assert!(!config.policy_for("bash").is_allow()); // falls to default (AlwaysAsk)
+}
+
+#[test]
+fn policy_lookup_accepts_aliases() {
+    let mut policies = std::collections::HashMap::new();
+    policies.insert("shell".to_string(), ApprovalPolicy::AlwaysDeny);
+    let config = PolicyConfig { default: ApprovalPolicy::AlwaysAsk, policies };
+
+    assert_eq!(config.policy_for_any(["Bash", "shell"].into_iter()), ApprovalPolicy::AlwaysDeny);
 }
 
 // ── Task 6: Session persistence ─────────────────────────────────────────────

@@ -434,18 +434,16 @@ Available commands:\n\n  /tool   — configure tools\n\
     /// Process a popped overlay — extract results from selection popups, etc.
     fn handle_overlay_popped(&mut self, popped: Option<Box<dyn Overlay>>) {
         let Some(overlay) = popped else { return };
-        if let Some(popup) = overlay.as_any().downcast_ref::<SelectionPopup>() {
-            if let Some(idx) = popup.selected_index() {
-                const MODELS: [&str; 2] = ["deepseek-v4-flash", "deepseek-v4-pro"];
-                if let Some(model) = MODELS.get(idx) {
-                    self.chat.push_cell(Box::new(UserCell {
-                        content: format!("/model {model}"),
-                    }));
-                    self.chat.push_cell(Box::new(AgentCell {
-                        buffer: format!("Switched model to: {model}"),
-                        is_streaming: false,
-                    }));
-                }
+        if let Some(popup) = overlay.as_any().downcast_ref::<SelectionPopup>()
+            && let Some(idx) = popup.selected_index()
+        {
+            const MODELS: [&str; 2] = ["deepseek-v4-flash", "deepseek-v4-pro"];
+            if let Some(model) = MODELS.get(idx) {
+                self.chat.push_cell(Box::new(UserCell { content: format!("/model {model}") }));
+                self.chat.push_cell(Box::new(AgentCell {
+                    buffer: format!("Switched model to: {model}"),
+                    is_streaming: false,
+                }));
             }
         }
     }

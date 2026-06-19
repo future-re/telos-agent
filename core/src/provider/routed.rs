@@ -109,6 +109,11 @@ impl RoutedProvider {
     /// Look up the provider for a given hint.
     fn resolve(&self, hint: Option<ModelHint>) -> &DeepSeekProvider {
         let model = self.config.resolve(hint);
+        tracing::debug!(
+            hint = ?hint,
+            model = %model,
+            "model route"
+        );
         // Safety: new() pre-creates providers for every model in config
         &self.providers[model]
     }
@@ -117,15 +122,26 @@ impl RoutedProvider {
 #[async_trait]
 impl ModelProvider for RoutedProvider {
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse, AgentError> {
-        let provider = self.resolve(request.model_hint);
-        provider.complete(request).await
+        let hint = request.model_hint;
+        let provider = self.resolve(hint);
+        let result = provider.complete(request).await;
+        if let Ok(ref resp) = result {
+            tracing::debug!(
+                hint = ?hint,
+                input_tokens = resp.usage.map(|u| u.input_tokens).unwrap_or(0),
+                output_tokens = resp.usage.map(|u| u.output_tokens).unwrap_or(0),
+                "routed complete"
+            );
+        }
+        result
     }
 
     fn stream_complete<'a>(
         &'a self,
         request: CompletionRequest,
     ) -> Pin<Box<dyn Stream<Item = Result<ProviderEvent, AgentError>> + Send + 'a>> {
-        let provider = self.resolve(request.model_hint);
+        let hint = request.model_hint;
+        let provider = self.resolve(hint);
         // provider borrows from self.providers (lifetime = 'a) ✅
         provider.stream_complete(request)
     }

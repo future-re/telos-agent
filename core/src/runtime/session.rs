@@ -256,33 +256,30 @@ impl AgentSession {
         previous_tool_error: bool,
         consecutive_noop: usize,
     ) -> ModelHint {
-        // Fast path: everything uses execution model
-        if config.path == crate::config::TaskPath::Fast {
-            return ModelHint::Execution;
-        }
+        let (hint, reason) = if config.path == crate::config::TaskPath::Fast {
+            (ModelHint::Execution, "fast path")
+        } else if previous_tool_error {
+            (ModelHint::Recovery, "tool error")
+        } else if consecutive_noop >= 3 {
+            (ModelHint::Thinking, "stuck detection")
+        } else if iteration == 1 {
+            (ModelHint::Thinking, "first iteration")
+        } else if config.path == crate::config::TaskPath::Heavy && iteration.is_multiple_of(4) {
+            (ModelHint::Thinking, "heavy periodic rethink")
+        } else {
+            (ModelHint::Execution, "default")
+        };
 
-        // Error recovery: tool failure needs re-evaluation
-        if previous_tool_error {
-            return ModelHint::Recovery;
-        }
+        tracing::debug!(
+            iteration = iteration,
+            hint = ?hint,
+            reason = reason,
+            path = ?config.path,
+            previous_tool_error = previous_tool_error,
+            "hint resolved"
+        );
 
-        // Stuck detection: repeated tool rounds with no progress
-        if consecutive_noop >= 3 {
-            return ModelHint::Thinking;
-        }
-
-        // First call in a turn: understand user intent, plan
-        if iteration == 1 {
-            return ModelHint::Thinking;
-        }
-
-        // Heavy path: periodic re-thinking every 4 tool rounds
-        if config.path == crate::config::TaskPath::Heavy && iteration.is_multiple_of(4) {
-            return ModelHint::Thinking;
-        }
-
-        // Default: processing tool results is execution work
-        ModelHint::Execution
+        hint
     }
 
     /// Stream a single provider completion, handling retries.

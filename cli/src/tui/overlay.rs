@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
@@ -49,7 +49,7 @@ impl Overlay for ApprovalOverlay {
             .title(" Approval required ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.tool_pending_fg))
-            .style(Style::default().bg(Color::Rgb(20, 22, 30)));
+            .style(Style::default().bg(theme.approval_bg));
 
         let mut text_lines: Vec<Line> = Vec::new();
 
@@ -69,7 +69,7 @@ impl Overlay for ApprovalOverlay {
                 text_lines.push(Line::from(""));
                 text_lines.push(Line::from(Span::styled(
                     format!("  $ {}", truncate_for_popup(cmd, 200)),
-                    Style::default().fg(Color::Rgb(180, 220, 180)),
+                    Style::default().fg(theme.approval_cmd_fg),
                 )));
             }
         } else if tool_lower == "edit" {
@@ -78,23 +78,23 @@ impl Overlay for ApprovalOverlay {
             let new = args.get("new_string").and_then(|v| v.as_str()).unwrap_or("");
             text_lines.push(Line::from(Span::styled(
                 format!("  File: {}", truncate_for_popup(file, 120)),
-                Style::default().fg(Color::Gray),
+                Style::default().fg(theme.approval_label_fg),
             )));
             text_lines.push(Line::from(""));
             text_lines.push(Line::from(Span::styled(
                 format!("  - {}", truncate_for_popup(old, 150)),
-                Style::default().fg(Color::Rgb(220, 120, 120)),
+                Style::default().fg(theme.approval_remove_fg),
             )));
             text_lines.push(Line::from(Span::styled(
                 format!("  + {}", truncate_for_popup(new, 150)),
-                Style::default().fg(Color::Rgb(120, 220, 120)),
+                Style::default().fg(theme.approval_add_fg),
             )));
         } else if tool_lower == "write" {
             let file = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("?");
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
             text_lines.push(Line::from(Span::styled(
                 format!("  File: {}", truncate_for_popup(file, 120)),
-                Style::default().fg(Color::Gray),
+                Style::default().fg(theme.approval_label_fg),
             )));
             let preview = truncate_for_popup(content, 300);
             if !preview.is_empty() {
@@ -102,7 +102,7 @@ impl Overlay for ApprovalOverlay {
                 for pline in preview.lines().take(6) {
                     text_lines.push(Line::from(Span::styled(
                         format!("  | {}", pline),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(theme.approval_preview_fg),
                     )));
                 }
             }
@@ -112,7 +112,7 @@ impl Overlay for ApprovalOverlay {
             for aline in args_str.lines().take(20) {
                 text_lines.push(Line::from(Span::styled(
                     format!("  {}", aline),
-                    Style::default().fg(Color::Gray),
+                    Style::default().fg(theme.approval_label_fg),
                 )));
             }
         }
@@ -120,7 +120,7 @@ impl Overlay for ApprovalOverlay {
         text_lines.push(Line::from(""));
         text_lines.push(Line::from(Span::styled(
             "  [a/y] approve  [d/n] deny  [e] edit-request  ",
-            Style::default().fg(Color::White),
+            Style::default().fg(theme.approval_hint_fg),
         )));
 
         let text = Text::from(text_lines);

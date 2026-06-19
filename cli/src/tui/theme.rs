@@ -13,6 +13,14 @@ pub struct Theme {
     pub border_active: Color,
     pub border_inactive: Color,
     pub input_placeholder: Color,
+    // Approval popup colors
+    pub approval_bg: Color,
+    pub approval_cmd_fg: Color,
+    pub approval_label_fg: Color,
+    pub approval_add_fg: Color,
+    pub approval_remove_fg: Color,
+    pub approval_preview_fg: Color,
+    pub approval_hint_fg: Color,
 }
 
 impl Default for Theme {
@@ -29,6 +37,13 @@ impl Default for Theme {
             border_active: Color::Rgb(100, 200, 255),
             border_inactive: Color::Rgb(60, 60, 80),
             input_placeholder: Color::Rgb(80, 80, 100),
+            approval_bg: Color::Rgb(20, 22, 30),
+            approval_cmd_fg: Color::Rgb(180, 220, 180),
+            approval_label_fg: Color::Gray,
+            approval_add_fg: Color::Rgb(120, 220, 120),
+            approval_remove_fg: Color::Rgb(220, 120, 120),
+            approval_preview_fg: Color::DarkGray,
+            approval_hint_fg: Color::White,
         }
     }
 }

@@ -161,7 +161,9 @@ impl InputPanel {
                 self.navigate_history(1);
                 InputEvent::None
             }
-            (KeyCode::Up, KeyModifiers::NONE) if self.is_empty() && !self.history.is_empty() => {
+            (KeyCode::Up, KeyModifiers::NONE)
+                if (self.is_empty() || self.history_pos.is_some()) && !self.history.is_empty() =>
+            {
                 self.navigate_history(-1);
                 InputEvent::None
             }
@@ -454,6 +456,19 @@ mod tests {
         panel.handle_key(key(KeyCode::Up));
 
         assert_eq!(text(&panel), "latest");
+    }
+
+    #[test]
+    fn plain_up_continues_to_older_history_while_browsing() {
+        let mut panel = InputPanel::new();
+        panel.submit_text("oldest".into());
+        panel.submit_text("middle".into());
+        panel.submit_text("latest".into());
+
+        panel.handle_key(key(KeyCode::Up));
+        panel.handle_key(key(KeyCode::Up));
+
+        assert_eq!(text(&panel), "middle");
     }
 
     #[test]

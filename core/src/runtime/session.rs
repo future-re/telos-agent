@@ -6,6 +6,7 @@ use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, info_span, warn};
 
 use crate::compaction::{CompactionConfig, compact_tool_result_message};
@@ -23,7 +24,7 @@ use crate::storage::{SessionMetadata, Storage};
 use crate::tool::FileReadState;
 use crate::tool::ToolRegistry;
 
-static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_SESSION_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 enum CompactionResult {
     /// Compaction completed (or was skipped); caller should continue the turn.
@@ -65,7 +66,7 @@ impl AgentSession {
 
         Ok(Self {
             config,
-            session_id: format!("session-{}", NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed)),
+            session_id: new_session_id(),
             next_turn_id: 1,
             messages,
             read_file_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -797,6 +798,17 @@ impl AgentSession {
     }
 }
 
+fn new_session_id() -> String {
+    let timestamp_ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let process_id = std::process::id();
+    let sequence = NEXT_SESSION_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+
+    format!("session-{timestamp_ns}-{process_id}-{sequence}")
+}
+
 /// Sum estimated token counts across every block in `messages`.
 ///
 /// Used by the turn loop to decide whether to invoke compaction or abort the
@@ -829,6 +841,22 @@ mod tests {
     use crate::tool::ToolRegistry;
     use std::path::PathBuf;
     use std::sync::Arc;
+
+    #[test]
+    fn new_sessions_have_storage_safe_restart_resistant_ids() {
+        let first = AgentSession::new(AgentConfig::default()).unwrap();
+        let second = AgentSession::new(AgentConfig::default()).unwrap();
+
+        for session_id in [first.session_id(), second.session_id()] {
+            assert!(session_id.starts_with("session-"));
+            assert!(session_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+            assert!(
+                session_id.split('-').count() >= 4,
+                "session id should include restart-resistant components: {session_id}"
+            );
+        }
+        assert_ne!(first.session_id(), second.session_id());
+    }
 
     #[tokio::test]
     async fn save_and_resume_restores_metadata_and_read_file_state() {

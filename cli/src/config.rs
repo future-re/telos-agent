@@ -20,9 +20,26 @@ pub struct FileConfig {
     pub approval: Option<ApprovalSection>,
     pub codeql: Option<CodeqlConfigSection>,
     pub diagnostics: Option<DiagnosticsSection>,
+    pub tui: Option<TuiSection>,
     pub env: Option<HashMap<String, String>>,
     /// Whether to auto-approve tool calls by default.
     pub auto_mode: Option<bool>,
+}
+
+/// Terminal UI configuration.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct TuiSection {
+    pub density: Option<TuiDensity>,
+}
+
+/// Terminal UI density preset.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TuiDensity {
+    Compact,
+    #[default]
+    Default,
+    Spacious,
 }
 
 /// Configuration section for CodeQL static analysis.
@@ -129,6 +146,10 @@ pub fn merge_configs(user: Option<FileConfig>, project: Option<FileConfig>) -> F
         user.as_ref().and_then(|c| c.diagnostics.as_ref()),
         project.as_ref().and_then(|c| c.diagnostics.as_ref()),
     );
+    let tui = merge_tui(
+        user.as_ref().and_then(|c| c.tui.as_ref()),
+        project.as_ref().and_then(|c| c.tui.as_ref()),
+    );
     let env = match (user.and_then(|c| c.env), project.and_then(|c| c.env)) {
         (Some(mut u), Some(p)) => {
             u.extend(p);
@@ -139,7 +160,7 @@ pub fn merge_configs(user: Option<FileConfig>, project: Option<FileConfig>) -> F
         (None, None) => None,
     };
 
-    FileConfig { agent, approval, codeql, diagnostics, env, auto_mode }
+    FileConfig { agent, approval, codeql, diagnostics, tui, env, auto_mode }
 }
 
 fn merge_agent(
@@ -239,6 +260,15 @@ fn merge_diagnostics_github(
             interval_hours: p.interval_hours.or(u.interval_hours),
             min_occurrences: p.min_occurrences.or(u.min_occurrences),
         }),
+    }
+}
+
+fn merge_tui(user: Option<&TuiSection>, project: Option<&TuiSection>) -> Option<TuiSection> {
+    match (user, project) {
+        (None, None) => None,
+        (Some(u), None) => Some(u.clone()),
+        (None, Some(p)) => Some(p.clone()),
+        (Some(u), Some(p)) => Some(TuiSection { density: p.density.or(u.density) }),
     }
 }
 
@@ -534,6 +564,62 @@ min_occurrences = 2
         assert_eq!(github.repository.as_deref(), Some("future-re/telos-agent"));
         assert_eq!(github.interval_hours, Some(12));
         assert_eq!(github.min_occurrences, Some(2));
+    }
+
+    #[test]
+    fn parses_tui_density_config() {
+        let cfg: FileConfig = toml::from_str(
+            r#"
+[tui]
+density = "compact"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(cfg.tui.unwrap().density, Some(TuiDensity::Compact));
+    }
+
+    #[test]
+    fn rejects_invalid_tui_density_config() {
+        let err = toml::from_str::<FileConfig>(
+            r#"
+[tui]
+density = "cozy"
+"#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("unknown variant"));
+    }
+
+    #[test]
+    fn merge_configs_project_tui_density_overrides_user() {
+        let user = FileConfig {
+            tui: Some(TuiSection { density: Some(TuiDensity::Compact) }),
+            ..FileConfig::default()
+        };
+        let project = FileConfig {
+            tui: Some(TuiSection { density: Some(TuiDensity::Spacious) }),
+            ..FileConfig::default()
+        };
+
+        let merged = merge_configs(Some(user), Some(project));
+
+        assert_eq!(merged.tui.unwrap().density, Some(TuiDensity::Spacious));
+    }
+
+    #[test]
+    fn merge_configs_project_missing_tui_density_falls_back_to_user() {
+        let user = FileConfig {
+            tui: Some(TuiSection { density: Some(TuiDensity::Compact) }),
+            ..FileConfig::default()
+        };
+        let project =
+            FileConfig { tui: Some(TuiSection { density: None }), ..FileConfig::default() };
+
+        let merged = merge_configs(Some(user), Some(project));
+
+        assert_eq!(merged.tui.unwrap().density, Some(TuiDensity::Compact));
     }
 
     #[test]

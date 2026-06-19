@@ -157,6 +157,9 @@ pub async fn run_chat(
                 onboarding.as_ref(),
             ),
         },
+        crate::tui::app::TuiLayoutSettings::from_density(
+            config.tui.as_ref().and_then(|tui| tui.density).unwrap_or_default(),
+        ),
     )
     .await;
     if let Some(runtime) = &_diagnostics_runtime

@@ -167,6 +167,9 @@ pub async fn run() -> Result<()> {
                             onboarding.as_ref(),
                         ),
                     },
+                    tui::app::TuiLayoutSettings::from_density(
+                        merged.tui.as_ref().and_then(|tui| tui.density).unwrap_or_default(),
+                    ),
                 )
                 .await;
                 if let Some(runtime) = &_diagnostics_runtime

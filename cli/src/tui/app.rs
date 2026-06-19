@@ -10,6 +10,7 @@ use std::time::Instant;
 use telos_agent::{MemoryStore, Role, Storage, TurnEvent};
 use tokio::sync::mpsc;
 
+use crate::config::TuiDensity;
 use crate::tui::approval::PendingApproval;
 use crate::tui::chat_widget::ChatWidget;
 use crate::tui::command_popup::SlashCommand;
@@ -28,6 +29,28 @@ const MODEL_OPTIONS: [&str; 2] = ["deepseek-v4-flash", "deepseek-v4-pro"];
 #[derive(Debug, Clone, Default)]
 pub struct ModelSwitchConfig {
     pub deepseek_api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TuiLayoutSettings {
+    pub input_height: u16,
+    pub tool_activity_max_lines: usize,
+}
+
+impl TuiLayoutSettings {
+    pub fn from_density(density: TuiDensity) -> Self {
+        match density {
+            TuiDensity::Compact => Self { input_height: 4, tool_activity_max_lines: 6 },
+            TuiDensity::Default => Self { input_height: 5, tool_activity_max_lines: 10 },
+            TuiDensity::Spacious => Self { input_height: 7, tool_activity_max_lines: 14 },
+        }
+    }
+}
+
+impl Default for TuiLayoutSettings {
+    fn default() -> Self {
+        Self::from_density(TuiDensity::Default)
+    }
 }
 
 enum BackgroundCommand {
@@ -69,6 +92,8 @@ pub struct App {
     pub input: InputPanel,
     /// Compact tool/command activity shown above the input panel.
     pub tool_activity: ToolActivityPanel,
+    /// Density-derived vertical layout settings.
+    layout_settings: TuiLayoutSettings,
     /// Active overlay stack (topmost overlay rendered last).
     pub overlays: Vec<Box<dyn Overlay>>,
     /// Whether a background turn is currently running.
@@ -117,6 +142,29 @@ pub struct App {
 
 impl App {
     pub fn new(
+        config: telos_agent::AgentConfig,
+        provider: Arc<dyn telos_agent::ModelProvider>,
+        tools: telos_agent::ToolRegistry,
+        status_text: String,
+        project_root: Option<&std::path::Path>,
+        auto_mode_on: bool,
+        memory: Arc<Mutex<MemoryStore>>,
+        model_switch: ModelSwitchConfig,
+    ) -> Result<Self, telos_agent::AgentError> {
+        Self::new_with_layout_settings(
+            config,
+            provider,
+            tools,
+            status_text,
+            project_root,
+            auto_mode_on,
+            memory,
+            model_switch,
+            TuiLayoutSettings::default(),
+        )
+    }
+
+    pub fn new_with_layout_settings(
         mut config: telos_agent::AgentConfig,
         provider: Arc<dyn telos_agent::ModelProvider>,
         tools: telos_agent::ToolRegistry,
@@ -125,6 +173,7 @@ impl App {
         auto_mode_on: bool,
         memory: Arc<Mutex<MemoryStore>>,
         model_switch: ModelSwitchConfig,
+        layout_settings: TuiLayoutSettings,
     ) -> Result<Self, telos_agent::AgentError> {
         // Wire up session storage before creating the AgentSession.
         let session_manager = crate::session::SessionManager::new(project_root);
@@ -247,7 +296,10 @@ impl App {
             base_status: status_text,
             chat: ChatWidget::new(),
             input: InputPanel::new(),
-            tool_activity: ToolActivityPanel::new(),
+            tool_activity: ToolActivityPanel::with_max_visible_lines(
+                layout_settings.tool_activity_max_lines,
+            ),
+            layout_settings,
             overlays: Vec::new(),
             turn_active: false,
             cancellation,
@@ -1081,10 +1133,10 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
         // Layout: chat | compact tool activity | input | status
         let activity_height = self.tool_activity.height(area.width as usize);
         let constraints = vec![
-            Constraint::Min(0),                  // chat
-            Constraint::Length(activity_height), // recent tool/command activity
-            Constraint::Length(5),               // input panel
-            Constraint::Length(1),               // status bar
+            Constraint::Min(0),                                    // chat
+            Constraint::Length(activity_height),                   // recent tool/command activity
+            Constraint::Length(self.layout_settings.input_height), // input panel
+            Constraint::Length(1),                                 // status bar
         ];
 
         let layout =
@@ -1219,7 +1271,24 @@ fn collect_tool_infos(tools: &telos_agent::ToolRegistry) -> Vec<ToolInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::TuiDensity;
     use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn layout_settings_map_density_presets() {
+        assert_eq!(
+            TuiLayoutSettings::from_density(TuiDensity::Compact),
+            TuiLayoutSettings { input_height: 4, tool_activity_max_lines: 6 }
+        );
+        assert_eq!(
+            TuiLayoutSettings::from_density(TuiDensity::Default),
+            TuiLayoutSettings { input_height: 5, tool_activity_max_lines: 10 }
+        );
+        assert_eq!(
+            TuiLayoutSettings::from_density(TuiDensity::Spacious),
+            TuiLayoutSettings { input_height: 7, tool_activity_max_lines: 14 }
+        );
+    }
 
     #[tokio::test]
     async fn send_prompt_resets_cancel_flag() {

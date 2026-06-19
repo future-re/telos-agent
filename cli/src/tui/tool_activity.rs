@@ -8,8 +8,7 @@ use crate::tui::history_cell::{ToolState, extract_result_lines, truncate_chars};
 use crate::tui::theme::Theme;
 
 const MAX_ITEMS: usize = 24;
-const MAX_VISIBLE_LINES: u16 = 10;
-const MAX_VISIBLE_ITEM_LINES: usize = MAX_VISIBLE_LINES as usize;
+const MAX_VISIBLE_LINES: usize = 10;
 const MAX_EXPANDED_PROGRESS_LINES: usize = 2;
 const MAX_COMPACT_RESULT_LINES: usize = 2;
 
@@ -76,7 +75,7 @@ impl ToolActivityItem {
         if detail.is_empty() { self.name.clone() } else { format!("{} {}", self.name, detail) }
     }
 
-    fn lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+    fn lines(&self, width: usize, theme: &Theme, max_visible_lines: usize) -> Vec<Line<'static>> {
         let (marker, mut style) = match self.state {
             ToolState::Pending | ToolState::Running { .. } => {
                 ("•", Style::default().fg(theme.tool_pending_fg))
@@ -121,19 +120,27 @@ impl ToolActivityItem {
                 ));
             }
 
-            for msg in self.approval_messages.iter().take(remaining_line_budget(lines.len())) {
+            for msg in self
+                .approval_messages
+                .iter()
+                .take(remaining_line_budget(lines.len(), max_visible_lines))
+            {
                 lines.push(transcript_line(msg, width, theme));
             }
 
             for msg in self.progress_messages.iter().take(MAX_EXPANDED_PROGRESS_LINES) {
-                if remaining_line_budget(lines.len()) == 0 {
+                if remaining_line_budget(lines.len(), max_visible_lines) == 0 {
                     break;
                 }
                 lines.push(transcript_line(msg, width, theme));
             }
 
-            let preview_lines = expanded_result_line_budget(lines.len(), self.result_lines.len());
-            if remaining_line_budget(lines.len()) > 0 {
+            let preview_lines = expanded_result_line_budget(
+                lines.len(),
+                self.result_lines.len(),
+                max_visible_lines,
+            );
+            if remaining_line_budget(lines.len(), max_visible_lines) > 0 {
                 push_result_preview(
                     &mut lines,
                     &self.result_lines,
@@ -149,15 +156,26 @@ impl ToolActivityItem {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct ToolActivityPanel {
     items: Vec<ToolActivityItem>,
     selected_idx: Option<usize>,
+    max_visible_lines: usize,
+}
+
+impl Default for ToolActivityPanel {
+    fn default() -> Self {
+        Self { items: Vec::new(), selected_idx: None, max_visible_lines: MAX_VISIBLE_LINES }
+    }
 }
 
 impl ToolActivityPanel {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_max_visible_lines(max_visible_lines: usize) -> Self {
+        Self { max_visible_lines, ..Self::default() }
     }
 
     pub fn clear(&mut self) {
@@ -170,7 +188,7 @@ impl ToolActivityPanel {
     }
 
     pub fn height(&self, width: usize) -> u16 {
-        self.render_lines(width, &Theme::default()).len().min(MAX_VISIBLE_LINES as usize) as u16
+        self.render_lines(width, &Theme::default()).len().min(self.max_visible_lines) as u16
     }
 
     pub fn push_call(&mut self, id: String, name: String, detail: String) {
@@ -290,12 +308,12 @@ impl ToolActivityPanel {
 
         if let Some(idx) = focus_idx {
             if let Some(item) = self.items.get(idx) {
-                lines.extend(item.lines(width, theme));
+                lines.extend(item.lines(width, theme, self.max_visible_lines));
             }
         } else if self.items.len() == 1
             && let Some(item) = self.items.last()
         {
-            lines.extend(item.lines(width, theme));
+            lines.extend(item.lines(width, theme, self.max_visible_lines));
         }
         lines
     }
@@ -460,13 +478,17 @@ fn is_shell_name(name: &str) -> bool {
     matches!(name.to_lowercase().as_str(), "bash" | "shell")
 }
 
-fn expanded_result_line_budget(current_lines: usize, result_line_count: usize) -> usize {
-    let remaining = MAX_VISIBLE_ITEM_LINES.saturating_sub(current_lines);
+fn expanded_result_line_budget(
+    current_lines: usize,
+    result_line_count: usize,
+    max_visible_lines: usize,
+) -> usize {
+    let remaining = max_visible_lines.saturating_sub(current_lines);
     if result_line_count > remaining { remaining.saturating_sub(1) } else { remaining }
 }
 
-fn remaining_line_budget(current_lines: usize) -> usize {
-    MAX_VISIBLE_ITEM_LINES.saturating_sub(current_lines)
+fn remaining_line_budget(current_lines: usize, max_visible_lines: usize) -> usize {
+    max_visible_lines.saturating_sub(current_lines)
 }
 
 fn push_result_preview(
@@ -559,12 +581,31 @@ mod tests {
         assert!(panel.toggle_selected());
 
         let expanded = panel.render_lines(80, &Theme::default());
-        assert_eq!(expanded.len(), MAX_VISIBLE_LINES as usize);
+        assert_eq!(expanded.len(), MAX_VISIBLE_LINES);
         let rendered = format!("{expanded:?}");
         assert!(rendered.contains("detail: cli/README.md"));
         assert!(rendered.contains("reading file"));
         assert!(rendered.contains("line 1"));
         assert!(rendered.contains("+4 lines"));
+    }
+
+    #[test]
+    fn compact_max_visible_lines_caps_expanded_activity() {
+        let mut panel = ToolActivityPanel::with_max_visible_lines(6);
+        panel.push_call("call-1".into(), "Read".into(), "cli/README.md".into());
+        panel.set_progress("call-1", "reading file".into());
+        panel.complete("call-1", "Read".into(), true);
+        panel.add_result_content(
+            "call-1",
+            &serde_json::json!({"text": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n"}),
+            false,
+        );
+
+        assert!(panel.toggle_selected());
+        let expanded = panel.render_lines(80, &Theme::default());
+
+        assert_eq!(expanded.len(), 6);
+        assert_eq!(panel.height(80), 6);
     }
 
     #[test]
@@ -594,7 +635,7 @@ mod tests {
 
         assert!(panel.toggle_selected());
         let expanded = panel.render_lines(80, &Theme::default());
-        assert!(expanded.len() <= MAX_VISIBLE_LINES as usize);
+        assert!(expanded.len() <= MAX_VISIBLE_LINES);
         let rendered = rendered_text(&expanded);
         assert!(rendered.contains("approval requested: requires approval"));
         assert!(rendered.contains("approval resolved: approved"));
@@ -604,7 +645,7 @@ mod tests {
     fn expanded_activity_stays_capped_when_approvals_fill_budget_before_result() {
         let mut panel = ToolActivityPanel::new();
         panel.push_call("call-1".into(), "Bash".into(), "deploy".into());
-        for idx in 0..MAX_VISIBLE_ITEM_LINES {
+        for idx in 0..MAX_VISIBLE_LINES {
             panel.approval_requested("call-1", "Bash".into(), format!("approval {idx}"));
         }
         panel.add_result_content(
@@ -616,7 +657,7 @@ mod tests {
         assert!(panel.toggle_selected());
         let expanded = panel.render_lines(80, &Theme::default());
 
-        assert!(expanded.len() <= MAX_VISIBLE_LINES as usize);
+        assert!(expanded.len() <= MAX_VISIBLE_LINES);
     }
 
     #[test]

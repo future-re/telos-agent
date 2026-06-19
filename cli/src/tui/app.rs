@@ -382,11 +382,7 @@ impl App {
             }
             TurnEvent::AssistantDelta { text } => {
                 self.status_text = "streaming…".to_string();
-                if self
-                    .chat
-                    .active_mut()
-                    .map_or(true, |c| !c.is_streaming())
-                {
+                if self.chat.active_mut().is_none_or(|c| !c.is_streaming()) {
                     // New agent turn — push a fresh streaming cell
                     self.chat.push_cell(Box::new(AgentCell {
                         buffer: text.clone(),
@@ -398,11 +394,7 @@ impl App {
                 self.chat.scroll_to_bottom();
             }
             TurnEvent::ThinkingDelta { text } => {
-                if self
-                    .chat
-                    .active_mut()
-                    .map_or(true, |c| !c.is_streaming())
-                {
+                if self.chat.active_mut().is_none_or(|c| !c.is_streaming()) {
                     self.chat.push_cell(Box::new(ThinkingCell { buffer: text.clone() }));
                 } else {
                     self.chat.push_text(&text);
@@ -411,23 +403,18 @@ impl App {
             TurnEvent::ToolCall { tool_call_id, name, detail } => {
                 let label = if detail.is_empty() { name.clone() } else { detail.clone() };
                 self.status_text = label;
-                self.chat.push_cell(Box::new(ToolCallCell::new(
-                    tool_call_id,
-                    name,
-                    detail,
-                )));
+                self.chat.push_cell(Box::new(ToolCallCell::new(tool_call_id, name, detail)));
             }
             TurnEvent::ToolProgress { tool_call_id, message, .. } => {
                 if !message.starts_with("running command with") {
-                    self.status_text = format!("{}", message);
+                    self.status_text = message.to_string();
                 }
                 // Find the ToolCallCell and add progress
-                if let Some(ref id) = tool_call_id {
-                    if let Some(cell) = self.chat.find_tool_call_mut(id) {
-                        if let Some(tc) = cell.as_any_mut().downcast_mut::<ToolCallCell>() {
-                            tc.add_progress(message);
-                        }
-                    }
+                if let Some(ref id) = tool_call_id
+                    && let Some(cell) = self.chat.find_tool_call_mut(id)
+                    && let Some(tc) = cell.as_any_mut().downcast_mut::<ToolCallCell>()
+                {
+                    tc.add_progress(message);
                 }
             }
             TurnEvent::ToolCompleted { tool_call_id, name, is_error } => {
@@ -440,7 +427,8 @@ impl App {
                     .unwrap_or_default();
 
                 self.chat.remove_tool_call(&tool_call_id);
-                let mut cell = ToolCallCell::new(tool_call_id.clone(), name.clone(), detail.clone());
+                let mut cell =
+                    ToolCallCell::new(tool_call_id.clone(), name.clone(), detail.clone());
                 cell.set_completed(!is_error);
                 self.chat.push_cell(Box::new(cell));
 
@@ -457,27 +445,20 @@ impl App {
             TurnEvent::ToolResult(message) => {
                 for result in message.tool_results_iter() {
                     if result.is_error {
-                        crate::memory_runtime::record_tool_error(
-                            &self.memory,
-                            result,
-                            None,
-                        )
-                        .await;
+                        crate::memory_runtime::record_tool_error(&self.memory, result, None).await;
                     }
                 }
             }
             TurnEvent::TurnFinished { final_text, .. } => {
                 if !final_text.is_empty() {
                     // Mark the streaming cell as done and add final text
-                    if let Some(active) = self.chat.active_mut() {
-                        if active.is_streaming() {
-                            // AgentCell is no longer streaming
-                        }
+                    if let Some(active) = self.chat.active_mut()
+                        && active.is_streaming()
+                    {
+                        // AgentCell is no longer streaming
                     }
-                    self.chat.push_cell(Box::new(AgentCell {
-                        buffer: final_text,
-                        is_streaming: false,
-                    }));
+                    self.chat
+                        .push_cell(Box::new(AgentCell { buffer: final_text, is_streaming: false }));
                 }
             }
             TurnEvent::TokenBudgetExceeded { used_tokens, max_tokens } => {

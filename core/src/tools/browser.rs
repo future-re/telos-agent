@@ -1495,4 +1495,13 @@ mod tests {
         assert!(validate_http_url("https://example.com").is_ok());
         assert!(validate_http_url("file:///etc/passwd").is_err());
     }
+
+    #[test]
+    fn detects_windows_edge_executables() {
+        assert!(is_windows_browser_path(Path::new("msedge.exe")));
+        assert!(is_windows_browser_path(Path::new(
+            "/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
+        )));
+        assert!(!is_windows_browser_path(Path::new("microsoft-edge")));
+    }
 }

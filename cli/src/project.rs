@@ -12,21 +12,33 @@ use std::path::{Path, PathBuf};
 /// Returns the first ancestor directory that contains a marker.
 /// If no marker is found, returns the canonicalized `start_dir`.
 pub fn find_project_root(start_dir: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    find_project_root_with_temp_root(start_dir, std::env::temp_dir())
+}
+
+fn find_project_root_with_temp_root(
+    start_dir: impl AsRef<Path>,
+    ambient_temp_root: impl AsRef<Path>,
+) -> std::io::Result<PathBuf> {
     let start_dir = start_dir.as_ref();
     let canonical = start_dir.canonicalize()?;
+    let ambient_temp_root = ambient_temp_root.as_ref().canonicalize().ok();
 
     let mut current: Option<&Path> = Some(canonical.as_path());
 
     while let Some(dir) = current {
+        let is_ambient_temp_root = ambient_temp_root.as_deref() == Some(dir);
         // Check for .telos.toml
-        if dir.join(".telos.toml").exists() {
+        if !is_ambient_temp_root && dir.join(".telos.toml").exists() {
             return Ok(dir.to_path_buf());
         }
         // Check for .git (directory) or .git (file, for worktrees)
         let git_path = dir.join(".git");
-        if git_path.exists() {
+        if !is_ambient_temp_root && git_path.exists() {
             // It's either a directory or a file (worktree gitdir ref)
             return Ok(dir.to_path_buf());
+        }
+        if is_ambient_temp_root {
+            break;
         }
 
         // Walk up to parent
@@ -97,6 +109,17 @@ mod tests {
 
         let found = find_project_root(root).unwrap();
         assert_eq!(found, root.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn ignores_marker_on_ambient_temp_root() {
+        let temp_root = TempDir::new().unwrap();
+        fs::create_dir(temp_root.path().join(".git")).unwrap();
+        let scratch = temp_root.path().join("scratch");
+        fs::create_dir_all(&scratch).unwrap();
+
+        let found = find_project_root_with_temp_root(&scratch, temp_root.path()).unwrap();
+        assert_eq!(found, scratch.canonicalize().unwrap());
     }
 
     #[test]

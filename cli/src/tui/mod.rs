@@ -2,6 +2,7 @@ pub mod app;
 pub mod approval;
 pub mod chat_panel;
 pub mod event;
+pub mod history_cell;
 pub mod input_panel;
 pub mod markdown;
 pub mod status_bar;

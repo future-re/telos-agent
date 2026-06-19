@@ -148,7 +148,7 @@ Configured per-tool under `[approval.policies]`.
 | `Ctrl+L` | Clear chat |
 | `Ctrl+N` | New session |
 | `Shift+Tab` | Toggle auto mode |
-| `/` commands | Open command popups such as model/session/tool selectors |
+| `/` commands | Open command popups such as api/model/session/tool selectors |
 | `PgUp` / `PgDn` | Scroll chat (page) |
 | `↑` / `↓` | Scroll chat (line) |
 | `a` / `y` | Approve tool call |

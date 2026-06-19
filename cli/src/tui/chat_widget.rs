@@ -243,12 +243,17 @@ impl ChatWidget {
         self.cells.iter().map(|c| c.needed_lines(width)).sum()
     }
 
+    fn clamp_scroll_offset(&mut self, width: usize, viewport_height: u16) {
+        let max_offset = self.total_height(width).saturating_sub(viewport_height) as usize;
+        self.scroll_offset = self.scroll_offset.min(max_offset);
+    }
+
     /// Render the conversation into the given area.
     ///
     /// Only cells that overlap the visible window (computed from
     /// `scroll_offset` and `area.height`) are rendered. Each visible
     /// cell draws itself into a sub-area at its computed y offset.
-    pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
         if self.cells.is_empty() || area.width == 0 || area.height == 0 {
             return;
         }
@@ -256,6 +261,7 @@ impl ChatWidget {
         let width = area.width as usize;
         let total = self.total_height(width);
         let area_height = area.height;
+        self.clamp_scroll_offset(width, area_height);
 
         // Visible range: which total-line indices are visible.
         let visible_end = total.saturating_sub(self.scroll_offset as u16);
@@ -288,13 +294,13 @@ impl ChatWidget {
             let visible_part_end = cell_end.min(visible_end);
             let visible_height = visible_part_end - visible_part_start;
 
-            // Y offset within the display area.
+            let top_skip = visible_part_start - acc;
             let display_y = area.y + (visible_part_start - visible_start);
 
             let cell_area =
                 Rect { x: area.x, y: display_y, width: area.width, height: visible_height };
 
-            cell.render(frame, cell_area, theme);
+            cell.render_scrolled(frame, cell_area, theme, top_skip);
             acc += cell_lines;
         }
     }
@@ -309,6 +315,8 @@ impl Default for ChatWidget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     #[test]
     fn assistant_and_thinking_deltas_use_separate_cells() {
@@ -347,6 +355,7 @@ mod tests {
         let mut chat = ChatWidget::new();
         let mut tool = ToolCallCell::new("call-1".into(), "Bash".into(), "echo hi".into());
         tool.add_progress("line 1".into());
+        tool.add_result_content(&serde_json::json!({"stdout": "ok\nnext\n", "stderr": ""}), false);
         chat.push_cell(Box::new(tool));
 
         chat.select_next_tool();
@@ -355,5 +364,65 @@ mod tests {
         let tool = chat.cells[0].as_any().downcast_ref::<ToolCallCell>().unwrap();
         assert!(tool.expanded);
         assert_eq!(tool.progress_messages, vec!["line 1"]);
+        assert_eq!(tool.result_lines, vec!["ok", "next"]);
+    }
+
+    #[test]
+    fn overscrolling_past_top_still_renders_history() {
+        let mut chat = ChatWidget::new();
+        chat.push_cell(Box::new(AgentCell {
+            buffer: "one\ntwo\nthree".to_string(),
+            is_streaming: false,
+        }));
+
+        chat.scroll_up(100);
+
+        let backend = TestBackend::new(20, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal.draw(|frame| chat.render(frame, frame.area(), &theme)).unwrap();
+
+        assert_eq!(chat.scroll_offset, 0);
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("one"), "{rendered:?}");
+        assert!(rendered.contains("three"), "{rendered:?}");
+    }
+
+    #[test]
+    fn scrolling_into_middle_of_cell_keeps_correct_visible_lines() {
+        let mut chat = ChatWidget::new();
+        chat.push_cell(Box::new(AgentCell {
+            buffer: "one\ntwo\nthree\nfour\nfive".to_string(),
+            is_streaming: false,
+        }));
+
+        chat.scroll_up(2);
+
+        let backend = TestBackend::new(20, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal.draw(|frame| chat.render(frame, frame.area(), &theme)).unwrap();
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("one"), "{rendered:?}");
+        assert!(rendered.contains("two"), "{rendered:?}");
+        assert!(rendered.contains("three"), "{rendered:?}");
+        assert!(!rendered.contains("four"), "{rendered:?}");
+        assert!(!rendered.contains("five"), "{rendered:?}");
     }
 }

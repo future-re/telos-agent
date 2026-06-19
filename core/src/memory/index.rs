@@ -89,6 +89,15 @@ impl MemoryStore {
         let dir = self.root.join(subdir);
         std::fs::create_dir_all(&dir)?;
         let path = dir.join(format!("{}.md", filename));
+        if let Some(old_path) = self.index.get(&entry.name)
+            && old_path != &path
+        {
+            match std::fs::remove_file(old_path) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err),
+            }
+        }
         let content = MemoryFormat::serialize(&entry);
         std::fs::write(&path, content)?;
         self.index.insert(entry.name.clone(), path);
@@ -432,6 +441,23 @@ mod tests {
         assert_eq!(entry.category, MemoryCategory::Command);
         assert!(entry.tags.contains(&"new".to_string()));
         assert!(entry.body.contains("Test body"));
+        assert!(entry.body.contains("New body"));
+    }
+
+    #[test]
+    fn category_change_survives_reopening_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = MemoryStore::new(dir.path().to_path_buf());
+
+        store.write(test_entry("same", "Old", MemoryCategory::Fact)).unwrap();
+        let mut replacement = test_entry("same", "New", MemoryCategory::Command);
+        replacement.body = "New body".into();
+        store.upsert(replacement).unwrap();
+
+        let reopened = MemoryStore::new(dir.path().to_path_buf());
+        let entry = reopened.read("same").unwrap();
+        assert_eq!(entry.category, MemoryCategory::Command);
+        assert_eq!(entry.description, "New");
         assert!(entry.body.contains("New body"));
     }
 

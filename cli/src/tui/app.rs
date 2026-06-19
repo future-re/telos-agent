@@ -15,11 +15,12 @@ use crate::tui::chat_widget::ChatWidget;
 use crate::tui::command_popup::SlashCommand;
 use crate::tui::event::{AppEvent, Event};
 use crate::tui::history_cell::*;
-use crate::tui::input_panel::{InputEvent, InputPanel};
+use crate::tui::input_panel::{InputEvent, InputMode, InputPanel};
 use crate::tui::overlay::{ApprovalOverlay, Overlay, OverlayAction};
 use crate::tui::selection_popup::SelectionPopup;
 use crate::tui::status_bar;
 use crate::tui::theme::Theme;
+use crate::tui::tool_activity::ToolActivityPanel;
 use crate::tui::user_input_popup::{Question, UserInputPopup};
 
 const MODEL_OPTIONS: [&str; 2] = ["deepseek-v4-flash", "deepseek-v4-pro"];
@@ -66,6 +67,8 @@ pub struct App {
     pub chat: ChatWidget,
     /// Input panel at the bottom.
     pub input: InputPanel,
+    /// Compact tool/command activity shown above the input panel.
+    pub tool_activity: ToolActivityPanel,
     /// Active overlay stack (topmost overlay rendered last).
     pub overlays: Vec<Box<dyn Overlay>>,
     /// Whether a background turn is currently running.
@@ -81,6 +84,9 @@ pub struct App {
     /// Tokens consumed in the current turn.
     turn_input_tokens: u64,
     turn_output_tokens: u64,
+    /// Tool usage counters for the current turn.
+    turn_tool_calls: u64,
+    turn_tool_failures: u64,
     /// Spinner animation frame (incremented on Tick).
     spinner_frame: usize,
     /// Maximum tokens for the budget progress bar.
@@ -241,6 +247,7 @@ impl App {
             base_status: status_text,
             chat: ChatWidget::new(),
             input: InputPanel::new(),
+            tool_activity: ToolActivityPanel::new(),
             overlays: Vec::new(),
             turn_active: false,
             cancel_flag,
@@ -248,6 +255,8 @@ impl App {
             turn_started: None,
             turn_input_tokens: 0,
             turn_output_tokens: 0,
+            turn_tool_calls: 0,
+            turn_tool_failures: 0,
             memory,
             storage: app_storage,
             sessions_dir,
@@ -285,6 +294,7 @@ impl App {
                     }
                     (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
                         self.chat.clear();
+                        self.tool_activity.clear();
                         self.chat.scroll_to_bottom();
                         return Ok(());
                     }
@@ -326,6 +336,12 @@ impl App {
                         return Ok(());
                     }
                     Mode::Normal => {
+                        if self.input.input_mode() != InputMode::Normal {
+                            let input_event = self.input.handle_key(key);
+                            self.handle_input_event(input_event).await;
+                            return Ok(());
+                        }
+
                         // Scroll keys
                         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                         match (key.code, ctrl) {
@@ -346,15 +362,26 @@ impl App {
                                 return Ok(());
                             }
                             (KeyCode::Tab, _) => {
-                                self.chat.select_next_tool();
+                                if self.tool_activity.is_empty() {
+                                    self.chat.select_next_tool();
+                                } else {
+                                    self.tool_activity.select_next();
+                                }
                                 return Ok(());
                             }
                             (KeyCode::BackTab, _) => {
-                                self.chat.select_prev_tool();
+                                if self.tool_activity.is_empty() {
+                                    self.chat.select_prev_tool();
+                                } else {
+                                    self.tool_activity.select_prev();
+                                }
                                 return Ok(());
                             }
-                            (KeyCode::Enter, _) | (KeyCode::Char(' '), _)
-                                if self.chat.toggle_selected_tool() =>
+                            (KeyCode::Enter, _)
+                            | (KeyCode::Char(' '), _)
+                            | (KeyCode::Char('t'), true)
+                                if self.tool_activity.toggle_selected()
+                                    || self.chat.toggle_selected_tool() =>
                             {
                                 return Ok(());
                             }
@@ -362,15 +389,8 @@ impl App {
                         }
 
                         // Input handling with InputEvent
-                        match self.input.handle_key(key) {
-                            InputEvent::Submit(prompt) => {
-                                self.send_prompt(prompt).await;
-                            }
-                            InputEvent::SlashCommand(cmd) => {
-                                self.handle_slash_command(cmd).await;
-                            }
-                            InputEvent::None => {}
-                        }
+                        let input_event = self.input.handle_key(key);
+                        self.handle_input_event(input_event).await;
                     }
                     Mode::Streaming => {
                         // During streaming, only scroll keys are handled.
@@ -380,10 +400,25 @@ impl App {
                             (KeyCode::PageDown, _) => self.chat.scroll_down(10),
                             (KeyCode::Up, false) => self.chat.scroll_up(1),
                             (KeyCode::Down, false) => self.chat.scroll_down(1),
-                            (KeyCode::Tab, _) => self.chat.select_next_tool(),
-                            (KeyCode::BackTab, _) => self.chat.select_prev_tool(),
-                            (KeyCode::Enter, _) | (KeyCode::Char(' '), _) => {
-                                let _ = self.chat.toggle_selected_tool();
+                            (KeyCode::Tab, _) => {
+                                if self.tool_activity.is_empty() {
+                                    self.chat.select_next_tool();
+                                } else {
+                                    self.tool_activity.select_next();
+                                }
+                            }
+                            (KeyCode::BackTab, _) => {
+                                if self.tool_activity.is_empty() {
+                                    self.chat.select_prev_tool();
+                                } else {
+                                    self.tool_activity.select_prev();
+                                }
+                            }
+                            (KeyCode::Enter, _)
+                            | (KeyCode::Char(' '), _)
+                            | (KeyCode::Char('t'), true) => {
+                                let _ = self.tool_activity.toggle_selected()
+                                    || self.chat.toggle_selected_tool();
                             }
                             _ => {}
                         }
@@ -396,12 +431,15 @@ impl App {
                     match event {
                         Event::Turn(turn_event) => self.handle_turn_event(turn_event).await,
                         Event::TurnComplete => {
+                            self.push_turn_summary();
                             self.chat.push_cell(Box::new(SeparatorCell));
                             self.mode = Mode::Normal;
                             self.turn_active = false;
                             self.turn_started = None;
                             self.turn_input_tokens = 0;
                             self.turn_output_tokens = 0;
+                            self.turn_tool_calls = 0;
+                            self.turn_tool_failures = 0;
                             self.status_text = self.base_status.clone();
                         }
                         Event::SessionError { message } => {
@@ -411,6 +449,8 @@ impl App {
                             self.turn_started = None;
                             self.turn_input_tokens = 0;
                             self.turn_output_tokens = 0;
+                            self.turn_tool_calls = 0;
+                            self.turn_tool_failures = 0;
                             self.status_text = self.base_status.clone();
                         }
                         Event::SessionNotice { message } => {
@@ -474,6 +514,34 @@ impl App {
         format!("↑{:.1}k ↓{:.1}k", up_k, down_k)
     }
 
+    fn push_turn_summary(&mut self) {
+        let Some(summary) = self.format_turn_summary() else { return };
+        self.chat.push_cell(Box::new(TurnSummaryCell { content: summary }));
+    }
+
+    fn format_turn_summary(&self) -> Option<String> {
+        let has_activity = self.turn_started.is_some()
+            || self.turn_tool_calls > 0
+            || self.turn_input_tokens > 0
+            || self.turn_output_tokens > 0;
+        if !has_activity {
+            return None;
+        }
+
+        let elapsed = self
+            .turn_started
+            .map(|started| format_duration_ms(started.elapsed().as_millis() as u64))
+            .unwrap_or_else(|| "n/a".to_string());
+        let tool_text = match (self.turn_tool_calls, self.turn_tool_failures) {
+            (0, _) => "0 tools".to_string(),
+            (calls, 0) => format!("{calls} tools"),
+            (calls, failures) => format!("{calls} tools · {failures} failed"),
+        };
+        let token_text = format_turn_tokens(self.turn_input_tokens, self.turn_output_tokens);
+
+        Some(format!("Turn {elapsed} · {tool_text} · {token_text}"))
+    }
+
     /// Update status bar to reflect auto-mode state.
     fn update_auto_mode_status(&mut self) {
         let on = self.auto_mode.load(Ordering::Relaxed);
@@ -494,10 +562,23 @@ impl App {
         self.cancel_flag.store(false, Ordering::Relaxed);
         crate::memory_runtime::record_user_preference(&self.memory, &prompt).await;
         self.chat.push_cell(Box::new(UserCell { content: prompt.clone() }));
+        self.tool_activity.clear();
         self.base_status = self.status_text.clone();
         let _ = self.turn_tx.send(BackgroundCommand::Prompt(prompt));
         self.mode = Mode::Streaming;
         self.turn_active = true;
+    }
+
+    async fn handle_input_event(&mut self, event: InputEvent) {
+        match event {
+            InputEvent::Submit(prompt) => {
+                self.send_prompt(prompt).await;
+            }
+            InputEvent::SlashCommand(cmd) => {
+                self.handle_slash_command(cmd).await;
+            }
+            InputEvent::None => {}
+        }
     }
 
     async fn handle_slash_command(&mut self, cmd: SlashCommand) {
@@ -506,9 +587,11 @@ impl App {
                 let help_text = "\
 Available commands:\n\n  /tool    — show registered tools and aliases\n\
   /model   — switch the model for later turns\n\
+  /api     — set the DeepSeek API key\n\
   /session — new, list, or resume stored sessions\n\
   /clear   — clear the visible conversation\n\
   /auto    — toggle auto-approve mode\n\
+  Ctrl+D   — quit when input is empty\n\
   /help    — show this help";
                 self.chat.push_cell(Box::new(UserCell { content: format!("/{cmd:?}") }));
                 self.chat.push_cell(Box::new(AgentCell {
@@ -519,6 +602,7 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
             SlashCommand::Clear => {
                 // App already has Ctrl+L for clear; /clear does the same
                 self.chat.clear();
+                self.tool_activity.clear();
                 self.chat.scroll_to_bottom();
             }
             SlashCommand::Auto => {
@@ -531,6 +615,9 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
                     .with_context("model");
                 self.overlays.push(Box::new(popup));
                 self.mode = Mode::Approving;
+            }
+            SlashCommand::Api => {
+                self.open_api_settings_popup();
             }
             SlashCommand::Tool => {
                 self.show_tool_summary();
@@ -602,6 +689,15 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
                     reason: "modification cancelled".into(),
                 });
             }
+            return;
+        }
+
+        if let Some(popup) = overlay.as_any().downcast_ref::<UserInputPopup>()
+            && popup.context() == Some("api_settings")
+            && let Some(answers) = popup.answers()
+        {
+            let key = answers.get("deepseek_api_key").cloned().unwrap_or_default();
+            self.set_deepseek_api_key(key);
         }
     }
 
@@ -643,6 +739,61 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
         self.mode = Mode::Approving;
     }
 
+    fn open_api_settings_popup(&mut self) {
+        let popup = UserInputPopup::new(
+            " API settings ",
+            vec![Question {
+                key: "deepseek_api_key".into(),
+                label: "DeepSeek API key".into(),
+                value: String::new(),
+                placeholder: String::new(),
+            }],
+        )
+        .with_context("api_settings");
+        self.overlays.push(Box::new(popup));
+        self.mode = Mode::Approving;
+    }
+
+    fn set_deepseek_api_key(&mut self, key: String) {
+        let key = key.trim().to_string();
+        if key.is_empty() {
+            self.chat.push_cell(Box::new(ErrorCell {
+                message: "API key was empty; no changes saved".to_string(),
+            }));
+            return;
+        }
+        self.model_switch.deepseek_api_key = Some(key.clone());
+        if let Some(base) = dirs::config_dir() {
+            let path = base.join("telos").join("config.toml");
+            if let Err(err) = save_deepseek_api_key(&path, &key) {
+                self.chat.push_cell(Box::new(ErrorCell {
+                    message: format!("failed to save API key: {err}"),
+                }));
+                return;
+            }
+        }
+        self.switch_to_default_deepseek_provider(&key);
+        self.status_text = "telos · API key configured".to_string();
+        self.base_status = self.status_text.clone();
+        self.chat.push_cell(Box::new(AgentCell {
+            buffer: "DeepSeek API key configured and applied to the current session.".to_string(),
+            is_streaming: false,
+        }));
+    }
+
+    fn switch_to_default_deepseek_provider(&mut self, key: &str) {
+        let config = telos_agent::RoutedModelConfig::dual(
+            key.to_string(),
+            "deepseek-v4-pro".to_string(),
+            "deepseek-v4-flash".to_string(),
+        );
+        let provider = Arc::new(telos_agent::RoutedProvider::new(config));
+        let _ = self.turn_tx.send(BackgroundCommand::SetProvider {
+            provider,
+            label: "deepseek-v4-pro/deepseek-v4-flash".to_string(),
+        });
+    }
+
     fn switch_model(&mut self, model: &str) {
         let Some(api_key) = self.model_switch.deepseek_api_key.clone() else {
             self.chat.push_cell(Box::new(ErrorCell {
@@ -682,6 +833,7 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
             return;
         }
         self.chat.clear();
+        self.tool_activity.clear();
         self.turn_input_tokens = 0;
         self.turn_output_tokens = 0;
         self.turn_started = None;
@@ -729,6 +881,7 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
         match self.storage.load(session_id).await {
             Ok(messages) => {
                 self.chat.clear();
+                self.tool_activity.clear();
                 self.chat.push_cell(Box::new(AgentCell {
                     buffer: format!("Resumed session: {session_id}"),
                     is_streaming: false,
@@ -830,6 +983,8 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
                 self.turn_started = Some(Instant::now());
                 self.turn_input_tokens = 0;
                 self.turn_output_tokens = 0;
+                self.turn_tool_calls = 0;
+                self.turn_tool_failures = 0;
             }
             TurnEvent::AssistantDelta { text } => {
                 self.status_text = "streaming…".to_string();
@@ -841,33 +996,22 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
             TurnEvent::ToolCall { tool_call_id, name, detail } => {
                 let label = if detail.is_empty() { name.clone() } else { detail.clone() };
                 self.status_text = label;
-                self.chat.push_cell(Box::new(ToolCallCell::new(tool_call_id, name, detail)));
+                self.turn_tool_calls = self.turn_tool_calls.saturating_add(1);
+                self.tool_activity.push_call(tool_call_id, name, detail);
             }
             TurnEvent::ToolProgress { tool_call_id, message, .. } => {
                 if !message.starts_with("running command with") {
                     self.status_text = message.to_string();
                 }
-                // Find the ToolCallCell and add progress
-                if let Some(ref id) = tool_call_id
-                    && let Some(cell) = self.chat.find_tool_call_mut(id)
-                    && let Some(tc) = cell.as_any_mut().downcast_mut::<ToolCallCell>()
-                {
-                    tc.add_progress(message);
+                if let Some(ref id) = tool_call_id {
+                    self.tool_activity.set_progress(id, message);
                 }
             }
             TurnEvent::ToolCompleted { tool_call_id, name, is_error } => {
-                let detail = if let Some(cell) = self.chat.find_tool_call_mut(&tool_call_id)
-                    && let Some(tc) = cell.as_any_mut().downcast_mut::<ToolCallCell>()
-                {
-                    tc.set_completed(!is_error);
-                    tc.detail.clone()
-                } else {
-                    let mut cell =
-                        ToolCallCell::new(tool_call_id.clone(), name.clone(), String::new());
-                    cell.set_completed(!is_error);
-                    self.chat.push_cell(Box::new(cell));
-                    String::new()
-                };
+                let detail = self.tool_activity.complete(&tool_call_id, name.clone(), !is_error);
+                if is_error {
+                    self.turn_tool_failures = self.turn_tool_failures.saturating_add(1);
+                }
 
                 if !is_error {
                     crate::memory_runtime::record_successful_tool(
@@ -881,6 +1025,11 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
             }
             TurnEvent::ToolResult(message) => {
                 for result in message.tool_results_iter() {
+                    self.tool_activity.add_result_content(
+                        &result.tool_call_id,
+                        &result.content,
+                        result.is_error,
+                    );
                     if result.is_error {
                         crate::memory_runtime::record_tool_error(&self.memory, result, None).await;
                     }
@@ -911,22 +1060,25 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
     }
 
     /// Draw the entire UI.
-    pub fn draw(&self, frame: &mut Frame) {
+    pub fn draw(&mut self, frame: &mut Frame) {
         let area = frame.area();
         let theme = Theme::default();
 
-        // Layout: chat | input | status
+        // Layout: chat | compact tool activity | input | status
+        let activity_height = self.tool_activity.height(area.width as usize);
         let constraints = vec![
-            Constraint::Min(0),    // chat
-            Constraint::Length(5), // input panel
-            Constraint::Length(1), // status bar
+            Constraint::Min(0),                  // chat
+            Constraint::Length(activity_height), // recent tool/command activity
+            Constraint::Length(5),               // input panel
+            Constraint::Length(1),               // status bar
         ];
 
         let layout =
             Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
 
         self.chat.render(frame, layout[0], &theme);
-        self.input.render(frame, layout[1], self.mode == Mode::Normal);
+        self.tool_activity.render(frame, layout[1], &theme);
+        self.input.render(frame, layout[2], self.mode == Mode::Normal);
 
         // ── Status bar at the bottom ─────────────────────────────────
         let status = if self.turn_active {
@@ -943,7 +1095,7 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
 
         status_bar::render(
             frame,
-            layout[2],
+            layout[3],
             &status,
             self.spinner_frame,
             self.turn_input_tokens + self.turn_output_tokens,
@@ -970,6 +1122,63 @@ fn save_auto_mode(path: &std::path::Path, on: bool) -> anyhow::Result<()> {
     };
     // Set auto_mode at the top level.
     config.as_table_mut().and_then(|t| t.insert("auto_mode".into(), toml::Value::Boolean(on)));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, toml::to_string_pretty(&config)?)?;
+    Ok(())
+}
+
+fn format_duration_ms(ms: u64) -> String {
+    if ms < 1_000 {
+        return format!("{ms}ms");
+    }
+    if ms < 60_000 {
+        return format!("{:.1}s", ms as f64 / 1000.0);
+    }
+    let secs = ms / 1000;
+    format!("{}m{}s", secs / 60, secs % 60)
+}
+
+fn format_turn_tokens(input: u64, output: u64) -> String {
+    let total = input + output;
+    if total == 0 {
+        return "tokens n/a".to_string();
+    }
+    format!(
+        "tokens ↑{} ↓{} total {}",
+        format_token_count(input),
+        format_token_count(output),
+        format_token_count(total)
+    )
+}
+
+fn format_token_count(tokens: u64) -> String {
+    if tokens < 1_000 {
+        return tokens.to_string();
+    }
+    format!("{:.1}k", tokens as f64 / 1000.0)
+}
+
+fn save_deepseek_api_key(path: &std::path::Path, key: &str) -> anyhow::Result<()> {
+    let contents = if path.exists() {
+        std::fs::read_to_string(path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let mut config: toml::Value = if contents.is_empty() {
+        toml::Value::Table(toml::Table::new())
+    } else {
+        toml::from_str(&contents).unwrap_or(toml::Value::Table(toml::Table::new()))
+    };
+
+    let table =
+        config.as_table_mut().ok_or_else(|| anyhow::anyhow!("config root is not a table"))?;
+    let env = table.entry("env").or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let env_table =
+        env.as_table_mut().ok_or_else(|| anyhow::anyhow!("config [env] is not a table"))?;
+    env_table.insert("DEEPSEEK_API_KEY".into(), toml::Value::String(key.to_string()));
+
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -1025,5 +1234,14 @@ mod tests {
         app.send_prompt("hello".into()).await;
 
         assert!(!cancelled.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn turn_summary_formats_duration_tools_and_tokens() {
+        assert_eq!(format_duration_ms(850), "850ms");
+        assert_eq!(format_duration_ms(12_340), "12.3s");
+        assert_eq!(format_duration_ms(65_000), "1m5s");
+        assert_eq!(format_turn_tokens(12_300, 1_800), "tokens ↑12.3k ↓1.8k total 14.1k");
+        assert_eq!(format_turn_tokens(0, 0), "tokens n/a");
     }
 }

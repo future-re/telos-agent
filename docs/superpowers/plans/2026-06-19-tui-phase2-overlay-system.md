@@ -12,6 +12,7 @@
 - Assistant and thinking streams are tracked separately so deltas do not merge into the wrong cell.
 - Tool cells retain progress when marked completed and shell tools can be selected and expanded.
 - `/model` switches the provider for later turns in the current TUI process when a DeepSeek API key is available.
+- `/api` sets the DeepSeek API key for the current TUI process and persists it to `[env].DEEPSEEK_API_KEY`.
 - `/session` supports new session, list sessions, and resume from JSONL storage.
 - `/tool` shows registered tools, aliases, and descriptions.
 - `Ctrl+C` cancellation is reset before the next prompt.

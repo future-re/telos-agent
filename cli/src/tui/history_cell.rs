@@ -23,6 +23,13 @@ pub trait HistoryCell: Send {
     /// Render this cell into `area` of the provided `frame`.
     fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme);
 
+    /// Render this cell after skipping `top_skip` terminal lines.
+    fn render_scrolled(&self, frame: &mut Frame, area: Rect, theme: &Theme, top_skip: u16) {
+        if top_skip == 0 {
+            self.render(frame, area, theme);
+        }
+    }
+
     /// Whether this cell is still accumulating content (streaming).
     fn is_streaming(&self) -> bool {
         false
@@ -89,6 +96,25 @@ impl HistoryCell for UserCell {
 
         let text = Text::from(lines);
         frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), area);
+    }
+
+    fn render_scrolled(&self, frame: &mut Frame, area: Rect, theme: &Theme, top_skip: u16) {
+        let lines: Vec<Line> = self
+            .content
+            .lines()
+            .map(|line| {
+                Line::from(vec![
+                    Span::styled("▸ ", theme.user_style()),
+                    Span::styled(line.to_string(), theme.user_style()),
+                ])
+            })
+            .collect();
+
+        let text = Text::from(lines);
+        frame.render_widget(
+            Paragraph::new(text).wrap(Wrap { trim: true }).scroll((top_skip, 0)),
+            area,
+        );
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -191,6 +217,25 @@ impl HistoryCell for AgentCell {
         }
     }
 
+    fn render_scrolled(&self, frame: &mut Frame, area: Rect, theme: &Theme, top_skip: u16) {
+        if self.buffer.is_empty() {
+            return;
+        }
+        if is_diff_content(&self.buffer) {
+            let diff_text = render_diff(&self.buffer, theme);
+            frame.render_widget(
+                Paragraph::new(diff_text).wrap(Wrap { trim: true }).scroll((top_skip, 0)),
+                area,
+            );
+        } else {
+            let md_text = crate::tui::markdown::render_markdown(&self.buffer, area.width as usize);
+            frame.render_widget(
+                Paragraph::new(md_text).wrap(Wrap { trim: true }).scroll((top_skip, 0)),
+                area,
+            );
+        }
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -247,6 +292,18 @@ impl HistoryCell for ThinkingCell {
         frame.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }), area);
     }
 
+    fn render_scrolled(&self, frame: &mut Frame, area: Rect, theme: &Theme, top_skip: u16) {
+        let label = format!("  💭 {}", self.buffer.trim());
+        let lines: Vec<Line> = label
+            .lines()
+            .map(|l| Line::from(Span::styled(l.to_string(), theme.thinking_style())))
+            .collect();
+        frame.render_widget(
+            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }).scroll((top_skip, 0)),
+            area,
+        );
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -272,6 +329,8 @@ pub struct ToolCallCell {
     pub tool_call_id: String,
     /// Progress messages accumulated during execution.
     pub progress_messages: Vec<String>,
+    /// Final output/error preview lines from the tool result.
+    pub result_lines: Vec<String>,
     /// Whether to show expanded output (for shell commands).
     pub expanded: bool,
     /// Whether this cell is selected for keyboard actions.
@@ -287,6 +346,7 @@ impl ToolCallCell {
             state: ToolState::Pending,
             tool_call_id,
             progress_messages: Vec::new(),
+            result_lines: Vec::new(),
             expanded: !is_shell, // shell commands start collapsed
             selected: false,
         }
@@ -314,16 +374,46 @@ impl ToolCallCell {
     pub fn add_progress(&mut self, message: String) {
         self.progress_messages.push(message);
     }
+
+    pub fn add_result_content(&mut self, content: &serde_json::Value, is_error: bool) {
+        self.result_lines = extract_result_lines(content, is_error);
+    }
+
+    fn title(&self) -> String {
+        let detail = truncate_chars(self.detail.trim(), 120);
+        if self.is_shell() {
+            return match self.state {
+                ToolState::Pending | ToolState::Running { .. } => format!("Running {detail}"),
+                ToolState::Completed { ok: true } => format!("Ran {detail}"),
+                ToolState::Completed { ok: false } => format!("Failed {detail}"),
+            };
+        }
+
+        if detail.is_empty() { self.name.clone() } else { format!("{}: {}", self.name, detail) }
+    }
+
+    fn is_expanded(&self) -> bool {
+        self.expanded || !self.is_shell()
+    }
 }
 
 impl HistoryCell for ToolCallCell {
     fn needed_lines(&self, _width: usize) -> u16 {
-        // Shell command collapsed: just one line
-        if self.is_shell() && !self.expanded {
-            return 1;
+        let mut lines = 1u16;
+        if self.is_expanded() {
+            lines += self.progress_messages.len().min(8) as u16;
+            lines += self.result_lines.len().min(12) as u16;
+            let hidden = hidden_result_lines(self.result_lines.len(), 12);
+            if hidden > 0 {
+                lines += 1;
+            }
+        } else if !self.result_lines.is_empty() {
+            lines += self.result_lines.len().min(2) as u16;
+            let hidden = hidden_result_lines(self.result_lines.len(), 2);
+            if hidden > 0 {
+                lines += 1;
+            }
         }
-        let mut lines = 1u16; // tool name line
-        lines += self.progress_messages.len() as u16;
         lines
     }
 
@@ -340,91 +430,187 @@ impl HistoryCell for ToolCallCell {
     }
 
     fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        // ── Shell command collapsed: show command with [+N] hint ────
-        if self.is_shell() && !self.expanded {
-            let cmd = if self.detail.chars().count() > 120 {
-                format!("{}…", self.detail.chars().take(119).collect::<String>())
-            } else {
-                self.detail.clone()
-            };
-            let hint = if self.progress_messages.is_empty() {
-                String::new()
-            } else {
-                format!("  [+{} lines]", self.progress_messages.len())
-            };
-            let (icon, mut style) = match self.state {
-                ToolState::Pending => ("  ◌ ", theme.tool_pending_style()),
-                ToolState::Running { .. } => ("  ◌ ", theme.tool_pending_style()),
-                ToolState::Completed { ok } => {
-                    if ok {
-                        ("  ✓ ", theme.tool_ok_style())
-                    } else {
-                        ("  ✗ ", theme.tool_error_style())
-                    }
-                }
-            };
-            if self.selected {
-                style = style.add_modifier(Modifier::REVERSED);
-            }
-            let label = format!("$ {}{}", cmd, hint);
-            let line = Line::from(vec![Span::styled(icon, style), Span::styled(label, style)]);
-            frame.render_widget(
-                Paragraph::new(Text::from(vec![line])).wrap(Wrap { trim: true }),
-                area,
-            );
-            return;
-        }
-
-        // ── Full view (non-shell, shell expanded, or pending/running) ──
-        let mut spans = Vec::new();
-
-        match self.state {
+        let (marker, mut style) = match self.state {
             ToolState::Pending | ToolState::Running { .. } => {
-                let style = if self.selected {
-                    theme.tool_pending_style().add_modifier(Modifier::REVERSED)
-                } else {
-                    theme.tool_pending_style()
-                };
-                spans.push(Span::styled("  ◌ ", style));
-                let label = if self.is_shell() {
-                    format!("$ {}", self.detail)
-                } else if self.detail.is_empty() {
-                    self.name.clone()
-                } else {
-                    format!("{}: {}", self.name, self.detail)
-                };
-                spans.push(Span::styled(label, style));
+                ("•", Style::default().fg(theme.tool_pending_fg))
             }
-            ToolState::Completed { ok } => {
-                let (icon, mut style) = if ok {
-                    ("  ✓ ", theme.tool_ok_style())
-                } else {
-                    ("  ✗ ", theme.tool_error_style())
-                };
-                if self.selected {
-                    style = style.add_modifier(Modifier::REVERSED);
-                }
-                spans.push(Span::styled(icon, style));
-                let label = if self.is_shell() {
-                    format!("$ {}", self.detail)
-                } else if self.detail.is_empty() {
-                    self.name.clone()
-                } else {
-                    format!("{}: {}", self.name, self.detail)
-                };
-                spans.push(Span::styled(label, style));
+            ToolState::Completed { ok: true } if self.is_shell() => {
+                ("•", Style::default().fg(theme.assistant_fg).add_modifier(Modifier::BOLD))
             }
+            ToolState::Completed { ok: true } => ("✓", theme.tool_ok_style()),
+            ToolState::Completed { ok: false } => ("✗", theme.tool_error_style()),
+        };
+        if self.selected {
+            style = style.fg(theme.user_fg).add_modifier(Modifier::BOLD);
         }
 
-        let mut lines = vec![Line::from(spans)];
-        for msg in &self.progress_messages {
-            lines.push(Line::from(Span::styled(
-                format!("     {msg}"),
-                Style::default().fg(theme.thinking_fg),
-            )));
+        let mut lines = vec![Line::from(vec![
+            Span::styled(format!("{marker} "), style),
+            Span::styled(self.title(), style),
+        ])];
+
+        if self.is_expanded() {
+            for msg in self.progress_messages.iter().take(8) {
+                lines.push(transcript_line(msg, theme));
+            }
+            push_result_preview(&mut lines, &self.result_lines, 12, theme, true);
+        } else {
+            push_result_preview(&mut lines, &self.result_lines, 2, theme, false);
         }
 
         frame.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }), area);
+    }
+
+    fn render_scrolled(&self, frame: &mut Frame, area: Rect, theme: &Theme, top_skip: u16) {
+        let (marker, mut style) = match self.state {
+            ToolState::Pending | ToolState::Running { .. } => {
+                ("•", Style::default().fg(theme.tool_pending_fg))
+            }
+            ToolState::Completed { ok: true } if self.is_shell() => {
+                ("•", Style::default().fg(theme.assistant_fg).add_modifier(Modifier::BOLD))
+            }
+            ToolState::Completed { ok: true } => ("✓", theme.tool_ok_style()),
+            ToolState::Completed { ok: false } => ("✗", theme.tool_error_style()),
+        };
+        if self.selected {
+            style = style.fg(theme.user_fg).add_modifier(Modifier::BOLD);
+        }
+
+        let mut lines = vec![Line::from(vec![
+            Span::styled(format!("{marker} "), style),
+            Span::styled(self.title(), style),
+        ])];
+
+        if self.is_expanded() {
+            for msg in self.progress_messages.iter().take(8) {
+                lines.push(transcript_line(msg, theme));
+            }
+            push_result_preview(&mut lines, &self.result_lines, 12, theme, true);
+        } else {
+            push_result_preview(&mut lines, &self.result_lines, 2, theme, false);
+        }
+
+        frame.render_widget(
+            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }).scroll((top_skip, 0)),
+            area,
+        );
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+fn push_result_preview(
+    lines: &mut Vec<Line<'static>>,
+    result_lines: &[String],
+    max_lines: usize,
+    theme: &Theme,
+    expanded: bool,
+) {
+    for line in result_lines.iter().take(max_lines) {
+        lines.push(transcript_line(line, theme));
+    }
+    let hidden = hidden_result_lines(result_lines.len(), max_lines);
+    if hidden > 0 {
+        let hint = if expanded {
+            format!("    … +{hidden} lines")
+        } else {
+            format!("    … +{hidden} lines (ctrl + t to view transcript)")
+        };
+        lines.push(Line::from(Span::styled(
+            hint,
+            Style::default().fg(theme.thinking_fg).add_modifier(Modifier::DIM),
+        )));
+    }
+}
+
+fn transcript_line(line: &str, theme: &Theme) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("  └ ", Style::default().fg(theme.thinking_fg)),
+        Span::styled(truncate_chars(line, 180), Style::default().fg(theme.thinking_fg)),
+    ])
+}
+
+fn hidden_result_lines(total: usize, shown: usize) -> usize {
+    total.saturating_sub(shown)
+}
+
+pub(crate) fn extract_result_lines(content: &serde_json::Value, is_error: bool) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(stdout) = content.get("stdout").and_then(|value| value.as_str()) {
+        lines.extend(stdout.lines().map(str::to_string).filter(|line| !line.trim().is_empty()));
+    }
+    if let Some(stderr) = content.get("stderr").and_then(|value| value.as_str()) {
+        lines.extend(stderr.lines().map(str::to_string).filter(|line| !line.trim().is_empty()));
+    }
+    if lines.is_empty()
+        && let Some(text) = content.get("text").and_then(|value| value.as_str())
+    {
+        lines.extend(text.lines().map(str::to_string).filter(|line| !line.trim().is_empty()));
+    }
+    if lines.is_empty() && is_error {
+        if let Some(message) = content
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(|value| value.as_str())
+        {
+            lines
+                .extend(message.lines().map(str::to_string).filter(|line| !line.trim().is_empty()));
+        } else {
+            lines.push(content.to_string());
+        }
+    }
+    lines
+}
+
+pub(crate) fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let keep = max_chars.saturating_sub(1);
+    format!("{}…", text.chars().take(keep).collect::<String>())
+}
+
+// ─── TurnSummaryCell ─────────────────────────────────────────────────────────
+
+pub struct TurnSummaryCell {
+    pub content: String,
+}
+
+impl HistoryCell for TurnSummaryCell {
+    fn needed_lines(&self, width: usize) -> u16 {
+        let chars_per_line = width.max(20).saturating_sub(2);
+        ((self.content.chars().count() as f64 / chars_per_line as f64).ceil() as u16).max(1)
+    }
+
+    fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let line = Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                self.content.clone(),
+                Style::default().fg(theme.thinking_fg).add_modifier(Modifier::DIM),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(Text::from(vec![line])).wrap(Wrap { trim: true }), area);
+    }
+
+    fn render_scrolled(&self, frame: &mut Frame, area: Rect, theme: &Theme, top_skip: u16) {
+        let line = Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                self.content.clone(),
+                Style::default().fg(theme.thinking_fg).add_modifier(Modifier::DIM),
+            ),
+        ]);
+        frame.render_widget(
+            Paragraph::new(Text::from(vec![line])).wrap(Wrap { trim: true }).scroll((top_skip, 0)),
+            area,
+        );
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -452,6 +638,18 @@ impl HistoryCell for SeparatorCell {
             Line::from(""),
         ];
         frame.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }), area);
+    }
+
+    fn render_scrolled(&self, frame: &mut Frame, area: Rect, theme: &Theme, top_skip: u16) {
+        let lines = vec![
+            Line::from(""),
+            Line::from(Span::styled("─────", Style::default().fg(theme.thinking_fg))),
+            Line::from(""),
+        ];
+        frame.render_widget(
+            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }).scroll((top_skip, 0)),
+            area,
+        );
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -492,6 +690,18 @@ impl HistoryCell for ErrorCell {
             .map(|l| Line::from(Span::styled(format!("✗ {l}"), theme.tool_error_style())))
             .collect();
         frame.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }), area);
+    }
+
+    fn render_scrolled(&self, frame: &mut Frame, area: Rect, theme: &Theme, top_skip: u16) {
+        let lines: Vec<Line> = self
+            .message
+            .lines()
+            .map(|l| Line::from(Span::styled(format!("✗ {l}"), theme.tool_error_style())))
+            .collect();
+        frame.render_widget(
+            Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }).scroll((top_skip, 0)),
+            area,
+        );
     }
 
     fn as_any(&self) -> &dyn Any {

@@ -3,6 +3,7 @@
 pub enum SlashCommand {
     Tool,
     Model,
+    Api,
     Help,
     Clear,
     Session,
@@ -15,6 +16,7 @@ impl SlashCommand {
         vec![
             ("tool", "List or configure tools", SlashCommand::Tool),
             ("model", "Switch model provider", SlashCommand::Model),
+            ("api", "Set DeepSeek API key", SlashCommand::Api),
             ("help", "Show help information", SlashCommand::Help),
             ("clear", "Clear conversation", SlashCommand::Clear),
             ("session", "Session management", SlashCommand::Session),
@@ -104,9 +106,9 @@ impl CommandPopup {
             return;
         }
 
-        let popup_width = area.width.min(40);
+        let popup_width = area.width.min(56);
         let popup_height = (self.matches.len() as u16).min(10) + 2; // border
-        let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+        let popup_x = area.x;
         let popup_y = area.y.saturating_sub(popup_height + 1);
 
         let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: popup_height };

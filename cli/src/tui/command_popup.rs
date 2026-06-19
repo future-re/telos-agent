@@ -7,6 +7,7 @@ pub enum SlashCommand {
     Help,
     Clear,
     Session,
+    Tasks,
     Auto,
 }
 
@@ -20,6 +21,7 @@ impl SlashCommand {
             ("help", "Show help information", SlashCommand::Help),
             ("clear", "Clear conversation", SlashCommand::Clear),
             ("session", "Session management", SlashCommand::Session),
+            ("tasks", "Show persisted tasks", SlashCommand::Tasks),
             ("auto", "Toggle auto-approve mode", SlashCommand::Auto),
         ]
     }
@@ -140,5 +142,24 @@ impl CommandPopup {
 impl Default for CommandPopup {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slash_command_registry_includes_tasks() {
+        let commands = SlashCommand::registry();
+
+        assert!(commands.iter().any(|(name, _, command)| {
+            *name == "tasks" && matches!(command, SlashCommand::Tasks)
+        }));
+        assert!(
+            SlashCommand::matching("ta").iter().any(
+                |(name, _, command)| *name == "tasks" && matches!(command, SlashCommand::Tasks)
+            )
+        );
     }
 }

@@ -1,7 +1,7 @@
 use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -122,6 +122,8 @@ pub struct App {
     storage: Arc<dyn Storage>,
     /// On-disk directory containing JSONL sessions.
     sessions_dir: PathBuf,
+    /// On-disk directory containing persisted task JSON files.
+    task_dir: PathBuf,
     /// Model switch settings.
     model_switch: ModelSwitchConfig,
     /// Snapshot of registered tool metadata for /tool.
@@ -147,6 +149,7 @@ impl App {
         tools: telos_agent::ToolRegistry,
         status_text: String,
         project_root: Option<&std::path::Path>,
+        project_root_or_cwd: &std::path::Path,
         auto_mode_on: bool,
         memory: Arc<Mutex<MemoryStore>>,
         model_switch: ModelSwitchConfig,
@@ -157,6 +160,7 @@ impl App {
             tools,
             status_text,
             project_root,
+            project_root_or_cwd,
             auto_mode_on,
             memory,
             model_switch,
@@ -170,6 +174,7 @@ impl App {
         tools: telos_agent::ToolRegistry,
         status_text: String,
         project_root: Option<&std::path::Path>,
+        project_root_or_cwd: &std::path::Path,
         auto_mode_on: bool,
         memory: Arc<Mutex<MemoryStore>>,
         model_switch: ModelSwitchConfig,
@@ -179,6 +184,7 @@ impl App {
         let session_manager = crate::session::SessionManager::new(project_root);
         std::fs::create_dir_all(session_manager.sessions_dir()).ok();
         let sessions_dir = session_manager.sessions_dir().to_path_buf();
+        let task_dir = task_dir_for_root(project_root_or_cwd);
         let storage =
             Arc::new(telos_agent::JsonlStorage::new(session_manager.sessions_dir().to_path_buf())?);
         config.storage = Some(storage.clone());
@@ -312,6 +318,7 @@ impl App {
             memory,
             storage: app_storage,
             sessions_dir,
+            task_dir,
             model_switch,
             tool_infos,
             editing_approval: None,
@@ -649,6 +656,7 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
   /model   — switch the model for later turns\n\
   /api     — set the DeepSeek API key\n\
   /session — new, list, or resume stored sessions\n\
+  /tasks   — show persisted tasks\n\
   /clear   — clear the visible conversation\n\
   /auto    — toggle auto-approve mode\n\
   Ctrl+D   — quit when input is empty\n\
@@ -690,6 +698,9 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
                 .with_context("session_action");
                 self.overlays.push(Box::new(popup));
                 self.mode = Mode::Approving;
+            }
+            SlashCommand::Tasks => {
+                self.show_task_summary();
             }
         }
     }
@@ -931,6 +942,14 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
         self.chat.push_cell(Box::new(AgentCell { buffer: body, is_streaming: false }));
     }
 
+    fn show_task_summary(&mut self) {
+        let tasks = tasks_in_dir(&self.task_dir);
+        self.chat.push_cell(Box::new(AgentCell {
+            buffer: format_task_summary(&tasks),
+            is_streaming: false,
+        }));
+    }
+
     async fn resume_session(&mut self, session_id: &str) {
         if self.turn_active {
             self.chat.push_cell(Box::new(ErrorCell {
@@ -997,18 +1016,7 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
     }
 
     fn session_ids(&self) -> Vec<String> {
-        let Ok(entries) = std::fs::read_dir(&self.sessions_dir) else { return Vec::new() };
-        let mut sessions = entries
-            .filter_map(Result::ok)
-            .filter_map(|entry| {
-                let path = entry.path();
-                (path.extension().and_then(|ext| ext.to_str()) == Some("jsonl"))
-                    .then(|| path.file_stem()?.to_str().map(str::to_string))?
-            })
-            .collect::<Vec<_>>();
-        sessions.sort();
-        sessions.reverse();
-        sessions
+        session_ids_in_dir(&self.sessions_dir)
     }
 
     fn show_tool_summary(&mut self) {
@@ -1268,6 +1276,110 @@ fn collect_tool_infos(tools: &telos_agent::ToolRegistry) -> Vec<ToolInfo> {
     infos
 }
 
+fn session_ids_in_dir(sessions_dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(sessions_dir) else { return Vec::new() };
+    let mut sessions = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            if !entry.file_type().ok()?.is_file() {
+                return None;
+            }
+            let path = entry.path();
+            (path.extension().and_then(|ext| ext.to_str()) == Some("jsonl"))
+                .then(|| path.file_stem()?.to_str().map(str::to_string))?
+        })
+        .filter(|id| is_valid_session_id_for_tui(id))
+        .collect::<Vec<_>>();
+    sessions.sort();
+    sessions.reverse();
+    sessions
+}
+
+fn is_valid_session_id_for_tui(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn task_dir_for_root(root: &Path) -> PathBuf {
+    root.join(".telos").join("tasks")
+}
+
+fn tasks_in_dir(task_dir: &Path) -> Vec<telos_agent::Task> {
+    let Ok(entries) = std::fs::read_dir(task_dir) else { return Vec::new() };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            if !entry.file_type().ok()?.is_file() {
+                return None;
+            }
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                return None;
+            }
+            let content = std::fs::read_to_string(path).ok()?;
+            serde_json::from_str(&content).ok()
+        })
+        .collect()
+}
+
+fn format_task_summary(tasks: &[telos_agent::Task]) -> String {
+    if tasks.is_empty() {
+        return "No persisted tasks found.".to_string();
+    }
+
+    let mut tasks = tasks.to_vec();
+    tasks.sort_by(|a, b| {
+        task_status_rank(&a.status)
+            .cmp(&task_status_rank(&b.status))
+            .then_with(|| a.subject.cmp(&b.subject))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+
+    let mut lines = vec!["Persisted tasks:".to_string(), String::new()];
+    for task in tasks {
+        let blocked_by = if task.blocked_by.is_empty() {
+            String::new()
+        } else {
+            format!(" (blocked by {})", task.blocked_by.join(", "))
+        };
+        lines.push(format!(
+            "  {} {} [{}] {}{}",
+            task_status_marker(&task.status),
+            task.subject,
+            task_status_label(&task.status),
+            task.id,
+            blocked_by
+        ));
+    }
+    lines.join("\n")
+}
+
+fn task_status_rank(status: &telos_agent::TaskStatus) -> u8 {
+    match status {
+        telos_agent::TaskStatus::Pending => 0,
+        telos_agent::TaskStatus::InProgress => 1,
+        telos_agent::TaskStatus::Completed => 2,
+        telos_agent::TaskStatus::Deleted => 3,
+    }
+}
+
+fn task_status_label(status: &telos_agent::TaskStatus) -> &'static str {
+    match status {
+        telos_agent::TaskStatus::Pending => "pending",
+        telos_agent::TaskStatus::InProgress => "in_progress",
+        telos_agent::TaskStatus::Completed => "completed",
+        telos_agent::TaskStatus::Deleted => "deleted",
+    }
+}
+
+fn task_status_marker(status: &telos_agent::TaskStatus) -> &'static str {
+    match status {
+        telos_agent::TaskStatus::Pending => "◦",
+        telos_agent::TaskStatus::InProgress => "•",
+        telos_agent::TaskStatus::Completed => "✓",
+        telos_agent::TaskStatus::Deleted => "×",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1307,6 +1419,7 @@ mod tests {
             tools,
             "telos".into(),
             Some(temp.path()),
+            temp.path(),
             false,
             memory,
             ModelSwitchConfig::default(),
@@ -1332,6 +1445,7 @@ mod tests {
             tools,
             "telos".into(),
             Some(temp.path()),
+            temp.path(),
             false,
             memory,
             ModelSwitchConfig::default(),
@@ -1370,6 +1484,7 @@ mod tests {
             tools,
             "telos".into(),
             Some(temp.path()),
+            temp.path(),
             false,
             memory,
             ModelSwitchConfig::default(),
@@ -1409,6 +1524,7 @@ mod tests {
             tools,
             "telos".into(),
             Some(temp.path()),
+            temp.path(),
             false,
             memory,
             ModelSwitchConfig::default(),
@@ -1446,5 +1562,94 @@ mod tests {
         assert_eq!(format_duration_ms(65_000), "1m5s");
         assert_eq!(format_turn_tokens(12_300, 1_800), "tokens ↑12.3k ↓1.8k total 14.1k");
         assert_eq!(format_turn_tokens(0, 0), "tokens n/a");
+    }
+
+    #[test]
+    fn session_ids_in_dir_filters_invalid_storage_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("session-123.jsonl"), "").unwrap();
+        std::fs::write(dir.path().join("chat_abc.jsonl"), "").unwrap();
+        std::fs::write(dir.path().join("bad.name.jsonl"), "").unwrap();
+        std::fs::write(dir.path().join("bad space.jsonl"), "").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "").unwrap();
+        std::fs::create_dir(dir.path().join("directory-session.jsonl")).unwrap();
+
+        assert_eq!(
+            session_ids_in_dir(dir.path()),
+            vec!["session-123".to_string(), "chat_abc".to_string()]
+        );
+    }
+
+    #[test]
+    fn tasks_in_dir_reads_without_creating_or_accepting_invalid_entries() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join(".telos").join("tasks");
+
+        assert!(tasks_in_dir(&missing).is_empty());
+        assert!(!missing.exists());
+
+        std::fs::create_dir_all(&missing).unwrap();
+        let valid = telos_agent::Task {
+            id: "task_valid".into(),
+            subject: "Visible".into(),
+            description: "Shown by /tasks".into(),
+            status: telos_agent::TaskStatus::Pending,
+            blocked_by: vec![],
+            blocks: vec![],
+            output: None,
+        };
+        std::fs::write(
+            missing.join("task_valid.json"),
+            serde_json::to_string_pretty(&valid).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(missing.join("bad.json"), "{not valid json").unwrap();
+        std::fs::write(missing.join("notes.txt"), "ignore me").unwrap();
+        std::fs::create_dir(missing.join("directory-task.json")).unwrap();
+
+        let tasks = tasks_in_dir(&missing);
+
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, "task_valid");
+    }
+
+    #[test]
+    fn task_summary_formats_empty_and_grouped_tasks() {
+        assert_eq!(format_task_summary(&[]), "No persisted tasks found.");
+
+        let tasks = vec![
+            telos_agent::Task {
+                id: "task_a".into(),
+                subject: "Write tests".into(),
+                description: "Cover task list rendering".into(),
+                status: telos_agent::TaskStatus::Pending,
+                blocked_by: vec![],
+                blocks: vec![],
+                output: None,
+            },
+            telos_agent::Task {
+                id: "task_b".into(),
+                subject: "Implement command".into(),
+                description: "Add /tasks".into(),
+                status: telos_agent::TaskStatus::InProgress,
+                blocked_by: vec!["task_a".into()],
+                blocks: vec![],
+                output: None,
+            },
+            telos_agent::Task {
+                id: "task_c".into(),
+                subject: "Commit".into(),
+                description: "Save changes".into(),
+                status: telos_agent::TaskStatus::Completed,
+                blocked_by: vec![],
+                blocks: vec![],
+                output: None,
+            },
+        ];
+
+        assert_eq!(
+            format_task_summary(&tasks),
+            "Persisted tasks:\n\n  ◦ Write tests [pending] task_a\n  • Implement command [in_progress] task_b (blocked by task_a)\n  ✓ Commit [completed] task_c"
+        );
     }
 }

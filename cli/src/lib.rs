@@ -159,6 +159,7 @@ pub async fn run() -> Result<()> {
                     tools,
                     status,
                     project_root.as_deref(),
+                    project_root.as_deref().unwrap_or(cwd),
                     merged.auto_mode.unwrap_or(false),
                     memory_store,
                     tui::app::ModelSwitchConfig {

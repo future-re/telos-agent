@@ -157,6 +157,7 @@ pub async fn run_chat(
         tools,
         status,
         project_root.as_deref(),
+        project_root.as_deref().unwrap_or(cwd),
         auto_mode,
         memory_store,
         crate::tui::app::ModelSwitchConfig {

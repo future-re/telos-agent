@@ -252,17 +252,32 @@ pub struct ToolCallCell {
     pub tool_call_id: String,
     /// Progress messages accumulated during execution.
     pub progress_messages: Vec<String>,
+    /// Whether to show expanded output (for shell commands).
+    pub expanded: bool,
 }
 
 impl ToolCallCell {
     pub fn new(tool_call_id: String, name: String, detail: String) -> Self {
+        let is_shell = matches!(name.to_lowercase().as_str(), "bash" | "shell");
         Self {
             name,
             detail,
             state: ToolState::Pending,
             tool_call_id,
             progress_messages: Vec::new(),
+            expanded: !is_shell, // shell commands start collapsed
         }
+    }
+
+    /// Whether this cell represents a shell command execution.
+    pub fn is_shell(&self) -> bool {
+        let lower = self.name.to_lowercase();
+        lower == "bash" || lower == "shell"
+    }
+
+    /// Toggle the expanded/collapsed state.
+    pub fn toggle_expand(&mut self) {
+        self.expanded = !self.expanded;
     }
 
     pub fn set_running(&mut self) {
@@ -280,6 +295,10 @@ impl ToolCallCell {
 
 impl HistoryCell for ToolCallCell {
     fn needed_lines(&self, _width: usize) -> u16 {
+        // Shell command collapsed: just one line
+        if self.is_shell() && !self.expanded {
+            return 1;
+        }
         let mut lines = 1u16; // tool name line
         lines += self.progress_messages.len() as u16;
         lines
@@ -290,12 +309,43 @@ impl HistoryCell for ToolCallCell {
     }
 
     fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        // ── Shell command collapsed: show command with [+N] hint ────
+        if self.is_shell() && !self.expanded {
+            let cmd = if self.detail.chars().count() > 120 {
+                format!("{}…", self.detail.chars().take(119).collect::<String>())
+            } else {
+                self.detail.clone()
+            };
+            let hint = if self.progress_messages.is_empty() {
+                String::new()
+            } else {
+                format!("  [+{} lines]", self.progress_messages.len())
+            };
+            let (icon, style) = match self.state {
+                ToolState::Pending => ("  ◌ ", theme.tool_pending_style()),
+                ToolState::Running { .. } => ("  ◌ ", theme.tool_pending_style()),
+                ToolState::Completed { ok } => {
+                    if ok { ("  ✓ ", theme.tool_ok_style()) } else { ("  ✗ ", theme.tool_error_style()) }
+                }
+            };
+            let label = format!("$ {}{}", cmd, hint);
+            let line = Line::from(vec![
+                Span::styled(icon, style),
+                Span::styled(label, style),
+            ]);
+            frame.render_widget(Paragraph::new(Text::from(vec![line])).wrap(Wrap { trim: true }), area);
+            return;
+        }
+
+        // ── Full view (non-shell, shell expanded, or pending/running) ──
         let mut spans = Vec::new();
 
         match self.state {
             ToolState::Pending | ToolState::Running { .. } => {
                 spans.push(Span::styled("  ◌ ", theme.tool_pending_style()));
-                let label = if self.detail.is_empty() {
+                let label = if self.is_shell() {
+                    format!("$ {}", self.detail)
+                } else if self.detail.is_empty() {
                     self.name.clone()
                 } else {
                     format!("{}: {}", self.name, self.detail)
@@ -309,7 +359,9 @@ impl HistoryCell for ToolCallCell {
                     ("  ✗ ", theme.tool_error_style())
                 };
                 spans.push(Span::styled(icon, style));
-                let label = if self.detail.is_empty() {
+                let label = if self.is_shell() {
+                    format!("$ {}", self.detail)
+                } else if self.detail.is_empty() {
                     self.name.clone()
                 } else {
                     format!("{}: {}", self.name, self.detail)

@@ -9,7 +9,7 @@ use async_trait::async_trait;
 
 use crate::error::AgentError;
 use crate::message::{ContentBlock, Message, Role};
-use crate::provider::{CompletionRequest, ModelProvider};
+use crate::provider::{CompletionRequest, ModelHint, ModelProvider};
 
 /// Strategy for compacting conversation history when tokens exceed a budget.
 #[async_trait]
@@ -103,7 +103,7 @@ impl CompactionStrategy for SummaryCompaction {
             system_prompt_blocks: None,
             messages: to_summarize,
             tools: vec![],
-            model_hint: None,
+            model_hint: Some(ModelHint::Summarization),
         };
 
         let response = provider.complete(summary_request).await?;

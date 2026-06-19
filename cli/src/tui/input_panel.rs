@@ -30,6 +30,29 @@ pub enum InputMode {
     Pasting { line_count: usize },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ComposerHints {
+    left: String,
+    right: Option<String>,
+}
+
+impl ComposerHints {
+    fn normal(width: u16) -> Self {
+        let left = String::from(" Enter send  Alt+Enter newline ");
+        let right = String::from(" Ctrl+up/down history  Shift+Tab auto  Ctrl+D quit ");
+
+        if usize::from(width) >= left.len() + right.len() + 2 {
+            Self { left, right: Some(right) }
+        } else {
+            Self { left, right: None }
+        }
+    }
+
+    fn history(index: usize, len: usize) -> Self {
+        Self { left: format!(" History {}/{} ", index + 1, len), right: None }
+    }
+}
+
 pub struct InputPanel {
     textarea: TextArea<'static>,
     /// Sent messages — used for up/down history navigation.
@@ -47,8 +70,7 @@ pub struct InputPanel {
 impl InputPanel {
     pub fn new() -> Self {
         let mut textarea = TextArea::default();
-        textarea
-            .set_placeholder_text("Message… (/ for commands, Enter to send, Alt+Enter newline)");
+        textarea.set_placeholder_text("Ask tiny-agent to edit, inspect, or run...");
         textarea.set_cursor_line_style(Style::default().add_modifier(Modifier::UNDERLINED));
         Self {
             textarea,
@@ -273,47 +295,64 @@ impl InputPanel {
                 InputMode::Pasting { line_count } => {
                     Span::styled(format!(" Pasted {line_count} lines — y(es)/n(o)? "), border_style)
                 }
-                _ => Span::styled(" Message ", border_style),
+                _ => Span::styled(" Compose ", border_style),
             }
         } else {
             Span::styled(" Streaming… ", Style::default().fg(theme.thinking_fg))
         };
 
-        let block = Block::default()
+        let mut block = Block::default()
             .borders(Borders::ALL)
             .border_style(border_style)
             .title_top(Line::from(title).left_aligned());
+
+        if active && !matches!(self.mode, InputMode::Pasting { .. }) {
+            block = block.title_top(
+                Line::from(Span::styled(
+                    " / commands ",
+                    Style::default().fg(theme.thinking_fg).add_modifier(Modifier::DIM),
+                ))
+                .right_aligned(),
+            );
+        }
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
         // Prompt prefix
-        let prompt_w = 2u16;
+        let prompt_w = 3u16;
         let prompt_area = Rect { x: inner.x, y: inner.y, width: prompt_w, height: 1 };
         let prompt = Paragraph::new(Line::from(Span::styled(
-            "> ",
+            "› ",
             Style::default().fg(theme.user_fg).add_modifier(Modifier::BOLD),
         )));
         frame.render_widget(prompt, prompt_area);
 
         // Hint line
-        let hint = match self.history_pos {
-            Some(i) => format!(" history [{}/{}] ", i + 1, self.history.len()),
-            None => String::from(
-                " enter·send  alt+enter·newline  ctrl+↑↓·history  shift+tab·auto  ctrl+d·quit ",
-            ),
+        let hints = match self.history_pos {
+            Some(i) => ComposerHints::history(i, self.history.len()),
+            None => ComposerHints::normal(inner.width),
         };
-        let hint_widget = Paragraph::new(hint)
-            .style(Style::default().fg(theme.thinking_fg).add_modifier(Modifier::DIM));
+        let hint_style = Style::default().fg(theme.thinking_fg).add_modifier(Modifier::DIM);
+        let footer_y = inner.y + inner.height.saturating_sub(1);
+
         frame.render_widget(
-            hint_widget,
-            Rect {
-                y: inner.y + inner.height.saturating_sub(1),
-                x: inner.x,
-                width: inner.width,
-                height: 1,
-            },
+            Paragraph::new(hints.left).style(hint_style),
+            Rect { y: footer_y, x: inner.x, width: inner.width, height: 1 },
         );
+
+        if let Some(right) = hints.right {
+            let right_width = right.len().min(usize::from(inner.width)) as u16;
+            frame.render_widget(
+                Paragraph::new(right).style(hint_style),
+                Rect {
+                    y: footer_y,
+                    x: inner.x + inner.width.saturating_sub(right_width),
+                    width: right_width,
+                    height: 1,
+                },
+            );
+        }
 
         // Render the textarea
         let input_area = Rect {
@@ -334,5 +373,37 @@ impl InputPanel {
 impl Default for InputPanel {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ComposerHints;
+
+    #[test]
+    fn composer_hints_split_when_width_allows() {
+        let hints = ComposerHints::normal(96);
+
+        assert_eq!(hints.left, " Enter send  Alt+Enter newline ");
+        assert_eq!(
+            hints.right.as_deref(),
+            Some(" Ctrl+up/down history  Shift+Tab auto  Ctrl+D quit ")
+        );
+    }
+
+    #[test]
+    fn composer_hints_collapse_on_narrow_width() {
+        let hints = ComposerHints::normal(34);
+
+        assert_eq!(hints.left, " Enter send  Alt+Enter newline ");
+        assert_eq!(hints.right, None);
+    }
+
+    #[test]
+    fn composer_hints_show_history_position() {
+        let hints = ComposerHints::history(2, 5);
+
+        assert_eq!(hints.left, " History 3/5 ");
+        assert_eq!(hints.right, None);
     }
 }

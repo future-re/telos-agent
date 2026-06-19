@@ -15,7 +15,9 @@ use crate::executor::{ToolExecutionEvent, ToolExecutionStreamItem, execute_tool_
 use crate::hooks::{HookContext, HookPhase};
 use crate::message::{ContentBlock, Message, Role, TextBlock, ThinkingBlock};
 use crate::metrics::SessionMetrics;
-use crate::provider::{CompletionRequest, ModelProvider, ProviderEvent, StopReason, TokenUsage};
+use crate::provider::{
+    CompletionRequest, ModelHint, ModelProvider, ProviderEvent, StopReason, TokenUsage,
+};
 use crate::runtime::{TurnEvent, TurnResult};
 use crate::storage::{SessionMetadata, Storage};
 use crate::tool::FileReadState;
@@ -247,6 +249,42 @@ impl AgentSession {
         Ok(CompactionResult::Continue { events, compactions })
     }
 
+    /// Determine the appropriate [`ModelHint`] for the current iteration.
+    fn resolve_hint(
+        config: &crate::config::AgentConfig,
+        iteration: usize,
+        previous_tool_error: bool,
+        consecutive_noop: usize,
+    ) -> ModelHint {
+        // Fast path: everything uses execution model
+        if config.path == crate::config::TaskPath::Fast {
+            return ModelHint::Execution;
+        }
+
+        // Error recovery: tool failure needs re-evaluation
+        if previous_tool_error {
+            return ModelHint::Recovery;
+        }
+
+        // Stuck detection: repeated tool rounds with no progress
+        if consecutive_noop >= 3 {
+            return ModelHint::Thinking;
+        }
+
+        // First call in a turn: understand user intent, plan
+        if iteration == 1 {
+            return ModelHint::Thinking;
+        }
+
+        // Heavy path: periodic re-thinking every 4 tool rounds
+        if config.path == crate::config::TaskPath::Heavy && iteration.is_multiple_of(4) {
+            return ModelHint::Thinking;
+        }
+
+        // Default: processing tool results is execution work
+        ModelHint::Execution
+    }
+
     /// Stream a single provider completion, handling retries.
     ///
     /// Returns the assistant message, stop reason, optional token usage, and all
@@ -256,6 +294,7 @@ impl AgentSession {
         &mut self,
         provider: &P,
         tool_definitions: &[crate::tool::ToolDefinition],
+        hint: ModelHint,
     ) -> Result<(Message, StopReason, Option<TokenUsage>, Vec<TurnEvent>), AgentError> {
         let mut events = Vec::new();
         let mut attempts = 0;
@@ -279,7 +318,7 @@ impl AgentSession {
                 system_prompt_blocks,
                 messages: self.messages.clone(),
                 tools: tool_definitions.to_vec(),
-                model_hint: None,
+                model_hint: Some(hint),
             };
 
             let mut stream = Box::pin(provider.stream_complete(request));
@@ -536,6 +575,9 @@ impl AgentSession {
             }
 
             let mut iterations = 0;
+            // Track state for model routing decisions
+            let mut previous_tool_error = false;
+            let mut consecutive_noop = 0usize;
             loop {
                 if iterations >= self.config.max_iterations {
                     Err(AgentError::MaxIterations(self.config.max_iterations))?;
@@ -585,8 +627,15 @@ impl AgentSession {
                     }
                 }
 
+                let hint = Self::resolve_hint(
+                    &self.config,
+                    iterations,
+                    previous_tool_error,
+                    consecutive_noop,
+                );
+
                 let (assistant_message, stop_reason, usage, provider_events) =
-                    self.call_provider(provider, &tool_definitions).await?;
+                    self.call_provider(provider, &tool_definitions, hint).await?;
                 for event in provider_events {
                     yield event;
                 }
@@ -618,6 +667,14 @@ impl AgentSession {
                 }
 
                 let tool_calls = assistant_message.tool_calls().cloned().collect::<Vec<_>>();
+
+                // Track no-progress loops: tool calls but no text output
+                if !tool_calls.is_empty() && assistant_message.text_content().is_empty() {
+                    consecutive_noop += 1;
+                } else if !tool_calls.is_empty() {
+                    consecutive_noop = 0;
+                }
+
                 if tool_calls.is_empty() {
                     let stop_events = self
                         .run_hook_phase(HookPhase::Stop, &hook_context, &assistant_message)
@@ -643,6 +700,9 @@ impl AgentSession {
                 for event in tool_events {
                     yield event;
                 }
+
+                // Update routing state from tool results
+                previous_tool_error = tool_message.tool_results_iter().any(|r| r.is_error);
 
                 self.messages.push(tool_message.clone());
                 yield TurnEvent::ToolResult(tool_message);
@@ -753,6 +813,7 @@ fn estimate_message_tokens(messages: &[Message], provider: &dyn ModelProvider) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::TaskPath;
     use crate::mock::MockProvider;
     use crate::provider::{CompletionResponse, StopReason, TokenUsage};
     use crate::storage::{JsonlStorage, Storage};
@@ -817,5 +878,49 @@ mod tests {
         assert_eq!(resumed.messages.len(), 2); // user + assistant (no system prompt)
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_hint_first_iteration_is_thinking() {
+        let config = AgentConfig::default(); // TaskPath::Standard
+        let hint = AgentSession::resolve_hint(&config, 1, false, 0);
+        assert_eq!(hint, ModelHint::Thinking);
+    }
+
+    #[test]
+    fn resolve_hint_tool_error_is_recovery() {
+        let config = AgentConfig::default();
+        let hint = AgentSession::resolve_hint(&config, 2, true, 0);
+        assert_eq!(hint, ModelHint::Recovery);
+    }
+
+    #[test]
+    fn resolve_hint_execution_default() {
+        let config = AgentConfig::default();
+        let hint = AgentSession::resolve_hint(&config, 2, false, 0);
+        assert_eq!(hint, ModelHint::Execution);
+    }
+
+    #[test]
+    fn resolve_hint_fast_path_always_execution() {
+        let config = AgentConfig::default().with_path(TaskPath::Fast);
+        assert_eq!(AgentSession::resolve_hint(&config, 1, false, 0), ModelHint::Execution);
+        assert_eq!(AgentSession::resolve_hint(&config, 2, true, 0), ModelHint::Execution);
+        assert_eq!(AgentSession::resolve_hint(&config, 5, false, 3), ModelHint::Execution);
+    }
+
+    #[test]
+    fn resolve_hint_stuck_detection() {
+        let config = AgentConfig::default();
+        let hint = AgentSession::resolve_hint(&config, 5, false, 3);
+        assert_eq!(hint, ModelHint::Thinking);
+    }
+
+    #[test]
+    fn resolve_hint_heavy_periodic_rethink() {
+        let config = AgentConfig::default().with_path(TaskPath::Heavy);
+        assert_eq!(AgentSession::resolve_hint(&config, 1, false, 0), ModelHint::Thinking);
+        assert_eq!(AgentSession::resolve_hint(&config, 2, false, 0), ModelHint::Execution);
+        assert_eq!(AgentSession::resolve_hint(&config, 4, false, 0), ModelHint::Thinking);
     }
 }

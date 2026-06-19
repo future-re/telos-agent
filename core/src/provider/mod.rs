@@ -15,10 +15,12 @@ mod openai_compat;
 mod test;
 
 pub mod deepseek;
+pub mod routed;
 mod traits;
 mod types;
 
 pub use deepseek::{DeepSeekConfig, DeepSeekProvider};
+pub use routed::{RoutedModelConfig, RoutedProvider};
 pub use traits::{ErasedProvider, ModelProvider};
 pub use types::{CompletionRequest, CompletionResponse, ProviderEvent, StopReason, TokenUsage};
 

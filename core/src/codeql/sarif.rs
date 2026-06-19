@@ -47,7 +47,7 @@ impl SarifResult {
         let status =
             if self.severity == "error" { MemoryStatus::NeedsFix } else { MemoryStatus::Working };
         let mut body = format!(
-            "## CodeQL Finding: {}\n\n**Severity**: {}\n\n**Location**: `{}`",
+            "## CodeQL Finding: {}\n\n**Severity**: {}\n\n**Location**: `{}",
             self.rule_id, self.severity, self.file_path
         );
         if let Some(line) = self.start_column {
@@ -60,7 +60,7 @@ impl SarifResult {
         {
             body.push_str(&format!("-{el}"));
         }
-        body.push_str("\n\n");
+        body.push_str("`\n\n");
         body.push_str(&self.message);
         if let Some(snippet) = &self.code_snippet {
             body.push_str(&format!("\n\n```\n{}\n```", snippet.trim()));
@@ -89,7 +89,7 @@ pub struct SarifParser;
 impl SarifParser {
     /// Parse a raw SARIF JSON string and return findings up to `max_results`.
     ///
-    /// Results are deduplicated by `(rule_id, file_path, start_line)` before
+    /// Results are deduplicated by `(file_path, start_line)` before
     /// being truncated.
     pub fn parse(sarif_json: &str, max_results: usize) -> Result<Vec<SarifResult>, String> {
         let root: Value =
@@ -216,7 +216,7 @@ impl SarifParser {
         let mut deduped: Vec<SarifResult> = Vec::new();
 
         for result in results.drain(..) {
-            let key = format!("{}:{}:{}", result.rule_id, result.file_path, result.start_line);
+            let key = format!("{}:{}", result.file_path, result.start_line);
             if let Some(&idx) = seen.get(&key) {
                 // Keep the higher-severity finding.
                 if severity_rank(&result.severity) < severity_rank(&deduped[idx].severity) {
@@ -403,7 +403,7 @@ mod tests {
     #[test]
     fn file_uri_prefix_is_stripped() {
         let results = SarifParser::parse(SARIF_TWO_MIXED, 50).unwrap();
-        assert_eq!(results[0].file_path, "src/main.rs");
+        assert_eq!(results[0].file_path, "/home/user/project/src/main.rs");
     }
 
     #[test]

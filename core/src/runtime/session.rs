@@ -504,7 +504,7 @@ impl AgentSession {
 
             // If no system prompt source was configured, build the default modular
             // prompt assembly from the tool registry so the model gets the full
-            // Claude Code-style identity, style, task guidance, safety, and tool
+            // telos-agent identity, style, task guidance, safety, and tool
             // usage instructions.
             if self.config.prompt_assembly.is_none() && self.config.base_system_prompt.is_none() {
                 self.config.prompt_assembly = Some(Arc::new(

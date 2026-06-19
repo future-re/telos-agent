@@ -1,4 +1,4 @@
-//! Plugin system error types — discriminated union following learn-claude-code patterns.
+//! Plugin system error types — discriminated union following modular error-pattern conventions.
 
 use std::path::PathBuf;
 use thiserror::Error;

@@ -15,7 +15,7 @@ use crate::tool::ToolRegistry;
 
 /// Core identity, security policy, and system-level rules.
 ///
-/// Adapted from the publicly exposed Claude Code system prompt:
+/// Topics:
 ///   - identity and role
 ///   - security testing policy
 ///   - URL generation rule
@@ -69,9 +69,6 @@ impl PromptSection for IdentitySection {
 // ── Tone and Style ────────────────────────────────────────
 
 /// Output style guidance for a terminal coding assistant.
-///
-/// Verbatim from the exposed Claude Code "Tone and style" and "Output
-/// efficiency" sections.
 pub struct ToneStyleSection;
 
 #[async_trait]
@@ -101,9 +98,6 @@ impl PromptSection for ToneStyleSection {
 // ── Task Guidance ─────────────────────────────────────────
 
 /// Recommended workflow for software-engineering tasks.
-///
-/// Verbatim from the exposed Claude Code "Doing tasks" section, adapted only
-/// for tool-name references.
 pub struct TaskGuidanceSection;
 
 #[async_trait]
@@ -137,8 +131,6 @@ impl PromptSection for TaskGuidanceSection {
 // ── Safety ────────────────────────────────────────────────
 
 /// Safety, reversibility, and honest reporting guidance.
-///
-/// Verbatim from the exposed Claude Code "Executing actions with care" section.
 pub struct SafetySection;
 
 #[async_trait]
@@ -153,7 +145,7 @@ impl PromptSection for SafetySection {
     async fn render(&self, _ctx: &()) -> String {
         [
             "# Executing actions with care",
-            "Carefully consider the reversibility and blast radius of actions. Generally you can freely take local, reversible actions like editing files or running tests. But for actions that are hard to reverse, affect shared systems beyond your local environment, or could otherwise be risky or destructive, check with the user before proceeding. The cost of pausing to confirm is low, while the cost of an unwanted action (lost work, unintended messages sent, deleted branches) can be very high. For actions like these, consider the context, the action, and user instructions, and by default transparently communicate the action and ask for confirmation before proceeding. This default can be changed by user instructions - if explicitly asked to operate more autonomously, then you may proceed without confirmation, but still attend to the risks and consequences when taking actions. A user approving an action (like a git push) once does NOT mean that they approve it in all contexts, so unless actions are authorized in advance in durable instructions like CLAUDE.md or AGENTS.md files, always confirm first. Authorization stands for the scope specified, not beyond. Match the scope of your actions to what was actually requested.",
+            "Carefully consider the reversibility and blast radius of actions. Generally you can freely take local, reversible actions like editing files or running tests. But for actions that are hard to reverse, affect shared systems beyond your local environment, or could otherwise be risky or destructive, check with the user before proceeding. The cost of pausing to confirm is low, while the cost of an unwanted action (lost work, unintended messages sent, deleted branches) can be very high. For actions like these, consider the context, the action, and user instructions, and by default transparently communicate the action and ask for confirmation before proceeding. This default can be changed by user instructions - if explicitly asked to operate more autonomously, then you may proceed without confirmation, but still attend to the risks and consequences when taking actions. A user approving an action (like a git push) once does NOT mean that they approve it in all contexts, so unless actions are authorized in advance in durable instructions like TELOS.md or AGENTS.md files, always confirm first. Authorization stands for the scope specified, not beyond. Match the scope of your actions to what was actually requested.",
             "",
             "Examples of the kind of risky actions that warrant user confirmation:",
             "- Destructive operations: deleting files/branches, dropping database tables, killing processes, rm -rf, overwriting uncommitted changes",
@@ -231,9 +223,6 @@ impl PromptSection for PathSection {
 // ── Tool Usage ────────────────────────────────────────────
 
 /// General tool-selection and parallelism guidance.
-///
-/// Verbatim from the exposed Claude Code "Using your tools" section, adapted
-/// for telos-agent tool names (Bash/Read/Edit/Write/Glob/Grep/Subagent/Skill).
 pub struct ToolUsageSection;
 
 #[async_trait]

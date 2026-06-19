@@ -32,6 +32,21 @@ pub async fn run_single(
     telos_agent::register_core_tools(&mut tools);
     let mut assembly = crate::context::build_prompt_assembly(&ctx);
     crate::memory_runtime::register_memory_runtime(&mut tools, &mut assembly, memory_store.clone());
+    // CodeQL startup analysis (background).
+    let codeql_cfg_run_single = crate::codeql_runtime::codeql_config_from_file(config);
+    let codeql_runtime_run_single = crate::codeql_runtime::register_codeql(
+        &mut tools,
+        &mut assembly,
+        memory_store.clone(),
+        codeql_cfg_run_single,
+        project_root.clone().unwrap_or_else(|| cwd.to_path_buf()),
+    );
+    if let Some(runtime) = codeql_runtime_run_single {
+        tokio::spawn(async move {
+            let report = runtime.run_startup_analysis().await;
+            tracing::info!(?report, "CodeQL startup analysis complete");
+        });
+    }
     agent_config.prompt_assembly = Some(Arc::new(assembly));
 
     let mut session = AgentSession::new(agent_config).context("failed to create agent session")?;
@@ -87,6 +102,21 @@ pub async fn run_chat(
     let memory_store = crate::memory_runtime::open_memory_store(project_root.as_deref())?;
     let mut assembly = crate::context::build_prompt_assembly(&ctx);
     crate::memory_runtime::register_memory_runtime(&mut tools, &mut assembly, memory_store.clone());
+    // CodeQL startup analysis (background).
+    let codeql_cfg_chat = crate::codeql_runtime::codeql_config_from_file(config);
+    let codeql_runtime_chat = crate::codeql_runtime::register_codeql(
+        &mut tools,
+        &mut assembly,
+        memory_store.clone(),
+        codeql_cfg_chat,
+        project_root.clone().unwrap_or_else(|| cwd.to_path_buf()),
+    );
+    if let Some(runtime) = codeql_runtime_chat {
+        tokio::spawn(async move {
+            let report = runtime.run_startup_analysis().await;
+            tracing::info!(?report, "CodeQL startup analysis complete");
+        });
+    }
     agent_config.prompt_assembly = Some(Arc::new(assembly));
 
     let status =

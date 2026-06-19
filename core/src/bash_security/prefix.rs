@@ -4,7 +4,7 @@
 //! matched against allow/deny rules. The prefix must be a literal prefix of
 //! the original command.
 //!
-//! Inspired by Claude Code's `utils/bash/commands.ts` and `utils/shell/prefix.ts`.
+//! Inspired by telos-agent's `utils/bash/commands.ts` and `utils/shell/prefix.ts`.
 
 use super::parser::{self, Node};
 

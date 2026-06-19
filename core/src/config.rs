@@ -271,8 +271,8 @@ impl AgentConfig {
 
     /// Replace `base_system_prompt` with the default modular prompt assembly.
     ///
-    /// This is the recommended way to use telos-agent's built-in Claude
-    /// Code-style prompt sections without manually wiring each section.
+    /// This is the recommended way to use telos-agent's built-in default
+    /// prompt sections without manually wiring each section.
     pub fn with_default_prompt_assembly(
         mut self,
         tools: Arc<crate::tool::ToolRegistry>,

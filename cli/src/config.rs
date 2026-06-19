@@ -15,9 +15,21 @@ use crate::onboarding::OnboardingResult;
 pub struct FileConfig {
     pub agent: Option<AgentSection>,
     pub approval: Option<ApprovalSection>,
+    pub codeql: Option<CodeqlConfigSection>,
     pub env: Option<HashMap<String, String>>,
     /// Whether to auto-approve tool calls by default.
     pub auto_mode: Option<bool>,
+}
+
+/// Configuration section for CodeQL static analysis.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct CodeqlConfigSection {
+    pub enabled: Option<bool>,
+    pub query_packs: Option<Vec<String>>,
+    pub max_results: Option<usize>,
+    pub timeout_secs: Option<u64>,
+    pub language: Option<String>,
+    pub database_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -80,6 +92,10 @@ pub fn merge_configs(user: Option<FileConfig>, project: Option<FileConfig>) -> F
         .as_ref()
         .and_then(|c| c.auto_mode)
         .or_else(|| user.as_ref().and_then(|c| c.auto_mode));
+    let codeql = merge_codeql(
+        user.as_ref().and_then(|c| c.codeql.as_ref()),
+        project.as_ref().and_then(|c| c.codeql.as_ref()),
+    );
     let env = match (user.and_then(|c| c.env), project.and_then(|c| c.env)) {
         (Some(mut u), Some(p)) => {
             u.extend(p);
@@ -90,7 +106,7 @@ pub fn merge_configs(user: Option<FileConfig>, project: Option<FileConfig>) -> F
         (None, None) => None,
     };
 
-    FileConfig { agent, approval, env, auto_mode }
+    FileConfig { agent, approval, codeql, env, auto_mode }
 }
 
 fn merge_agent(
@@ -134,6 +150,25 @@ fn merge_approval(
         (Some(u), Some(p)) => Some(ApprovalSection {
             default_policy: p.default_policy.clone().or_else(|| u.default_policy.clone()),
             policies: p.policies.clone().or_else(|| u.policies.clone()),
+        }),
+    }
+}
+
+fn merge_codeql(
+    user: Option<&CodeqlConfigSection>,
+    project: Option<&CodeqlConfigSection>,
+) -> Option<CodeqlConfigSection> {
+    match (user, project) {
+        (None, None) => None,
+        (Some(u), None) => Some(u.clone()),
+        (None, Some(p)) => Some(p.clone()),
+        (Some(u), Some(p)) => Some(CodeqlConfigSection {
+            enabled: p.enabled.or(u.enabled),
+            query_packs: p.query_packs.clone().or_else(|| u.query_packs.clone()),
+            max_results: p.max_results.or(u.max_results),
+            timeout_secs: p.timeout_secs.or(u.timeout_secs),
+            language: p.language.clone().or_else(|| u.language.clone()),
+            database_path: p.database_path.clone().or_else(|| u.database_path.clone()),
         }),
     }
 }

@@ -6,6 +6,8 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::codeql::CodeQLTool;
+use crate::codeql::CodeqlConfig;
 use crate::skills::SkillRegistry;
 use crate::tasks::TaskManager;
 use crate::tool::ToolRegistry;
@@ -74,6 +76,17 @@ pub fn register_memory_tools(
 /// Register the Skill tool if a skill registry is available.
 pub fn register_skill_tool(registry: &mut ToolRegistry, skill_registry: Arc<SkillRegistry>) {
     registry.register(SkillTool::new(skill_registry));
+}
+
+/// Register the CodeQL tool if a CodeQL config is available.
+pub fn register_codeql_tools(
+    registry: &mut ToolRegistry,
+    store: Arc<Mutex<crate::memory::MemoryStore>>,
+    config: Option<CodeqlConfig>,
+) {
+    if let Some(cfg) = config {
+        registry.register(CodeQLTool::new(Arc::new(cfg), store));
+    }
 }
 
 // Re-export shared helpers that other crate modules use directly.

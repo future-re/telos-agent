@@ -89,7 +89,7 @@ impl DependencyRef {
 
 // --- Hook configuration ---
 
-/// Hook event matcher — same shape as learn-claude-code's hook matcher.
+/// Hook event matcher — same shape as the modular hook matcher.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HookMatcher {

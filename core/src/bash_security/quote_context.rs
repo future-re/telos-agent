@@ -1,7 +1,7 @@
 //! Quote context extraction for bash commands.
 //!
 //! Provides three views of a command string, matching the semantics of
-//! Claude Code's `QuoteContext` in `utils/bash/treeSitterAnalysis.ts`:
+//! telos-agent's `QuoteContext` in `utils/bash/treeSitterAnalysis.ts`:
 //!
 //! - `fully_unquoted`: all quoted content removed
 //! - `with_double_quotes`: single-quoted / ANSI-C / heredoc content removed,

@@ -19,6 +19,7 @@
 // Module declarations — public so downstream crates can name internal types directly.
 pub mod approval;
 pub mod bash_security;
+pub mod codeql;
 pub mod compaction;
 pub mod config;
 pub mod error;
@@ -67,6 +68,10 @@ pub use memory::{
 pub use tools::{
     MemoryEditTool, MemoryGrepTool, MemoryReadTool, MemoryStatusTool, MemoryWriteTool,
 };
+// CodeQL — static analysis integration.
+pub use codeql::{
+    CodeQLTool, CodeqlConfig, CodeqlDatabase, CodeqlSection, SarifParser, SarifResult,
+};
 // Metrics — session-level counters accumulated by the runtime.
 pub use metrics::SessionMetrics;
 // Test helper — pre-canned [`ModelProvider`] for unit tests.
@@ -108,5 +113,6 @@ pub use tool::{
 pub use tools::{
     AskUserQuestionTool, FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ShellTool,
     SkillTool, TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool, WebFetchTool,
-    WebSearchTool, register_core_tools, register_memory_tools, register_task_tools,
+    WebSearchTool, register_codeql_tools, register_core_tools, register_memory_tools,
+    register_task_tools,
 };

@@ -2,8 +2,8 @@
 //!
 //! The prompt is assembled from independent sections rather than one hardcoded
 //! string. Static sections are rendered once and cached; dynamic sections are
-//! re-rendered every turn. This mirrors the design taught in
-//! learn-claude-code: "prompt is assembled, not hardcoded".
+//! re-rendered every turn. This mirrors the modular prompt architecture:
+//! "prompt is assembled, not hardcoded".
 pub mod assembly;
 pub mod builtins;
 pub mod section;

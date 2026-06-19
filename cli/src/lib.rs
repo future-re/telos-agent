@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod codeql_runtime;
 pub mod config;
 pub mod context;
 pub mod memory_runtime;
@@ -120,6 +121,23 @@ pub async fn run() -> Result<()> {
                     &mut assembly,
                     memory_store.clone(),
                 );
+                // CodeQL startup analysis (background).
+                let codeql_cfg = crate::codeql_runtime::codeql_config_from_file(&merged);
+                let codeql_runtime = crate::codeql_runtime::register_codeql(
+                    &mut tools,
+                    &mut assembly,
+                    memory_store.clone(),
+                    codeql_cfg,
+                    project_root
+                        .clone()
+                        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default()),
+                );
+                if let Some(runtime) = codeql_runtime {
+                    tokio::spawn(async move {
+                        let report = runtime.run_startup_analysis().await;
+                        tracing::info!(?report, "CodeQL startup analysis complete");
+                    });
+                }
                 let mut tui_config = config;
                 tui_config.prompt_assembly = Some(Arc::new(assembly));
 

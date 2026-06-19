@@ -6,6 +6,22 @@ use crate::message::{Message, ToolCall};
 use crate::prompt::PromptBlock;
 use crate::tool::ToolDefinition;
 
+/// Semantic routing hint — describes the nature of a provider call so that
+/// a routing provider can select an appropriate model.
+///
+/// Providers that don't support routing ignore this field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ModelHint {
+    /// Strategic reasoning: understanding user intent, planning, complex decisions.
+    Thinking,
+    /// Tool execution: processing tool results, simple file operations, retrieval.
+    Execution,
+    /// Error recovery: re-evaluating and re-planning after a tool failure.
+    Recovery,
+    /// Summarization: conversation compaction, history compression.
+    Summarization,
+}
+
 /// All inputs a provider needs to generate a single completion.
 ///
 /// `system_prompt` is separate from `messages` because OpenAI-compatible
@@ -18,6 +34,9 @@ pub struct CompletionRequest {
     pub system_prompt_blocks: Option<Vec<PromptBlock>>,
     pub messages: Vec<Message>,
     pub tools: Vec<ToolDefinition>,
+    /// Optional model routing hint. When `None`, the provider uses its default model.
+    /// When `Some`, a routing-aware provider may select a different model.
+    pub model_hint: Option<ModelHint>,
 }
 
 /// Why the model stopped emitting tokens.
@@ -64,4 +83,40 @@ pub enum ProviderEvent {
     ToolCall(ToolCall),
     /// Final marker carrying the stop reason and (optional) usage.
     MessageStop { stop_reason: StopReason, usage: Option<TokenUsage> },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_hint_is_none_by_default() {
+        let req = CompletionRequest {
+            system_prompt: None,
+            system_prompt_blocks: None,
+            messages: vec![],
+            tools: vec![],
+            model_hint: None,
+        };
+        assert!(req.model_hint.is_none());
+    }
+
+    #[test]
+    fn model_hint_can_be_set() {
+        let req = CompletionRequest {
+            system_prompt: None,
+            system_prompt_blocks: None,
+            messages: vec![],
+            tools: vec![],
+            model_hint: Some(ModelHint::Thinking),
+        };
+        assert_eq!(req.model_hint, Some(ModelHint::Thinking));
+    }
+
+    #[test]
+    fn model_hint_is_copy_and_eq() {
+        let a = ModelHint::Thinking;
+        let b = a;
+        assert_eq!(a, b);
+    }
 }

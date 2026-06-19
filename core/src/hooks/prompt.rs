@@ -13,6 +13,7 @@ pub async fn exec_prompt_hook(
         system_prompt_blocks: None,
         messages,
         tools: vec![],
+        model_hint: None,
     };
     let response = provider.complete(request).await?;
     Ok(response.message.text_content())

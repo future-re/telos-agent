@@ -103,6 +103,7 @@ impl CompactionStrategy for SummaryCompaction {
             system_prompt_blocks: None,
             messages: to_summarize,
             tools: vec![],
+            model_hint: None,
         };
 
         let response = provider.complete(summary_request).await?;

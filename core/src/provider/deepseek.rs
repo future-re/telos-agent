@@ -150,6 +150,7 @@ mod tests {
             system_prompt_blocks: None,
             messages: vec![Message::user("Hi")],
             tools: vec![],
+            model_hint: None,
         };
 
         let response = provider.complete(request).await.unwrap();
@@ -182,6 +183,7 @@ mod tests {
             system_prompt_blocks: None,
             messages: vec![Message::user("Hi")],
             tools: vec![],
+            model_hint: None,
         };
 
         let events: Vec<_> = provider.stream_complete(request).collect().await;

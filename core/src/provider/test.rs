@@ -38,6 +38,7 @@ fn simple_request() -> CompletionRequest {
         system_prompt_blocks: None,
         messages: vec![Message::user("What is the capital of France?")],
         tools: vec![],
+        model_hint: None,
     }
 }
 

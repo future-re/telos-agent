@@ -279,6 +279,7 @@ impl AgentSession {
                 system_prompt_blocks,
                 messages: self.messages.clone(),
                 tools: tool_definitions.to_vec(),
+                model_hint: None,
             };
 
             let mut stream = Box::pin(provider.stream_complete(request));

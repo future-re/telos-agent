@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Paragraph, Wrap};
 use std::any::Any;
@@ -97,6 +97,54 @@ pub struct AgentCell {
     pub is_streaming: bool,
 }
 
+// ─── Diff helpers ──────────────────────────────────────────────────────────────
+
+fn is_diff_content(text: &str) -> bool {
+    if text.contains("diff --git") {
+        return true;
+    }
+    // Count lines starting with + or - (diff additions/removals, not markdown lists)
+    let mut diff_lines = 0;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if (trimmed.starts_with('+') && !trimmed.starts_with("+++"))
+            || (trimmed.starts_with('-')
+                && !trimmed.starts_with("---")
+                && !trimmed.starts_with("- "))
+        {
+            diff_lines += 1;
+        }
+        if diff_lines >= 3 {
+            return true;
+        }
+    }
+    false
+}
+
+fn render_diff(text: &str, theme: &Theme) -> Text<'static> {
+    let mut lines = Vec::new();
+    for line in text.lines() {
+        let span =
+            if line.starts_with("diff --git") || line.starts_with("---") || line.starts_with("+++")
+            {
+                Span::styled(
+                    line.to_string(),
+                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                )
+            } else if line.starts_with("@@") {
+                Span::styled(line.to_string(), Style::default().fg(Color::Cyan))
+            } else if line.starts_with('+') {
+                Span::styled(line.to_string(), Style::default().fg(Color::Rgb(80, 220, 120)))
+            } else if line.starts_with('-') {
+                Span::styled(line.to_string(), Style::default().fg(Color::Rgb(220, 80, 80)))
+            } else {
+                Span::styled(line.to_string(), theme.assistant_style())
+            };
+        lines.push(Line::from(span));
+    }
+    Text::from(lines)
+}
+
 impl HistoryCell for AgentCell {
     fn needed_lines(&self, width: usize) -> u16 {
         if self.buffer.is_empty() {
@@ -115,12 +163,17 @@ impl HistoryCell for AgentCell {
         self.buffer.push_str(text);
     }
 
-    fn render(&self, frame: &mut Frame, area: Rect, _theme: &Theme) {
+    fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         if self.buffer.is_empty() {
             return;
         }
-        let md_text = crate::tui::markdown::render_markdown(&self.buffer, area.width as usize);
-        frame.render_widget(Paragraph::new(md_text).wrap(Wrap { trim: true }), area);
+        if is_diff_content(&self.buffer) {
+            let diff_text = render_diff(&self.buffer, theme);
+            frame.render_widget(Paragraph::new(diff_text).wrap(Wrap { trim: true }), area);
+        } else {
+            let md_text = crate::tui::markdown::render_markdown(&self.buffer, area.width as usize);
+            frame.render_widget(Paragraph::new(md_text).wrap(Wrap { trim: true }), area);
+        }
     }
 
     fn as_any(&self) -> &dyn Any {

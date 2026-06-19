@@ -48,27 +48,28 @@ pub fn render(
     }
 
     // ── Token progress bar ──────────────────────────────────────
-    if let Some(max) = tokens_max {
-        if max > 0 && tokens_used > 0 {
-            let pct = (tokens_used as f64 / max as f64 * 100.0).clamp(0.0, 100.0);
-            let bar_width = 10usize;
-            let filled = ((pct / 100.0) * bar_width as f64).round() as usize;
-            let empty = bar_width.saturating_sub(filled);
-            let bar = format!("[{}{}] {:3.0}%", "█".repeat(filled), "░".repeat(empty), pct);
+    if let Some(max) = tokens_max
+        && max > 0
+        && tokens_used > 0
+    {
+        let pct = (tokens_used as f64 / max as f64 * 100.0).clamp(0.0, 100.0);
+        let bar_width = 10usize;
+        let filled = ((pct / 100.0) * bar_width as f64).round() as usize;
+        let empty = bar_width.saturating_sub(filled);
+        let bar = format!("[{}{}] {:3.0}%", "█".repeat(filled), "░".repeat(empty), pct);
 
-            let bar_color = if pct >= 95.0 {
-                Color::Red
-            } else if pct >= 90.0 {
-                Color::Rgb(255, 165, 0) // orange
-            } else if pct >= 75.0 {
-                Color::Yellow
-            } else {
-                Color::Green
-            };
+        let bar_color = if pct >= 95.0 {
+            Color::Red
+        } else if pct >= 90.0 {
+            Color::Rgb(255, 165, 0) // orange
+        } else if pct >= 75.0 {
+            Color::Yellow
+        } else {
+            Color::Green
+        };
 
-            spans.push(Span::styled(" ", Style::default().bg(theme.status_bg)));
-            spans.push(Span::styled(bar, Style::default().fg(bar_color).bg(theme.status_bg)));
-        }
+        spans.push(Span::styled(" ", Style::default().bg(theme.status_bg)));
+        spans.push(Span::styled(bar, Style::default().fg(bar_color).bg(theme.status_bg)));
     }
 
     let style = Style::default().fg(theme.status_fg).bg(theme.status_bg);

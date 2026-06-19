@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod config;
 pub mod context;
+pub mod memory_runtime;
 pub mod project;
 pub mod runner;
 pub mod terminal;
@@ -115,7 +116,14 @@ pub async fn run() -> Result<()> {
                 };
 
                 // Inject the loaded context into the agent's prompt assembly.
-                let assembly = crate::context::build_prompt_assembly(&ctx);
+                let memory_store =
+                    crate::memory_runtime::open_memory_store(project_root.as_deref())?;
+                let mut assembly = crate::context::build_prompt_assembly(&ctx);
+                crate::memory_runtime::register_memory_runtime(
+                    &mut tools,
+                    &mut assembly,
+                    memory_store.clone(),
+                );
                 let mut tui_config = config;
                 tui_config.prompt_assembly = Some(Arc::new(assembly));
 
@@ -131,6 +139,7 @@ pub async fn run() -> Result<()> {
                     status,
                     project_root.as_deref(),
                     merged.auto_mode.unwrap_or(false),
+                    memory_store,
                 )
                 .await;
             }

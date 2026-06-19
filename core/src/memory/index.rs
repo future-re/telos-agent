@@ -3,6 +3,43 @@ use std::path::PathBuf;
 
 use crate::memory::format::{MemoryCategory, MemoryEntry, MemoryFormat, MemoryStatus};
 
+/// Sort order for memory queries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemorySort {
+    Relevance,
+    RecentlyUpdated,
+    MostUsed,
+}
+
+/// Query options for selecting memories.
+#[derive(Debug, Clone)]
+pub struct MemoryQuery {
+    pub status: Option<MemoryStatus>,
+    pub tags: Vec<String>,
+    pub limit: Option<usize>,
+    pub include_body: bool,
+    pub sort: MemorySort,
+}
+
+impl Default for MemoryQuery {
+    fn default() -> Self {
+        Self {
+            status: None,
+            tags: Vec::new(),
+            limit: None,
+            include_body: true,
+            sort: MemorySort::Relevance,
+        }
+    }
+}
+
+/// Result of inserting or merging a memory entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpsertOutcome {
+    Created,
+    Updated,
+}
+
 /// Persistent store for agent memories, organized by category into subdirectories.
 /// Maintains a MEMORY.md index file.
 pub struct MemoryStore {
@@ -59,6 +96,42 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// Write a new memory or merge into an existing one with the same name or description.
+    pub fn upsert(&mut self, entry: MemoryEntry) -> std::io::Result<UpsertOutcome> {
+        let existing_name = if self.index.contains_key(&entry.name) {
+            Some(entry.name.clone())
+        } else {
+            self.index.keys().find_map(|name| {
+                let existing = self.read(name)?;
+                if existing.description.eq_ignore_ascii_case(&entry.description) {
+                    Some(existing.name)
+                } else {
+                    None
+                }
+            })
+        };
+
+        if let Some(name) = existing_name
+            && let Some(mut existing) = self.read(&name)
+        {
+            existing.description =
+                if entry.description.is_empty() { existing.description } else { entry.description };
+            existing.category = entry.category;
+            existing.tags = merge_strings(existing.tags, entry.tags);
+            existing.updated = entry.updated;
+            existing.status = entry.status;
+            existing.confidence = entry.confidence.or(existing.confidence);
+            existing.related = merge_strings(existing.related, entry.related);
+            existing.source_session = entry.source_session.or(existing.source_session);
+            existing.body = merge_body(&existing.body, &entry.body);
+            self.write(existing)?;
+            return Ok(UpsertOutcome::Updated);
+        }
+
+        self.write(entry)?;
+        Ok(UpsertOutcome::Created)
+    }
+
     /// Read a memory entry by name.
     pub fn read(&self, name: &str) -> Option<MemoryEntry> {
         let path = self.index.get(name)?;
@@ -71,6 +144,46 @@ impl MemoryStore {
         let mut names: Vec<String> = self.index.keys().cloned().collect();
         names.sort();
         names
+    }
+
+    /// Query memories by metadata.
+    pub fn query(&self, query: MemoryQuery) -> Vec<MemoryEntry> {
+        let tags: Vec<String> = query.tags.iter().map(|tag| tag.to_lowercase()).collect();
+        let mut entries: Vec<MemoryEntry> = self
+            .index
+            .keys()
+            .filter_map(|name| self.read(name))
+            .filter(|entry| {
+                query.status.as_ref().is_none_or(|status| &entry.status == status)
+                    && tags.iter().all(|tag| entry.tags.iter().any(|t| t.to_lowercase() == *tag))
+            })
+            .collect();
+
+        match query.sort {
+            MemorySort::Relevance => entries.sort_by(|a, b| {
+                status_rank(&a.status)
+                    .cmp(&status_rank(&b.status))
+                    .then_with(|| {
+                        std::cmp::Reverse(a.times_used).cmp(&std::cmp::Reverse(b.times_used))
+                    })
+                    .then_with(|| b.updated.cmp(&a.updated))
+                    .then_with(|| a.name.cmp(&b.name))
+            }),
+            MemorySort::RecentlyUpdated => {
+                entries.sort_by(|a, b| b.updated.cmp(&a.updated).then_with(|| a.name.cmp(&b.name)));
+            }
+            MemorySort::MostUsed => entries.sort_by_key(|b| std::cmp::Reverse(b.times_used)),
+        }
+
+        if let Some(limit) = query.limit {
+            entries.truncate(limit);
+        }
+        if !query.include_body {
+            for entry in &mut entries {
+                entry.body.clear();
+            }
+        }
+        entries
     }
 
     /// Search memories by keyword — matches against name, description, tags, and body.
@@ -97,6 +210,16 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// Record that a memory was explicitly used.
+    pub fn record_use(&mut self, name: &str) -> std::io::Result<()> {
+        if let Some(mut entry) = self.read(name) {
+            entry.times_used = entry.times_used.saturating_add(1);
+            entry.updated = unix_timestamp();
+            self.write(entry)?;
+        }
+        Ok(())
+    }
+
     /// Move a memory to the _archived directory (never delete).
     pub fn archive(&mut self, name: &str) -> std::io::Result<()> {
         if let Some(path) = self.index.remove(name) {
@@ -111,11 +234,12 @@ impl MemoryStore {
 
     /// Get the top N most-used memories for prompt injection.
     pub fn top_by_usage(&self, n: usize) -> Vec<MemoryEntry> {
-        let mut entries: Vec<MemoryEntry> =
-            self.index.keys().filter_map(|name| self.read(name)).collect();
-        entries.sort_by_key(|b| std::cmp::Reverse(b.times_used));
-        entries.truncate(n);
-        entries
+        self.query(MemoryQuery {
+            status: Some(MemoryStatus::Working),
+            limit: Some(n),
+            sort: MemorySort::MostUsed,
+            ..MemoryQuery::default()
+        })
     }
 
     /// Write the MEMORY.md index file.
@@ -154,6 +278,40 @@ fn sanitize_name(name: &str) -> String {
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
         .collect::<String>()
         .to_lowercase()
+}
+
+fn merge_strings(mut existing: Vec<String>, incoming: Vec<String>) -> Vec<String> {
+    for item in incoming {
+        if !existing.iter().any(|e| e.eq_ignore_ascii_case(&item)) {
+            existing.push(item);
+        }
+    }
+    existing
+}
+
+fn merge_body(existing: &str, incoming: &str) -> String {
+    if incoming.trim().is_empty() || existing.contains(incoming.trim()) {
+        return existing.to_string();
+    }
+    if existing.trim().is_empty() {
+        return incoming.to_string();
+    }
+    format!("{}\n\n---\n\n{}", existing.trim_end(), incoming.trim_start())
+}
+
+fn status_rank(status: &MemoryStatus) -> u8 {
+    match status {
+        MemoryStatus::NeedsFix => 0,
+        MemoryStatus::Working => 1,
+        MemoryStatus::Deprecated => 2,
+    }
+}
+
+fn unix_timestamp() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -254,5 +412,61 @@ mod tests {
         let top = store.top_by_usage(1);
         assert_eq!(top.len(), 1);
         assert_eq!(top[0].name, "high-usage");
+    }
+
+    #[test]
+    fn upsert_updates_existing_memory_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = MemoryStore::new(dir.path().to_path_buf());
+
+        store.write(test_entry("same", "Old", MemoryCategory::Fact)).unwrap();
+        let mut replacement = test_entry("same", "New", MemoryCategory::Command);
+        replacement.tags = vec!["new".into()];
+        replacement.body = "New body".into();
+
+        let outcome = store.upsert(replacement).unwrap();
+        assert_eq!(outcome, UpsertOutcome::Updated);
+
+        let entry = store.read("same").unwrap();
+        assert_eq!(entry.description, "New");
+        assert_eq!(entry.category, MemoryCategory::Command);
+        assert!(entry.tags.contains(&"new".to_string()));
+        assert!(entry.body.contains("Test body"));
+        assert!(entry.body.contains("New body"));
+    }
+
+    #[test]
+    fn query_filters_status_and_tags() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = MemoryStore::new(dir.path().to_path_buf());
+
+        let mut fix = test_entry("fix", "Fix", MemoryCategory::Fact);
+        fix.status = MemoryStatus::NeedsFix;
+        fix.tags = vec!["error".into()];
+        store.write(fix).unwrap();
+        store.write(test_entry("ok", "Ok", MemoryCategory::Fact)).unwrap();
+
+        let results = store.query(MemoryQuery {
+            status: Some(MemoryStatus::NeedsFix),
+            tags: vec!["error".into()],
+            include_body: false,
+            ..MemoryQuery::default()
+        });
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "fix");
+        assert!(results[0].body.is_empty());
+    }
+
+    #[test]
+    fn record_use_increments_times_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = MemoryStore::new(dir.path().to_path_buf());
+
+        store.write(test_entry("used", "Used", MemoryCategory::Fact)).unwrap();
+        store.record_use("used").unwrap();
+
+        let entry = store.read("used").unwrap();
+        assert_eq!(entry.times_used, 2);
     }
 }

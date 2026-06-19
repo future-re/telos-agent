@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
+use std::collections::HashMap;
 use std::pin::pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use telos_agent::{
-    AgentSession, ApprovalHandler, CompletionResponse, Message, MockProvider, StopReason,
-    ToolRegistry,
+    AgentSession, ApprovalHandler, CompletionResponse, MemoryStore, Message, MockProvider,
+    StopReason, ToolRegistry,
 };
 
 use crate::cli::SharedOptions;
@@ -17,10 +18,23 @@ pub async fn run_single(
     prompt: String,
     approval_handler: Option<Arc<dyn ApprovalHandler>>,
 ) -> Result<()> {
-    let agent_config = config::build_agent_config(options, config, approval_handler)?;
-    let mut session = AgentSession::new(agent_config).context("failed to create agent session")?;
+    let current_dir = std::env::current_dir()?;
+    let cwd = options.cwd.as_deref().unwrap_or(&current_dir);
+    let project_root = crate::project::find_project_root(cwd).ok();
+    let ctx = match &project_root {
+        Some(root) => crate::context::load_project_context(root),
+        None => crate::context::ProjectContext::empty(),
+    };
+    let memory_store = crate::memory_runtime::open_memory_store(project_root.as_deref())?;
+
+    let mut agent_config = config::build_agent_config(options, config, approval_handler)?;
     let mut tools = ToolRegistry::new();
     telos_agent::register_core_tools(&mut tools);
+    let mut assembly = crate::context::build_prompt_assembly(&ctx);
+    crate::memory_runtime::register_memory_runtime(&mut tools, &mut assembly, memory_store.clone());
+    agent_config.prompt_assembly = Some(Arc::new(assembly));
+
+    let mut session = AgentSession::new(agent_config).context("failed to create agent session")?;
 
     let provider = if let Some(ref onb) = onboarding {
         config::build_provider_from_onboarding(onb)?
@@ -30,10 +44,10 @@ pub async fn run_single(
 
     match provider {
         ResolvedProvider::Kimi(p) => {
-            run_with_provider(&mut session, &p, &tools, prompt).await?;
+            run_with_provider(&mut session, &p, &tools, prompt, memory_store.clone()).await?;
         }
         ResolvedProvider::DeepSeek(p) => {
-            run_with_provider(&mut session, &p, &tools, prompt).await?;
+            run_with_provider(&mut session, &p, &tools, prompt, memory_store.clone()).await?;
         }
         ResolvedProvider::Mock(_) => {
             eprintln!("Note: using mock provider; no real model call is made.");
@@ -42,7 +56,7 @@ pub async fn run_single(
                 stop_reason: StopReason::EndTurn,
                 usage: None,
             }]);
-            run_with_provider(&mut session, &mock, &tools, prompt).await?;
+            run_with_provider(&mut session, &mock, &tools, prompt, memory_store.clone()).await?;
         }
     }
 
@@ -73,14 +87,25 @@ pub async fn run_chat(
     };
 
     // Inject the loaded context into the agent's prompt assembly.
-    let assembly = crate::context::build_prompt_assembly(&ctx);
+    let memory_store = crate::memory_runtime::open_memory_store(project_root.as_deref())?;
+    let mut assembly = crate::context::build_prompt_assembly(&ctx);
+    crate::memory_runtime::register_memory_runtime(&mut tools, &mut assembly, memory_store.clone());
     agent_config.prompt_assembly = Some(Arc::new(assembly));
 
     let status =
         crate::context::build_status_text(options.model.as_deref(), project_root.as_deref(), &ctx);
 
     let auto_mode = config.auto_mode.unwrap_or(false);
-    crate::tui::run(agent_config, provider, tools, status, project_root.as_deref(), auto_mode).await
+    crate::tui::run(
+        agent_config,
+        provider,
+        tools,
+        status,
+        project_root.as_deref(),
+        auto_mode,
+        memory_store,
+    )
+    .await
 }
 
 async fn run_with_provider<P: telos_agent::ModelProvider>(
@@ -88,23 +113,44 @@ async fn run_with_provider<P: telos_agent::ModelProvider>(
     provider: &P,
     tools: &ToolRegistry,
     prompt: String,
+    memory_store: Arc<Mutex<MemoryStore>>,
 ) -> Result<()> {
+    crate::memory_runtime::record_user_preference(&memory_store, &prompt);
     let mut stream = pin!(session.run_turn_stream(provider, tools, prompt));
     let mut printed = String::new();
+    let mut tool_details: HashMap<String, String> = HashMap::new();
     while let Some(event) = stream.next().await {
         match event {
             Ok(telos_agent::TurnEvent::AssistantDelta { text }) => {
                 print!("{text}");
                 printed.push_str(&text);
             }
-            Ok(telos_agent::TurnEvent::ToolCall { name, .. }) => {
+            Ok(telos_agent::TurnEvent::ToolCall { tool_call_id, name, detail }) => {
+                tool_details.insert(tool_call_id, detail);
                 eprintln!("\n[tool: {name}]");
             }
-            Ok(telos_agent::TurnEvent::ToolCompleted { name, is_error, .. }) => {
+            Ok(telos_agent::TurnEvent::ToolCompleted { tool_call_id, name, is_error }) => {
                 if is_error {
                     eprintln!("[tool {name} failed]");
                 } else {
                     eprintln!("[tool {name} completed]");
+                    crate::memory_runtime::record_successful_tool(
+                        &memory_store,
+                        &name,
+                        &tool_call_id,
+                        tool_details.get(&tool_call_id).map(String::as_str),
+                    );
+                }
+            }
+            Ok(telos_agent::TurnEvent::ToolResult(message)) => {
+                for result in message.tool_results_iter() {
+                    if result.is_error {
+                        crate::memory_runtime::record_tool_error(
+                            &memory_store,
+                            result,
+                            tool_details.get(&result.tool_call_id).map(String::as_str),
+                        );
+                    }
                 }
             }
             Ok(telos_agent::TurnEvent::TurnFinished { final_text, .. }) => {

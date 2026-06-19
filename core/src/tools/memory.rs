@@ -48,9 +48,13 @@ impl Tool for MemoryReadTool {
             .get("name")
             .and_then(|v| v.as_str())
             .ok_or_else(|| AgentError::Validation("missing `name`".into()))?;
-        let store = self.store.lock().unwrap();
+        let mut store = self.store.lock().unwrap();
         match store.read(name) {
             Some(entry) => {
+                store.record_use(name).map_err(|e| AgentError::ToolExecution {
+                    tool: "MemoryRead".into(),
+                    message: e.to_string(),
+                })?;
                 let mut value =
                     serde_json::to_value(&entry).unwrap_or(json!({"error":"serialization failed"}));
                 value["body"] = json!(entry.body);
@@ -86,6 +90,8 @@ impl Tool for MemoryWriteTool {
                 "description":{"type":"string"},
                 "category":{"type":"string","enum":["script","command","pattern","fact","workflow"]},
                 "body":{"type":"string","description":"Markdown body content"},
+                "status":{"type":"string","enum":["working","needs_fix","deprecated"],"default":"working"},
+                "confidence":{"type":"string"},
                 "tags":{"type":"array","items":{"type":"string"},"default":[]},
                 "related":{"type":"array","items":{"type":"string"},"default":[]}
             },"required":["name","description","category","body"]}),
@@ -113,6 +119,14 @@ impl Tool for MemoryWriteTool {
             .and_then(|v| v.as_str())
             .ok_or(AgentError::Validation("missing category".into()))?;
         let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("");
+        let status_str = args.get("status").and_then(|v| v.as_str()).unwrap_or("working");
+        let status = match status_str {
+            "working" => crate::memory::MemoryStatus::Working,
+            "needs_fix" => crate::memory::MemoryStatus::NeedsFix,
+            "deprecated" => crate::memory::MemoryStatus::Deprecated,
+            _ => return Err(AgentError::Validation(format!("unknown status: {status_str}"))),
+        };
+        let confidence = args.get("confidence").and_then(|v| v.as_str()).map(String::from);
         let category = match cat_str {
             "script" => crate::memory::MemoryCategory::Script,
             "command" => crate::memory::MemoryCategory::Command,
@@ -140,16 +154,16 @@ impl Tool for MemoryWriteTool {
             tags,
             created: now.clone(),
             updated: now,
-            status: crate::memory::MemoryStatus::Working,
+            status,
             times_used: 0,
-            confidence: None,
+            confidence,
             related,
             source_session: None,
             body: body.to_string(),
         };
 
         let mut store = self.store.lock().unwrap();
-        store.write(entry).map_err(|e| AgentError::ToolExecution {
+        store.upsert(entry).map_err(|e| AgentError::ToolExecution {
             tool: "MemoryWrite".into(),
             message: e.to_string(),
         })?;

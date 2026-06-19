@@ -60,7 +60,10 @@ pub use hooks::{Hook, HookCondition, HookContext, HookEntry, HookPhase, HookRegi
 pub use message::{ContentBlock, Message, Role, TextBlock, ThinkingBlock, ToolCall, ToolResult};
 // Memory — persistent cross-session agent memory.
 pub use memory::ProfileManager;
-pub use memory::{MemoryCategory, MemoryEntry, MemoryFormat, MemoryStatus, MemoryStore};
+pub use memory::{
+    MemoryCategory, MemoryEntry, MemoryFormat, MemoryQuery, MemorySort, MemoryStatus, MemoryStore,
+    UpsertOutcome,
+};
 pub use tools::{
     MemoryEditTool, MemoryGrepTool, MemoryReadTool, MemoryStatusTool, MemoryWriteTool,
 };
@@ -105,5 +108,5 @@ pub use tool::{
 pub use tools::{
     AskUserQuestionTool, FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, ShellTool,
     SkillTool, TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool, WebFetchTool,
-    WebSearchTool, register_core_tools, register_task_tools,
+    WebSearchTool, register_core_tools, register_memory_tools, register_task_tools,
 };

@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::config::TaskPath;
 use crate::mcp::manager::McpManager;
-use crate::memory::index::MemoryStore;
+use crate::memory::MemoryStatus;
+use crate::memory::index::{MemoryQuery, MemorySort, MemoryStore};
 use crate::memory::profile::ProfileManager;
 use crate::prompt::{PromptSection, PromptStability};
 use crate::skills::SkillRegistry;
@@ -465,15 +466,21 @@ impl PromptSection for MemorySection {
 
     async fn render(&self, _ctx: &()) -> String {
         let store = self.store.lock().unwrap();
-        let top = store.top_by_usage(5);
-        if top.is_empty() {
+        let mut memories = store.query(MemoryQuery {
+            limit: Some(8),
+            sort: MemorySort::Relevance,
+            ..MemoryQuery::default()
+        });
+        memories.retain(|entry| entry.status != MemoryStatus::Deprecated);
+        memories.truncate(5);
+        if memories.is_empty() {
             return String::new();
         }
         let mut lines = vec!["## Relevant Memories".to_string()];
-        for entry in &top {
+        for entry in &memories {
             lines.push(format!(
-                "- **{}** ({:?}): {}",
-                entry.name, entry.category, entry.description
+                "- **{}** ({:?}, {:?}): {}",
+                entry.name, entry.category, entry.status, entry.description
             ));
             // Include first 200 chars of body as context
             let preview: String = entry.body.chars().take(200).collect();

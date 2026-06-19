@@ -15,9 +15,9 @@ use futures_util::StreamExt;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use std::io::stdout;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use telos_agent::{AgentConfig, ModelProvider, ToolRegistry};
+use telos_agent::{AgentConfig, MemoryStore, ModelProvider, ToolRegistry};
 
 /// Ensures the terminal leaves raw mode and the alternate screen on panic or
 /// early return.
@@ -38,6 +38,7 @@ pub async fn run(
     status_text: String,
     project_root: Option<&std::path::Path>,
     auto_mode: bool,
+    memory_store: Arc<Mutex<MemoryStore>>,
 ) -> Result<()> {
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = stdout();
@@ -47,7 +48,8 @@ pub async fn run(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(config, provider, tools, status_text, project_root, auto_mode)?;
+    let mut app =
+        App::new(config, provider, tools, status_text, project_root, auto_mode, memory_store)?;
     let tick_rate = Duration::from_millis(100);
     let mut reader = EventStream::new();
 

@@ -1873,6 +1873,38 @@ async fn memory_section_empty_when_no_memories() {
 }
 
 #[tokio::test]
+async fn memory_section_skips_deprecated_entries() {
+    use std::sync::{Arc, Mutex};
+    use telos_agent::memory::{MemoryCategory, MemoryEntry, MemoryStatus, MemoryStore};
+    use telos_agent::prompt::PromptSection;
+    use telos_agent::prompt::builtins::MemorySection;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = MemoryStore::new(dir.path().to_path_buf());
+
+    store
+        .write(MemoryEntry {
+            name: "old-fact".into(),
+            description: "Old fact".into(),
+            category: MemoryCategory::Fact,
+            tags: vec![],
+            created: "1".into(),
+            updated: "1".into(),
+            status: MemoryStatus::Deprecated,
+            times_used: 100,
+            confidence: None,
+            related: vec![],
+            source_session: None,
+            body: "do not show".into(),
+        })
+        .unwrap();
+
+    let section = MemorySection::new(Arc::new(Mutex::new(store)));
+    let rendered = section.render(&()).await;
+    assert!(!rendered.contains("old-fact"));
+}
+
+#[tokio::test]
 async fn profile_section_renders_profiles() {
     use std::sync::Arc;
     use telos_agent::memory::ProfileManager;

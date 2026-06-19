@@ -4,12 +4,14 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::pin::pin;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
-use telos_agent::TurnEvent;
+use telos_agent::{MemoryStore, TurnEvent};
 use tokio::sync::mpsc;
 
 use crate::tui::approval::PendingApproval;
@@ -80,6 +82,10 @@ pub struct App {
     /// Tokens consumed in the current turn.
     turn_input_tokens: u64,
     turn_output_tokens: u64,
+    /// Shared memory store for tools, prompt injection, and automatic feedback.
+    memory: Arc<Mutex<MemoryStore>>,
+    /// Tool call details keyed by tool_call_id for automatic memory entries.
+    tool_details: HashMap<String, String>,
     /// Send prompts to the background agent task.
     turn_tx: mpsc::UnboundedSender<String>,
     /// Receive TurnEvents from the background agent task.
@@ -96,6 +102,7 @@ impl App {
         status_text: String,
         project_root: Option<&std::path::Path>,
         auto_mode_on: bool,
+        memory: Arc<Mutex<MemoryStore>>,
     ) -> Result<Self, telos_agent::AgentError> {
         // Wire up session storage before creating the AgentSession.
         let session_manager = crate::session::SessionManager::new(project_root);
@@ -174,6 +181,8 @@ impl App {
             turn_started: None,
             turn_input_tokens: 0,
             turn_output_tokens: 0,
+            memory,
+            tool_details: HashMap::new(),
             turn_tx: prompt_tx,
             turn_rx: event_rx,
             approval_rx,
@@ -350,6 +359,7 @@ impl App {
 
     /// Send a user prompt to the background agent task.
     pub fn send_prompt(&mut self, prompt: String) {
+        crate::memory_runtime::record_user_preference(&self.memory, &prompt);
         self.messages.push(UiMessage::User(prompt.clone()));
         self.base_status = self.status_text.clone();
         let _ = self.turn_tx.send(prompt);
@@ -397,6 +407,7 @@ impl App {
                 self.messages.push(UiMessage::ThinkingDelta(text));
             }
             TurnEvent::ToolCall { tool_call_id, name, detail } => {
+                self.tool_details.insert(tool_call_id.clone(), detail.clone());
                 let label = if detail.is_empty() { name.clone() } else { detail.clone() };
                 self.status_text = label;
                 self.messages.push(UiMessage::ToolCall { id: tool_call_id, name, detail });
@@ -430,11 +441,31 @@ impl App {
                     _ => true,
                 });
                 self.messages.push(UiMessage::ToolCompleted {
-                    id: tool_call_id,
-                    name,
-                    detail,
+                    id: tool_call_id.clone(),
+                    name: name.clone(),
+                    detail: detail.clone(),
                     is_error,
                 });
+
+                if !is_error {
+                    crate::memory_runtime::record_successful_tool(
+                        &self.memory,
+                        &name,
+                        &tool_call_id,
+                        self.tool_details.get(&tool_call_id).map(String::as_str),
+                    );
+                }
+            }
+            TurnEvent::ToolResult(message) => {
+                for result in message.tool_results_iter() {
+                    if result.is_error {
+                        crate::memory_runtime::record_tool_error(
+                            &self.memory,
+                            result,
+                            self.tool_details.get(&result.tool_call_id).map(String::as_str),
+                        );
+                    }
+                }
             }
             TurnEvent::TurnFinished { final_text, .. } => {
                 if !final_text.is_empty() {
@@ -668,10 +699,11 @@ fn approval_content_lines(tool_name: &str, args: &serde_json::Value, width: usiz
 
 fn truncate_for_popup(s: &str, max_chars: usize) -> String {
     let s = s.trim();
-    if s.len() <= max_chars {
+    if s.chars().count() <= max_chars {
         s.to_string()
     } else {
-        format!("{}…", &s[..max_chars.saturating_sub(1)])
+        let keep = max_chars.saturating_sub(1);
+        format!("{}…", s.chars().take(keep).collect::<String>())
     }
 }
 
@@ -693,4 +725,20 @@ fn save_auto_mode(path: &std::path::Path, on: bool) -> anyhow::Result<()> {
     }
     std::fs::write(path, toml::to_string_pretty(&config)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_for_popup;
+
+    #[test]
+    fn truncate_for_popup_handles_utf8_boundaries() {
+        let truncated = truncate_for_popup("中文命令🙂测试", 5);
+        assert_eq!(truncated, "中文命令…");
+    }
+
+    #[test]
+    fn truncate_for_popup_leaves_short_text_unchanged() {
+        assert_eq!(truncate_for_popup("hello", 10), "hello");
+    }
 }

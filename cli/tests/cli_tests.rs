@@ -202,6 +202,26 @@ fn sessions_dir_without_project() {
     assert!(sessions.ends_with("sessions"));
 }
 
+#[test]
+fn memory_root_prefers_project_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = telos_cli::memory_runtime::memory_root(Some(dir.path())).unwrap();
+    assert_eq!(root, dir.path().join(".telos").join("memory"));
+}
+
+#[test]
+fn memory_runtime_registers_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = telos_cli::memory_runtime::open_memory_store(Some(dir.path())).unwrap();
+    let mut tools = telos_agent::ToolRegistry::new();
+    let mut assembly = telos_agent::PromptAssembly::new();
+
+    telos_cli::memory_runtime::register_memory_runtime(&mut tools, &mut assembly, store);
+
+    assert!(tools.get("MemoryRead").is_ok());
+    assert!(tools.get("memory_write").is_ok());
+}
+
 // ── Onboarding tests ───────────────────────────────────────────────────────
 
 #[test]

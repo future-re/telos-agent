@@ -3,7 +3,7 @@
 //! The crate provides:
 //! - [`AgentSession`] — the main turn loop (model → tools → model)
 //! - [`Tool`] trait and [`ToolRegistry`] — pluggable tool system
-//! - [`ModelProvider`] trait — pluggable LLM backends (DeepSeek, Kimi)
+//! - [`ModelProvider`] trait — pluggable LLM backends (DeepSeek)
 //! - [`Hook`] system — intercept assistant messages (post-sampling, stop)
 //! - Context compaction — token-budget-aware summarization
 //! - Permission engine — rule-based tool allow/deny
@@ -76,7 +76,7 @@ pub use permissions::{PermissionEngine, PermissionRule, RuleDecision};
 // Provider — the trait downstream LLM backends implement, plus built-in impls.
 pub use provider::{
     CompletionRequest, CompletionResponse, DeepSeekConfig, DeepSeekProvider, ErasedProvider,
-    KimiConfig, KimiProvider, ModelProvider, ProviderEvent, StopReason, TokenUsage,
+    ModelProvider, ProviderEvent, StopReason, TokenUsage,
 };
 // Runtime — the agent session and the streaming turn loop.
 pub use runtime::{AgentSession, TurnEvent, TurnResult};

@@ -1,6 +1,6 @@
 //! Model provider abstraction — pluggable LLM backends.
 //!
-//! Built-in backends: [`DeepSeekProvider`], [`KimiProvider`].
+//! Built-in backends: [`DeepSeekProvider`].
 //! The default [`ModelProvider::stream_complete`] wraps [`ModelProvider::complete`]
 //! so non-streaming providers automatically get a (single-chunk) streaming impl.
 
@@ -15,12 +15,10 @@ mod openai_compat;
 mod test;
 
 pub mod deepseek;
-pub mod kimi;
 mod traits;
 mod types;
 
 pub use deepseek::{DeepSeekConfig, DeepSeekProvider};
-pub use kimi::{KimiConfig, KimiProvider};
 pub use traits::{ErasedProvider, ModelProvider};
 pub use types::{CompletionRequest, CompletionResponse, ProviderEvent, StopReason, TokenUsage};
 

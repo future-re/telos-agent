@@ -190,7 +190,7 @@ impl App {
     }
 
     /// Process a single event.
-    pub fn handle_event(&mut self, event: Event) -> anyhow::Result<()> {
+    pub async fn handle_event(&mut self, event: Event) -> anyhow::Result<()> {
         match event {
             Event::Key(key) => {
                 use crossterm::event::{KeyCode, KeyModifiers};
@@ -272,7 +272,7 @@ impl App {
 
                         // Input handling (Ctrl+Up/Down → history, other keys → typing).
                         if let Some(prompt) = self.input.handle_key(key) {
-                            self.send_prompt(prompt);
+                            self.send_prompt(prompt).await;
                         }
                     }
                     Mode::Streaming => {
@@ -290,30 +290,40 @@ impl App {
             }
             Event::Tick => {
                 while let Ok(event) = self.turn_rx.try_recv() {
-                    self.handle_event(event)?;
+                    match event {
+                        Event::Turn(turn_event) => self.handle_turn_event(turn_event).await,
+                        Event::TurnComplete => {
+                            self.messages.push(UiMessage::TurnComplete);
+                            self.mode = Mode::Normal;
+                            self.turn_active = false;
+                            self.turn_started = None;
+                            self.turn_input_tokens = 0;
+                            self.turn_output_tokens = 0;
+                            self.status_text = self.base_status.clone();
+                        }
+                        Event::SessionError { message } => {
+                            self.messages.push(UiMessage::Error(message));
+                            self.mode = Mode::Normal;
+                            self.turn_active = false;
+                            self.turn_started = None;
+                            self.turn_input_tokens = 0;
+                            self.turn_output_tokens = 0;
+                            self.status_text = self.base_status.clone();
+                        }
+                        _ => {}
+                    }
                 }
                 while let Ok(pending) = self.approval_rx.try_recv() {
                     self.pending_approvals.push_back(pending);
                     self.mode = Mode::Approving;
                 }
             }
-            Event::SessionError { message } => {
-                self.messages.push(UiMessage::Error(message));
-                self.mode = Mode::Normal;
-                self.turn_active = false;
-            }
             Event::Resize { .. } => {}
-            Event::Turn(turn_event) => self.handle_turn_event(turn_event),
-            Event::TurnComplete => {
-                self.messages.push(UiMessage::TurnComplete);
-                self.mode = Mode::Normal;
-                self.turn_active = false;
-                self.turn_started = None;
-                self.turn_input_tokens = 0;
-                self.turn_output_tokens = 0;
-                self.status_text = self.base_status.clone();
-            }
             Event::Mouse(_) => {}
+            // Turn, TurnComplete, and SessionError are only received via
+            // turn_rx.try_recv() inside the Tick handler above and never
+            // arrive at the outer match from the main event loop.
+            _ => {}
         }
         Ok(())
     }
@@ -358,8 +368,8 @@ impl App {
     }
 
     /// Send a user prompt to the background agent task.
-    pub fn send_prompt(&mut self, prompt: String) {
-        crate::memory_runtime::record_user_preference(&self.memory, &prompt);
+    pub async fn send_prompt(&mut self, prompt: String) {
+        crate::memory_runtime::record_user_preference(&self.memory, &prompt).await;
         self.messages.push(UiMessage::User(prompt.clone()));
         self.base_status = self.status_text.clone();
         let _ = self.turn_tx.send(prompt);
@@ -390,7 +400,7 @@ impl App {
     }
 
     /// Convert an agent `TurnEvent` into a `UiMessage`.
-    fn handle_turn_event(&mut self, event: TurnEvent) {
+    async fn handle_turn_event(&mut self, event: TurnEvent) {
         match event {
             TurnEvent::TurnStarted { .. } => {
                 self.status_text = "thinking…".to_string();
@@ -453,7 +463,8 @@ impl App {
                         &name,
                         &tool_call_id,
                         self.tool_details.get(&tool_call_id).map(String::as_str),
-                    );
+                    )
+                    .await;
                 }
             }
             TurnEvent::ToolResult(message) => {
@@ -463,7 +474,8 @@ impl App {
                             &self.memory,
                             result,
                             self.tool_details.get(&result.tool_call_id).map(String::as_str),
-                        );
+                        )
+                        .await;
                     }
                 }
             }

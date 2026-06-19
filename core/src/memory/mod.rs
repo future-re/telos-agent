@@ -3,7 +3,7 @@ pub mod format;
 pub use format::{MemoryCategory, MemoryEntry, MemoryFormat, MemoryStatus};
 
 pub mod index;
-pub use index::{MemoryQuery, MemorySort, MemoryStore, UpsertOutcome};
+pub use index::{MemoryQuery, MemorySort, MemoryStore, UpsertOutcome, unix_timestamp};
 
 pub mod profile;
 pub use profile::ProfileManager;

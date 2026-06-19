@@ -103,15 +103,18 @@ mod tests {
     fn read_config_returns_some_when_file_exists() {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
-        fs::write(root.join(".telos.toml"), "[agent]\nprovider = \"kimi\"\nmodel = \"kimi-k2\"\n")
-            .unwrap();
+        fs::write(
+            root.join(".telos.toml"),
+            "[agent]\nprovider = \"deepseek\"\nmodel = \"deepseek-chat\"\n",
+        )
+        .unwrap();
 
         let config = read_project_config(root);
         assert!(config.is_some());
         let cfg = config.unwrap();
         let agent = cfg.agent.unwrap();
-        assert_eq!(agent.provider.as_deref(), Some("kimi"));
-        assert_eq!(agent.model.as_deref(), Some("kimi-k2"));
+        assert_eq!(agent.provider.as_deref(), Some("deepseek"));
+        assert_eq!(agent.model.as_deref(), Some("deepseek-chat"));
     }
 
     #[test]

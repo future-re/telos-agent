@@ -465,30 +465,41 @@ impl PromptSection for MemorySection {
     }
 
     async fn render(&self, _ctx: &()) -> String {
-        let store = self.store.lock().unwrap();
-        let mut memories = store.query(MemoryQuery {
-            limit: Some(8),
-            sort: MemorySort::Relevance,
-            ..MemoryQuery::default()
-        });
-        memories.retain(|entry| entry.status != MemoryStatus::Deprecated);
-        memories.truncate(5);
-        if memories.is_empty() {
-            return String::new();
-        }
-        let mut lines = vec!["## Relevant Memories".to_string()];
-        for entry in &memories {
-            lines.push(format!(
-                "- **{}** ({:?}, {:?}): {}",
-                entry.name, entry.category, entry.status, entry.description
-            ));
-            // Include first 200 chars of body as context
-            let preview: String = entry.body.chars().take(200).collect();
-            if !preview.is_empty() {
-                lines.push(format!("  {}", preview));
+        let store = self.store.clone();
+        match tokio::task::spawn_blocking(move || {
+            let store = store.lock().unwrap();
+            let mut memories = store.query(MemoryQuery {
+                limit: Some(8),
+                sort: MemorySort::Relevance,
+                ..MemoryQuery::default()
+            });
+            memories.retain(|entry| entry.status != MemoryStatus::Deprecated);
+            memories.truncate(5);
+            if memories.is_empty() {
+                return String::new();
+            }
+            let mut lines = vec!["## Relevant Memories".to_string()];
+            for entry in &memories {
+                lines.push(format!(
+                    "- **{}** ({:?}, {:?}): {}",
+                    entry.name, entry.category, entry.status, entry.description
+                ));
+                // Include first 200 chars of body as context
+                let preview: String = entry.body.chars().take(200).collect();
+                if !preview.is_empty() {
+                    lines.push(format!("  {}", preview));
+                }
+            }
+            lines.join("\n")
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::warn!("MemorySection::render failed: {e}");
+                String::new()
             }
         }
-        lines.join("\n")
     }
 }
 

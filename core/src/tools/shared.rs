@@ -93,6 +93,12 @@ pub(crate) fn display_relative(cwd: &Path, path: &Path) -> String {
 /// This is the second line of defence against path traversal via symlinks:
 /// `resolve_workspace_path` only normalises `.`/`..` lexically, so a symlink
 /// inside `cwd` that points outside will slip through unless we canonicalise.
+///
+/// For paths that do not exist yet, the function walks up the tree until it
+/// finds an existing ancestor, canonicalises that ancestor, and then joins the
+/// remaining suffix back on. The suffix is checked lexically against
+/// `canonical_cwd` so that a symlinked ancestor pointing outside `cwd` is still
+/// rejected.
 pub(crate) async fn canonicalize_within_cwd(
     cwd: &Path,
     path: &Path,
@@ -103,34 +109,66 @@ pub(crate) async fn canonicalize_within_cwd(
             message: format!("failed to canonicalize cwd: {err}"),
         })?;
 
-    // Try to canonicalise the target itself; if it does not exist yet (e.g. a
-    // write to a new file), canonicalise its parent directory instead.
-    let canonical_path = match tokio::fs::canonicalize(path).await {
-        Ok(p) => p,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(cwd);
-            let canonical_parent =
-                tokio::fs::canonicalize(parent).await.map_err(|err| AgentError::ToolExecution {
-                    tool: "filesystem".into(),
-                    message: format!("failed to canonicalize parent directory: {err}"),
-                })?;
-            canonical_parent.join(path.file_name().unwrap_or_default())
-        }
-        Err(err) => {
-            return Err(AgentError::ToolExecution {
-                tool: "filesystem".into(),
-                message: format!("failed to canonicalize path: {err}"),
-            });
-        }
-    };
-
-    if !canonical_path.starts_with(&canonical_cwd) {
-        return Err(AgentError::PermissionDenied(format!(
-            "path escapes cwd after following symlinks: {}",
-            path.display()
-        )));
+    // Fast path: the target already exists.
+    if let Ok(canonical_path) = tokio::fs::canonicalize(path).await {
+        return check_cwd_prefix(canonical_path, &canonical_cwd, path);
     }
 
+    // Slow path: walk up until we find an existing ancestor. This handles new
+    // nested files (e.g. `src/new_dir/new_file.rs`) and reduces the symlink
+    // race window to the existing-ancestor check.
+    let mut existing_ancestor = path;
+    let mut suffix = PathBuf::new();
+    loop {
+        if let Some(parent) = existing_ancestor.parent() {
+            if let Some(name) = existing_ancestor.file_name() {
+                suffix = if suffix.as_os_str().is_empty() {
+                    PathBuf::from(name)
+                } else {
+                    PathBuf::from(name).join(&suffix)
+                };
+            }
+            existing_ancestor = parent;
+            if existing_ancestor.as_os_str().is_empty() {
+                existing_ancestor = cwd;
+                break;
+            }
+            if tokio::fs::metadata(existing_ancestor).await.is_ok() {
+                break;
+            }
+        } else {
+            existing_ancestor = cwd;
+            break;
+        }
+    }
+
+    let canonical_ancestor = tokio::fs::canonicalize(existing_ancestor).await.map_err(|err| {
+        AgentError::ToolExecution {
+            tool: "filesystem".into(),
+            message: format!("failed to canonicalize parent directory: {err}"),
+        }
+    })?;
+
+    let canonical_path = if suffix.as_os_str().is_empty() {
+        canonical_ancestor
+    } else {
+        canonical_ancestor.join(&suffix)
+    };
+
+    check_cwd_prefix(canonical_path, &canonical_cwd, path)
+}
+
+fn check_cwd_prefix(
+    canonical_path: PathBuf,
+    canonical_cwd: &Path,
+    original: &Path,
+) -> Result<PathBuf, AgentError> {
+    if !canonical_path.starts_with(canonical_cwd) {
+        return Err(AgentError::PermissionDenied(format!(
+            "path escapes cwd after following symlinks: {}",
+            original.display()
+        )));
+    }
     Ok(canonical_path)
 }
 
@@ -307,5 +345,50 @@ mod tests {
             display_relative(Path::new("/home"), Path::new("/other/file.txt")),
             "/other/file.txt"
         );
+    }
+
+    #[tokio::test]
+    async fn canonicalize_accepts_deeply_nested_new_file() {
+        let dir = std::env::temp_dir().join("tiny_agent_canonicalize_deep");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let path = dir.join("a/b/c/new.txt");
+        let resolved = canonicalize_within_cwd(&dir, &path).await.unwrap();
+        assert!(resolved.starts_with(&dir));
+        assert_eq!(resolved.file_name().unwrap(), "new.txt");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn canonicalize_rejects_symlink_ancestor_outside_cwd() {
+        let dir = std::env::temp_dir().join("tiny_agent_canonicalize_symlink");
+        let outside = std::env::temp_dir().join("tiny_agent_canonicalize_outside");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Create a symlink inside cwd that points outside.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, dir.join("escape")).unwrap();
+
+        // For non-Unix platforms this test is a no-op.
+        #[cfg(not(unix))]
+        {
+            let _ = outside;
+            let _ = dir;
+            return;
+        }
+
+        let result = canonicalize_within_cwd(&dir, &dir.join("escape/new.txt")).await;
+        assert!(
+            matches!(result, Err(AgentError::PermissionDenied(_))),
+            "expected PermissionDenied for symlink escape, got {result:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 }

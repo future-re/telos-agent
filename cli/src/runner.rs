@@ -43,9 +43,6 @@ pub async fn run_single(
     };
 
     match provider {
-        ResolvedProvider::Kimi(p) => {
-            run_with_provider(&mut session, &p, &tools, prompt, memory_store.clone()).await?;
-        }
         ResolvedProvider::DeepSeek(p) => {
             run_with_provider(&mut session, &p, &tools, prompt, memory_store.clone()).await?;
         }
@@ -115,7 +112,7 @@ async fn run_with_provider<P: telos_agent::ModelProvider>(
     prompt: String,
     memory_store: Arc<Mutex<MemoryStore>>,
 ) -> Result<()> {
-    crate::memory_runtime::record_user_preference(&memory_store, &prompt);
+    crate::memory_runtime::record_user_preference(&memory_store, &prompt).await;
     let mut stream = pin!(session.run_turn_stream(provider, tools, prompt));
     let mut printed = String::new();
     let mut tool_details: HashMap<String, String> = HashMap::new();
@@ -139,7 +136,8 @@ async fn run_with_provider<P: telos_agent::ModelProvider>(
                         &name,
                         &tool_call_id,
                         tool_details.get(&tool_call_id).map(String::as_str),
-                    );
+                    )
+                    .await;
                 }
             }
             Ok(telos_agent::TurnEvent::ToolResult(message)) => {
@@ -149,7 +147,8 @@ async fn run_with_provider<P: telos_agent::ModelProvider>(
                             &memory_store,
                             result,
                             tool_details.get(&result.tool_call_id).map(String::as_str),
-                        );
+                        )
+                        .await;
                     }
                 }
             }

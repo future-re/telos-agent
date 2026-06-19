@@ -1,4 +1,4 @@
-//! Connectivity smoke tests for Kimi and DeepSeek providers.
+//! Connectivity smoke tests for the DeepSeek provider.
 //!
 //! These tests require valid API keys in the `src/provider/.env` file.
 //! Tests are skipped when keys are not set, so they won't fail in CI.
@@ -8,7 +8,6 @@
 use crate::message::Message;
 use crate::provider::StopReason;
 use crate::provider::deepseek::{DeepSeekConfig, DeepSeekProvider};
-use crate::provider::kimi::{KimiConfig, KimiProvider};
 use crate::provider::{CompletionRequest, ModelProvider, ProviderEvent};
 
 use futures_util::StreamExt;
@@ -18,19 +17,6 @@ fn load_env() {
     // Try the provider-local .env first, then fall back to the project root.
     let _ = dotenvy::from_filename("src/provider/.env");
     dotenvy::dotenv().ok();
-}
-
-fn get_kimi_config() -> Option<KimiConfig> {
-    load_env();
-    let api_key = std::env::var("MOONSHOT_API_KEY").ok()?;
-    if api_key.is_empty() || api_key == "your_kimi_api_key_here" {
-        return None;
-    }
-    Some(KimiConfig {
-        api_key,
-        model: "kimi-k2-0711-preview".into(),
-        base_url: "https://api.moonshot.cn".into(),
-    })
 }
 
 fn get_deepseek_config() -> Option<DeepSeekConfig> {
@@ -52,79 +38,6 @@ fn simple_request() -> CompletionRequest {
         system_prompt_blocks: None,
         messages: vec![Message::user("What is the capital of France?")],
         tools: vec![],
-    }
-}
-
-// ── Kimi ──────────────────────────────────────────────────────────
-
-#[tokio::test]
-async fn kimi_complete_smoke() {
-    let config = match get_kimi_config() {
-        Some(c) => c,
-        None => {
-            eprintln!("SKIP: MOONSHOT_API_KEY not set or still placeholder");
-            return;
-        }
-    };
-
-    let provider = KimiProvider::new(config);
-    let response = match provider.complete(simple_request()).await {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("SKIP: Kimi complete request failed (network/env): {e}");
-            return;
-        }
-    };
-
-    assert!(!response.message.text_content().is_empty(), "Kimi should return non-empty text");
-    assert_eq!(response.stop_reason, StopReason::EndTurn);
-    assert!(response.usage.is_some(), "Kimi should report token usage");
-    let usage = response.usage.unwrap();
-    assert!(usage.input_tokens > 0);
-    assert!(usage.output_tokens > 0);
-}
-
-#[tokio::test]
-async fn kimi_stream_smoke() {
-    let config = match get_kimi_config() {
-        Some(c) => c,
-        None => {
-            eprintln!("SKIP: MOONSHOT_API_KEY not set or still placeholder");
-            return;
-        }
-    };
-
-    let provider = KimiProvider::new(config);
-    let mut stream = provider.stream_complete(simple_request());
-    let mut text = String::new();
-    let mut saw_start = false;
-    let mut saw_stop = false;
-    let mut usage = None;
-
-    while let Some(event) = stream.next().await {
-        match event {
-            Ok(ProviderEvent::MessageStart) => saw_start = true,
-            Ok(ProviderEvent::TextDelta(delta)) => text.push_str(&delta),
-            Ok(ProviderEvent::ThinkingDelta(_)) => {}
-            Ok(ProviderEvent::MessageStop { stop_reason, usage: u }) => {
-                saw_stop = true;
-                assert_eq!(stop_reason, StopReason::EndTurn);
-                usage = u;
-            }
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("SKIP: Kimi stream error (network/env): {e}");
-                return;
-            }
-        }
-    }
-
-    assert!(saw_start, "Kimi stream: missing MessageStart");
-    assert!(saw_stop, "Kimi stream: missing MessageStop");
-    assert!(!text.is_empty(), "Kimi stream: no text received");
-    if let Some(u) = usage {
-        assert!(u.input_tokens > 0);
-        assert!(u.output_tokens > 0);
     }
 }
 

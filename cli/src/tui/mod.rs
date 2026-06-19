@@ -68,7 +68,7 @@ pub async fn run(
             _ = tokio::time::sleep(tick_rate) => Event::Tick,
         };
 
-        if let Err(e) = app.handle_event(event) {
+        if let Err(e) = app.handle_event(event).await {
             eprintln!("TUI event handling error: {e}");
             break;
         }

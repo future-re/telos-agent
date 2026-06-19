@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
+use telos_agent::memory::unix_timestamp;
 use telos_agent::{
     MemoryCategory, MemoryEntry, MemorySection, MemoryStatus, MemoryStore, ToolRegistry, ToolResult,
 };
@@ -27,35 +28,46 @@ pub fn register_memory_runtime(
     assembly.add(MemorySection::new(store));
 }
 
-pub fn record_tool_error(
+pub async fn record_tool_error(
     store: &Arc<Mutex<MemoryStore>>,
     result: &ToolResult,
     detail: Option<&str>,
 ) {
-    let tool = result.name.clone();
-    let label = detail.filter(|d| !d.is_empty()).unwrap_or(&tool);
-    let ts = timestamp_now();
-    let entry = MemoryEntry {
-        name: format!("fix-{}", stable_id(&result.tool_call_id)),
-        description: format!("Tool failure: {tool}"),
-        category: MemoryCategory::Fact,
-        tags: vec!["error".into(), "auto-feedback".into(), tool.to_lowercase()],
-        created: ts.clone(),
-        updated: ts,
-        status: MemoryStatus::NeedsFix,
-        times_used: 0,
-        confidence: Some("high".into()),
-        related: vec![],
-        source_session: None,
-        body: format!(
-            "Tool `{tool}` failed.\n\nDetail: `{label}`\n\nError payload:\n```json\n{}\n```\n\nFix this before retrying.",
-            pretty_json(&result.content)
-        ),
-    };
-    upsert_memory(store, entry);
+    let store = store.clone();
+    // Extract only the fields we need, avoiding a full ToolResult clone.
+    let tool_name = result.name.clone();
+    let tool_call_id = result.tool_call_id.clone();
+    let content = result.content.clone();
+    let detail = detail.map(String::from);
+    if let Err(e) = tokio::task::spawn_blocking(move || {
+        let label = detail.filter(|d| !d.is_empty()).unwrap_or_else(|| tool_name.clone());
+        let ts = unix_timestamp();
+        let entry = MemoryEntry {
+            name: format!("fix-{}", stable_id(&tool_call_id)),
+            description: format!("Tool failure: {tool_name}"),
+            category: MemoryCategory::Fact,
+            tags: vec!["error".into(), "auto-feedback".into(), tool_name.to_lowercase()],
+            created: ts.clone(),
+            updated: ts,
+            status: MemoryStatus::NeedsFix,
+            times_used: 0,
+            confidence: Some("high".into()),
+            related: vec![],
+            source_session: None,
+            body: format!(
+                "Tool `{tool_name}` failed.\n\nDetail: `{label}`\n\nError payload:\n```json\n{}\n```\n\nFix this before retrying.",
+                pretty_json(&content)
+            ),
+        };
+        upsert_memory(&store, entry);
+    })
+    .await
+    {
+        tracing::warn!("record_tool_error spawn_blocking failed: {e}");
+    }
 }
 
-pub fn record_successful_tool(
+pub async fn record_successful_tool(
     store: &Arc<Mutex<MemoryStore>>,
     tool: &str,
     tool_call_id: &str,
@@ -67,50 +79,68 @@ pub fn record_successful_tool(
     if !matches!(tool.to_lowercase().as_str(), "bash" | "shell" | "edit" | "write") {
         return;
     }
-    let ts = timestamp_now();
-    let category = if matches!(tool.to_lowercase().as_str(), "bash" | "shell") {
-        MemoryCategory::Command
-    } else {
-        MemoryCategory::Workflow
-    };
-    let entry = MemoryEntry {
-        name: format!("tool-{}-{}", tool.to_lowercase(), stable_id(tool_call_id)),
-        description: format!("Successful {tool} usage: {detail}"),
-        category,
-        tags: vec!["auto-learned".into(), tool.to_lowercase()],
-        created: ts.clone(),
-        updated: ts,
-        status: MemoryStatus::Working,
-        times_used: 0,
-        confidence: Some("medium".into()),
-        related: vec![],
-        source_session: None,
-        body: format!("Tool `{tool}` completed successfully.\n\nDetail: `{detail}`"),
-    };
-    upsert_memory(store, entry);
+    let store = store.clone();
+    let tool = tool.to_string();
+    let tool_call_id = tool_call_id.to_string();
+    let detail = detail.to_string();
+    if let Err(e) = tokio::task::spawn_blocking(move || {
+        let ts = unix_timestamp();
+        let category = if matches!(tool.to_lowercase().as_str(), "bash" | "shell") {
+            MemoryCategory::Command
+        } else {
+            MemoryCategory::Workflow
+        };
+        let entry = MemoryEntry {
+            name: format!("tool-{}-{}", tool.to_lowercase(), stable_id(&tool_call_id)),
+            description: format!("Successful {tool} usage: {detail}"),
+            category,
+            tags: vec!["auto-learned".into(), tool.to_lowercase()],
+            created: ts.clone(),
+            updated: ts,
+            status: MemoryStatus::Working,
+            times_used: 0,
+            confidence: Some("medium".into()),
+            related: vec![],
+            source_session: None,
+            body: format!("Tool `{tool}` completed successfully.\n\nDetail: `{detail}`"),
+        };
+        upsert_memory(&store, entry);
+    })
+    .await
+    {
+        tracing::warn!("record_successful_tool spawn_blocking failed: {e}");
+    }
 }
 
-pub fn record_user_preference(store: &Arc<Mutex<MemoryStore>>, prompt: &str) {
+pub async fn record_user_preference(store: &Arc<Mutex<MemoryStore>>, prompt: &str) {
     let trimmed = prompt.trim();
     if trimmed.is_empty() || !looks_like_preference(trimmed) {
         return;
     }
-    let ts = timestamp_now();
-    let entry = MemoryEntry {
-        name: format!("preference-{}", stable_id(trimmed)),
-        description: "User preference".into(),
-        category: MemoryCategory::Fact,
-        tags: vec!["auto-learned".into(), "preference".into()],
-        created: ts.clone(),
-        updated: ts,
-        status: MemoryStatus::Working,
-        times_used: 0,
-        confidence: Some("high".into()),
-        related: vec![],
-        source_session: None,
-        body: trimmed.to_string(),
-    };
-    upsert_memory(store, entry);
+    let store = store.clone();
+    let trimmed = trimmed.to_string();
+    if let Err(e) = tokio::task::spawn_blocking(move || {
+        let ts = unix_timestamp();
+        let entry = MemoryEntry {
+            name: format!("preference-{}", stable_id(&trimmed)),
+            description: "User preference".into(),
+            category: MemoryCategory::Fact,
+            tags: vec!["auto-learned".into(), "preference".into()],
+            created: ts.clone(),
+            updated: ts,
+            status: MemoryStatus::Working,
+            times_used: 0,
+            confidence: Some("high".into()),
+            related: vec![],
+            source_session: None,
+            body: trimmed,
+        };
+        upsert_memory(&store, entry);
+    })
+    .await
+    {
+        tracing::warn!("record_user_preference spawn_blocking failed: {e}");
+    }
 }
 
 fn upsert_memory(store: &Arc<Mutex<MemoryStore>>, entry: MemoryEntry) {
@@ -145,11 +175,4 @@ fn stable_id(input: &str) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("{hash:016x}")
-}
-
-fn timestamp_now() -> String {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_default()
 }

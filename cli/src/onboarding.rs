@@ -36,18 +36,6 @@ fn models_for(provider: ProviderArg) -> &'static [ModelInfo] {
                 desc: "powerful reasoning • 1M ctx • $0.44/$0.87 per 1M",
             },
         ],
-        ProviderArg::Kimi => &[
-            ModelInfo {
-                id: "kimi-k2.6",
-                label: "K2.6 (recommended)",
-                desc: "flagship • 262K ctx • $0.95/$4.00 per 1M",
-            },
-            ModelInfo {
-                id: "kimi-k2.5",
-                label: "K2.5",
-                desc: "value • 262K ctx • $0.60/$3.00 per 1M",
-            },
-        ],
         ProviderArg::Mock => &[],
     }
 }
@@ -73,9 +61,8 @@ pub fn run() -> Result<Option<OnboardingResult>> {
     eprintln!();
 
     // ── Provider selection ────────────────────────────────────────────
-    eprintln!("  Available providers:");
+    eprintln!("  Available provider:");
     eprintln!("    [1] DeepSeek — api.deepseek.com");
-    eprintln!("    [2] Kimi     — api.moonshot.cn");
     eprintln!();
 
     let provider = loop {
@@ -86,9 +73,8 @@ pub fn run() -> Result<Option<OnboardingResult>> {
         };
         match choice.trim() {
             "1" | "deepseek" | "deep" => break ProviderArg::Deepseek,
-            "2" | "kimi" | "moonshot" => break ProviderArg::Kimi,
             _ => {
-                eprintln!("  Invalid choice. Enter 1 or 2.");
+                eprintln!("  Invalid choice. Enter 1.");
                 continue;
             }
         }
@@ -202,9 +188,6 @@ pub fn save_config(result: &OnboardingResult) -> Result<()> {
         ProviderArg::Deepseek => {
             env.insert("DEEPSEEK_API_KEY".to_string(), result.api_key.clone());
         }
-        ProviderArg::Kimi => {
-            env.insert("MOONSHOT_API_KEY".to_string(), result.api_key.clone());
-        }
         ProviderArg::Mock => {}
     }
 
@@ -261,7 +244,6 @@ fn prompt_input(prompt: &str) -> Result<Option<String>> {
 fn provider_display(p: ProviderArg) -> &'static str {
     match p {
         ProviderArg::Deepseek => "DeepSeek",
-        ProviderArg::Kimi => "Kimi",
         ProviderArg::Mock => "Mock",
     }
 }
@@ -269,7 +251,6 @@ fn provider_display(p: ProviderArg) -> &'static str {
 fn provider_signup_url(p: ProviderArg) -> &'static str {
     match p {
         ProviderArg::Deepseek => "https://platform.deepseek.com/api_keys",
-        ProviderArg::Kimi => "https://platform.moonshot.cn/console/api-keys",
         ProviderArg::Mock => "",
     }
 }
@@ -392,7 +373,6 @@ fn read_with_asterisks() -> Result<String, anyhow::Error> {
 fn provider_to_config_str(p: ProviderArg) -> &'static str {
     match p {
         ProviderArg::Deepseek => "deepseek",
-        ProviderArg::Kimi => "kimi",
         ProviderArg::Mock => "mock",
     }
 }

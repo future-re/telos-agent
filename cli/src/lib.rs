@@ -35,10 +35,6 @@ pub async fn run() -> Result<()> {
     };
     let merged = config::merge_configs(user_config, project_config);
 
-    // Apply FileConfig env vars to the process environment so clap/env-style
-    // resolvers (including resolve_api_key) can find them on next run.
-    config::apply_config_env(&merged);
-
     // Print project root on startup (informational).
     if let Some(ref root) = project_root {
         eprintln!("Project root: {}", root.display());
@@ -178,35 +174,17 @@ fn check_onboarding(
             "No provider configured.\n\
              Set TELOS_PROVIDER and TELOS_API_KEY environment variables,\n\
              or create ~/.config/telos/config.toml with:\n\
-             \n  [agent]\n  provider = \"deepseek\"  # or \"kimi\"\n\
+             \n  [agent]\n  provider = \"deepseek\"\n\
              \n  Or run `telos` interactively to use the setup wizard."
         );
     }
 
     match onboarding::run() {
-        Ok(Some(result)) => {
-            // Set provider env vars so resolve_api_key finds the key
-            // for this session.
-            // SAFETY: set_var is called during startup before any threads
-            // are spawned, so no data races can occur.
-            match result.provider {
-                cli::ProviderArg::Deepseek => unsafe {
-                    std::env::set_var("DEEPSEEK_API_KEY", &result.api_key);
-                },
-                cli::ProviderArg::Kimi => unsafe {
-                    std::env::set_var("MOONSHOT_API_KEY", &result.api_key);
-                },
-                cli::ProviderArg::Mock => {}
-            }
-            Ok(Some(result))
-        }
+        Ok(Some(result)) => Ok(Some(result)),
         Ok(None) => {
             eprintln!("\nSetup cancelled. Exiting.");
             // Return Ok(()) would exit run(), but we're in a helper. The caller
-            // checks for this and should propagate. We use a sentinel approach:
-            // the caller sees Ok(None) and exits.
-            // But Ok(None) is also the "already configured" case...
-            // We need to distinguish. Use a custom error that the caller catches.
+            // checks for this and should propagate. We use a custom error that the caller catches.
             anyhow::bail!("Setup cancelled");
         }
         Err(e) => Err(e),
@@ -224,7 +202,6 @@ pub(crate) fn build_erased_provider(
     config: &config::FileConfig,
 ) -> Result<Arc<dyn telos_agent::ModelProvider>> {
     match config::build_provider(options, config)? {
-        config::ResolvedProvider::Kimi(p) => Ok(Arc::new(p)),
         config::ResolvedProvider::DeepSeek(p) => Ok(Arc::new(p)),
         config::ResolvedProvider::Mock(p) => Ok(Arc::new(p)),
     }
@@ -234,7 +211,6 @@ pub(crate) fn build_erased_from_onboarding(
     onb: &onboarding::OnboardingResult,
 ) -> Result<Arc<dyn telos_agent::ModelProvider>> {
     match config::build_provider_from_onboarding(onb)? {
-        config::ResolvedProvider::Kimi(p) => Ok(Arc::new(p)),
         config::ResolvedProvider::DeepSeek(p) => Ok(Arc::new(p)),
         config::ResolvedProvider::Mock(p) => Ok(Arc::new(p)),
     }

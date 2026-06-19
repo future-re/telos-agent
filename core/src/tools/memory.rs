@@ -47,21 +47,35 @@ impl Tool for MemoryReadTool {
         let name = args
             .get("name")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| AgentError::Validation("missing `name`".into()))?;
-        let mut store = self.store.lock().unwrap();
-        match store.read(name) {
-            Some(entry) => {
-                store.record_use(name).map_err(|e| AgentError::ToolExecution {
-                    tool: "MemoryRead".into(),
-                    message: e.to_string(),
-                })?;
-                let mut value =
-                    serde_json::to_value(&entry).unwrap_or(json!({"error":"serialization failed"}));
-                value["body"] = json!(entry.body);
-                Ok(ToolOutput::json(value))
+            .ok_or_else(|| AgentError::Validation("missing `name`".into()))?
+            .to_string();
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut store = store.lock().map_err(|e| AgentError::ToolExecution {
+                tool: "MemoryRead".into(),
+                message: format!("memory store poisoned: {e}"),
+            })?;
+            match store.read(&name) {
+                Some(entry) => {
+                    store.record_use(&name).map_err(|e| AgentError::ToolExecution {
+                        tool: "MemoryRead".into(),
+                        message: e.to_string(),
+                    })?;
+                    let mut value = serde_json::to_value(&entry)
+                        .unwrap_or(json!({"error":"serialization failed"}));
+                    value["body"] = json!(entry.body);
+                    Ok(ToolOutput::json(value))
+                }
+                None => {
+                    Ok(ToolOutput::json(json!({"error": format!("memory '{}' not found", name)})))
+                }
             }
-            None => Ok(ToolOutput::json(json!({"error": format!("memory '{}' not found", name)}))),
-        }
+        })
+        .await
+        .map_err(|e| AgentError::ToolExecution {
+            tool: "MemoryRead".into(),
+            message: format!("memory task panicked: {e}"),
+        })?
     }
 }
 
@@ -112,13 +126,15 @@ impl Tool for MemoryWriteTool {
         let name = args
             .get("name")
             .and_then(|v| v.as_str())
-            .ok_or(AgentError::Validation("missing name".into()))?;
-        let desc = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
+            .ok_or(AgentError::Validation("missing name".into()))?
+            .to_string();
+        let desc = args.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let cat_str = args
             .get("category")
             .and_then(|v| v.as_str())
-            .ok_or(AgentError::Validation("missing category".into()))?;
-        let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("");
+            .ok_or(AgentError::Validation("missing category".into()))?
+            .to_string();
+        let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let status_str = args.get("status").and_then(|v| v.as_str()).unwrap_or("working");
         let status = match status_str {
             "working" => crate::memory::MemoryStatus::Working,
@@ -127,7 +143,7 @@ impl Tool for MemoryWriteTool {
             _ => return Err(AgentError::Validation(format!("unknown status: {status_str}"))),
         };
         let confidence = args.get("confidence").and_then(|v| v.as_str()).map(String::from);
-        let category = match cat_str {
+        let category = match cat_str.as_str() {
             "script" => crate::memory::MemoryCategory::Script,
             "command" => crate::memory::MemoryCategory::Command,
             "pattern" => crate::memory::MemoryCategory::Pattern,
@@ -148,8 +164,8 @@ impl Tool for MemoryWriteTool {
         let now = chrono_now();
 
         let entry = MemoryEntry {
-            name: name.to_string(),
-            description: desc.to_string(),
+            name,
+            description: desc,
             category,
             tags,
             created: now.clone(),
@@ -159,15 +175,27 @@ impl Tool for MemoryWriteTool {
             confidence,
             related,
             source_session: None,
-            body: body.to_string(),
+            body,
         };
 
-        let mut store = self.store.lock().unwrap();
-        store.upsert(entry).map_err(|e| AgentError::ToolExecution {
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || {
+            let entry_name = entry.name.clone();
+            let mut store = store.lock().map_err(|e| AgentError::ToolExecution {
+                tool: "MemoryWrite".into(),
+                message: format!("memory store poisoned: {e}"),
+            })?;
+            store.upsert(entry).map_err(|e| AgentError::ToolExecution {
+                tool: "MemoryWrite".into(),
+                message: e.to_string(),
+            })?;
+            Ok(ToolOutput::json(json!({"status": "written", "name": entry_name})))
+        })
+        .await
+        .map_err(|e| AgentError::ToolExecution {
             tool: "MemoryWrite".into(),
-            message: e.to_string(),
-        })?;
-        Ok(ToolOutput::json(json!({"status": "written", "name": name})))
+            message: format!("memory task panicked: {e}"),
+        })?
     }
 }
 
@@ -212,11 +240,23 @@ impl Tool for MemoryGrepTool {
         let query = args
             .get("query")
             .and_then(|v| v.as_str())
-            .ok_or(AgentError::Validation("missing query".into()))?;
-        let store = self.store.lock().unwrap();
-        let results = store.search(query);
-        let summary: Vec<Value> = results.iter().map(|e| json!({"name": e.name, "description": e.description, "category": format!("{:?}", e.category), "tags": e.tags})).collect();
-        Ok(ToolOutput::json(json!({"results": summary, "count": summary.len()})))
+            .ok_or(AgentError::Validation("missing query".into()))?
+            .to_string();
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || {
+            let store = store.lock().map_err(|e| AgentError::ToolExecution {
+                tool: "MemoryGrep".into(),
+                message: format!("memory store poisoned: {e}"),
+            })?;
+            let results = store.search(&query);
+            let summary: Vec<Value> = results.iter().map(|e| json!({"name": e.name, "description": e.description, "category": format!("{:?}", e.category), "tags": e.tags})).collect();
+            Ok(ToolOutput::json(json!({"results": summary, "count": summary.len()})))
+        })
+        .await
+        .map_err(|e| AgentError::ToolExecution {
+            tool: "MemoryGrep".into(),
+            message: format!("memory task panicked: {e}"),
+        })?
     }
 }
 
@@ -256,20 +296,32 @@ impl Tool for MemoryEditTool {
         let name = args
             .get("name")
             .and_then(|v| v.as_str())
-            .ok_or(AgentError::Validation("missing name".into()))?;
-        let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("");
-        let mut store = self.store.lock().unwrap();
-        if let Some(mut entry) = store.read(name) {
-            entry.body = body.to_string();
-            entry.updated = chrono_now();
-            store.write(entry).map_err(|e| AgentError::ToolExecution {
+            .ok_or(AgentError::Validation("missing name".into()))?
+            .to_string();
+        let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut store = store.lock().map_err(|e| AgentError::ToolExecution {
                 tool: "MemoryEdit".into(),
-                message: e.to_string(),
+                message: format!("memory store poisoned: {e}"),
             })?;
-            Ok(ToolOutput::json(json!({"status": "updated", "name": name})))
-        } else {
-            Ok(ToolOutput::json(json!({"error": format!("memory '{}' not found", name)})))
-        }
+            if let Some(mut entry) = store.read(&name) {
+                entry.body = body;
+                entry.updated = chrono_now();
+                store.write(entry).map_err(|e| AgentError::ToolExecution {
+                    tool: "MemoryEdit".into(),
+                    message: e.to_string(),
+                })?;
+                Ok(ToolOutput::json(json!({"status": "updated", "name": name})))
+            } else {
+                Ok(ToolOutput::json(json!({"error": format!("memory '{}' not found", name)})))
+            }
+        })
+        .await
+        .map_err(|e| AgentError::ToolExecution {
+            tool: "MemoryEdit".into(),
+            message: format!("memory task panicked: {e}"),
+        })?
     }
 }
 
@@ -310,36 +362,66 @@ impl Tool for MemoryStatusTool {
         let name = args
             .get("name")
             .and_then(|v| v.as_str())
-            .ok_or(AgentError::Validation("missing name".into()))?;
+            .ok_or(AgentError::Validation("missing name".into()))?
+            .to_string();
         let status_str = args
             .get("status")
             .and_then(|v| v.as_str())
-            .ok_or(AgentError::Validation("missing status".into()))?;
-        let status = match status_str {
+            .ok_or(AgentError::Validation("missing status".into()))?
+            .to_string();
+        let status = match status_str.as_str() {
             "working" => crate::memory::MemoryStatus::Working,
             "needs_fix" => crate::memory::MemoryStatus::NeedsFix,
             "deprecated" => crate::memory::MemoryStatus::Deprecated,
             _ => return Err(AgentError::Validation(format!("unknown status: {status_str}"))),
         };
-        let mut store = self.store.lock().unwrap();
-        store.update_status(name, status).map_err(|e| AgentError::ToolExecution {
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut store = store.lock().map_err(|e| AgentError::ToolExecution {
+                tool: "MemoryStatus".into(),
+                message: format!("memory store poisoned: {e}"),
+            })?;
+            store.update_status(&name, status).map_err(|e| AgentError::ToolExecution {
+                tool: "MemoryStatus".into(),
+                message: e.to_string(),
+            })?;
+            Ok(ToolOutput::json(
+                json!({"status": "updated", "name": name, "new_status": status_str}),
+            ))
+        })
+        .await
+        .map_err(|e| AgentError::ToolExecution {
             tool: "MemoryStatus".into(),
-            message: e.to_string(),
-        })?;
-        Ok(ToolOutput::json(json!({"status": "updated", "name": name, "new_status": status_str})))
+            message: format!("memory task panicked: {e}"),
+        })?
     }
 }
 
+fn is_leap_year(y: u64) -> bool {
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
+}
+
 fn chrono_now() -> String {
-    // Simple date string without chrono dep
+    // Simple date string without chrono dep.
+    // Walk forward from Unix epoch to find the current year, then month.
     let now =
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-    let secs = now.as_secs();
-    let days_since_2024 = secs.saturating_sub(1704067200) / 86400;
-    let year = 2024 + (days_since_2024 / 365);
-    let day_of_year = days_since_2024 % 365;
-    let ml = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let (mut rem, mut m) = (day_of_year, 1usize);
+    let mut days = now.as_secs() / 86400;
+    let mut year: u64 = 1970;
+    loop {
+        let days_in_year: u64 = if is_leap_year(year) { 366 } else { 365 };
+        if days < days_in_year {
+            break;
+        }
+        days -= days_in_year;
+        year += 1;
+    }
+    let ml: [u64; 12] = if is_leap_year(year) {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+    let (mut rem, mut m) = (days, 1usize);
     for &l in &ml {
         if rem < l {
             break;

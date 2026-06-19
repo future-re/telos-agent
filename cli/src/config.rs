@@ -4,10 +4,7 @@ use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use telos_agent::{
-    AgentConfig, ApprovalHandler, DeepSeekConfig, DeepSeekProvider, KimiConfig, KimiProvider,
-    MockProvider,
-};
+use telos_agent::{AgentConfig, ApprovalHandler, DeepSeekConfig, DeepSeekProvider, MockProvider};
 
 use crate::cli::{ProviderArg, SharedOptions};
 use crate::onboarding::OnboardingResult;
@@ -143,7 +140,6 @@ fn merge_approval(
 
 pub enum ResolvedProvider {
     DeepSeek(DeepSeekProvider),
-    Kimi(KimiProvider),
     Mock(MockProvider),
 }
 
@@ -188,25 +184,17 @@ pub fn build_provider(options: &SharedOptions, config: &FileConfig) -> Result<Re
     let provider =
         options.provider.or_else(|| provider_from_config(config)).unwrap_or(ProviderArg::Mock);
 
+    let config_env = config.env.as_ref();
+
     match provider {
-        ProviderArg::Kimi => {
-            // Priority: CLI --model > TELOS_MODEL env > config file > default
-            let model = options
-                .model
-                .clone()
-                .or_else(|| config.agent.as_ref()?.model.clone())
-                .unwrap_or_else(|| "kimi-k2.6".into());
-            let api_key = resolve_api_key(provider, options.api_key.clone(), "MOONSHOT_API_KEY")?;
-            let cfg = KimiConfig::new(api_key, model);
-            Ok(ResolvedProvider::Kimi(KimiProvider::new(cfg)))
-        }
         ProviderArg::Deepseek => {
             let model = options
                 .model
                 .clone()
                 .or_else(|| config.agent.as_ref()?.model.clone())
                 .unwrap_or_else(|| "deepseek-v4-flash".into());
-            let api_key = resolve_api_key(provider, options.api_key.clone(), "DEEPSEEK_API_KEY")?;
+            let api_key =
+                resolve_api_key(provider, options.api_key.clone(), config_env, "DEEPSEEK_API_KEY")?;
             let cfg = DeepSeekConfig::new(api_key, model);
             Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
         }
@@ -218,7 +206,6 @@ pub fn build_provider(options: &SharedOptions, config: &FileConfig) -> Result<Re
 fn provider_from_config(config: &FileConfig) -> Option<ProviderArg> {
     let s = config.agent.as_ref()?.provider.as_deref()?;
     match s.to_lowercase().as_str() {
-        "kimi" | "moonshot" => Some(ProviderArg::Kimi),
         "deepseek" | "deep" => Some(ProviderArg::Deepseek),
         "mock" => Some(ProviderArg::Mock),
         _ => None,
@@ -229,10 +216,6 @@ fn provider_from_config(config: &FileConfig) -> Option<ProviderArg> {
 /// CLI/env/config resolution. Used when the user just completed setup.
 pub fn build_provider_from_onboarding(result: &OnboardingResult) -> Result<ResolvedProvider> {
     match result.provider {
-        ProviderArg::Kimi => {
-            let cfg = KimiConfig::new(&result.api_key, &result.model);
-            Ok(ResolvedProvider::Kimi(KimiProvider::new(cfg)))
-        }
         ProviderArg::Deepseek => {
             let cfg = DeepSeekConfig::new(&result.api_key, &result.model);
             Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
@@ -244,33 +227,43 @@ pub fn build_provider_from_onboarding(result: &OnboardingResult) -> Result<Resol
 /// Apply env vars from FileConfig to the process environment.
 /// Does NOT override already-set vars — CLI/env vars from outside the config
 /// take priority.
-pub fn apply_config_env(config: &FileConfig) {
-    if let Some(env) = &config.env {
-        for (k, v) in env {
-            if std::env::var(k).is_err() {
-                // SAFETY: set_var is called before any threads are spawned
-                // (during startup in lib::run), so no data races can occur.
-                unsafe {
-                    std::env::set_var(k, v);
-                }
-            }
-        }
-    }
+///
+/// Apply env vars from FileConfig to the process environment.
+///
+/// # Deprecation
+/// This function is a no-op and will be removed in a future version.
+/// Config env vars are now read directly from `FileConfig::env`
+/// instead of being mirrored into the process environment.
+/// Use [`resolve_api_key`] or read `FileConfig::env` directly instead.
+#[deprecated(
+    since = "0.2.0",
+    note = "config env vars are now read directly from FileConfig::env; apply_config_env is a no-op and will be removed"
+)]
+pub fn apply_config_env(_config: &FileConfig) {
+    // No-op: avoid unsafe `std::env::set_var` in multi-threaded async contexts.
 }
 
 fn resolve_api_key(
     provider: ProviderArg,
     cli_key: Option<String>,
+    config_env: Option<&HashMap<String, String>>,
     env_var: &str,
 ) -> Result<String> {
     if let Some(key) = cli_key {
         return Ok(key);
     }
 
+    // Process environment variable takes priority over config file env.
     if let Ok(key) = std::env::var(env_var)
         && !key.trim().is_empty()
     {
         return Ok(key);
+    }
+
+    if let Some(key) = config_env.and_then(|env| env.get(env_var)).map(String::as_str)
+        && !key.trim().is_empty()
+    {
+        return Ok(key.to_string());
     }
 
     if std::io::stdin().is_terminal() {
@@ -292,7 +285,6 @@ fn resolve_api_key(
 
 fn provider_name(provider: ProviderArg) -> &'static str {
     match provider {
-        ProviderArg::Kimi => "Kimi",
         ProviderArg::Deepseek => "DeepSeek",
         ProviderArg::Mock => "Mock",
     }
@@ -393,26 +385,35 @@ mod tests {
         }
         assert!(matches!(p("deepseek"), Some(ProviderArg::Deepseek)));
         assert!(matches!(p("deep"), Some(ProviderArg::Deepseek)));
-        assert!(matches!(p("kimi"), Some(ProviderArg::Kimi)));
-        assert!(matches!(p("moonshot"), Some(ProviderArg::Kimi)));
         assert!(matches!(p("mock"), Some(ProviderArg::Mock)));
         assert!(p("unknown").is_none());
         assert!(p("").is_none());
     }
 
     #[test]
-    fn apply_config_env_does_not_override_existing() {
-        unsafe {
-            std::env::set_var("TEST_EXISTING_VAR", "original");
-        }
+    fn build_provider_reads_api_key_from_config_env() {
+        let options = SharedOptions::default();
         let config = FileConfig {
-            env: Some(HashMap::from([("TEST_EXISTING_VAR".into(), "override".into())])),
+            agent: Some(AgentSection { provider: Some("deepseek".into()), ..Default::default() }),
+            env: Some(HashMap::from([("DEEPSEEK_API_KEY".into(), "sk-from-config".into())])),
             ..FileConfig::default()
         };
-        apply_config_env(&config);
-        assert_eq!(std::env::var("TEST_EXISTING_VAR").unwrap(), "original");
-        unsafe {
-            std::env::remove_var("TEST_EXISTING_VAR");
-        }
+        let result = build_provider(&options, &config).unwrap();
+        assert!(matches!(result, ResolvedProvider::DeepSeek(_)));
+    }
+
+    #[test]
+    fn cli_api_key_overrides_config_env() {
+        let options = SharedOptions {
+            provider: Some(ProviderArg::Deepseek),
+            api_key: Some("sk-from-cli".into()),
+            ..Default::default()
+        };
+        let config = FileConfig {
+            env: Some(HashMap::from([("DEEPSEEK_API_KEY".into(), "sk-from-config".into())])),
+            ..FileConfig::default()
+        };
+        let result = build_provider(&options, &config).unwrap();
+        assert!(matches!(result, ResolvedProvider::DeepSeek(_)));
     }
 }

@@ -108,6 +108,7 @@ pub async fn run() -> Result<()> {
                 let current_dir = std::env::current_dir()?;
                 let cwd = cli.shared.cwd.as_deref().unwrap_or(&current_dir);
                 let project_root = project::find_project_root(cwd).ok();
+                runner::register_cli_task_tools(&mut tools, project_root.as_deref().unwrap_or(cwd));
                 let ctx = match &project_root {
                     Some(root) => crate::context::load_project_context(root),
                     None => crate::context::ProjectContext::empty(),

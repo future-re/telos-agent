@@ -10,7 +10,7 @@ use crate::tool::ToolDefinition;
 /// a routing provider can select an appropriate model.
 ///
 /// Providers that don't support routing ignore this field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ModelHint {
     /// Strategic reasoning: understanding user intent, planning, complex decisions.
     Thinking,

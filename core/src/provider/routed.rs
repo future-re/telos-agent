@@ -66,6 +66,12 @@ impl RoutedModelConfig {
         }
     }
 
+    /// Set a custom base URL (e.g. for self-hosted or proxy endpoints).
+    pub fn with_base_url(mut self, url: String) -> Self {
+        self.base_url = url;
+        self
+    }
+
     /// Collect all unique model names referenced in this config.
     fn all_models(&self) -> HashSet<&str> {
         let mut models: HashSet<&str> = self.routes.values().map(|s| s.as_str()).collect();
@@ -153,19 +159,12 @@ mod tests {
         let config = test_config();
         assert_eq!(config.resolve(Some(ModelHint::Thinking)), "deepseek-v4-pro");
         assert_eq!(config.resolve(Some(ModelHint::Execution)), "deepseek-v4-flash");
+        assert_eq!(config.resolve(Some(ModelHint::Recovery)), "deepseek-v4-pro");
     }
 
     #[test]
     fn resolve_none_returns_default() {
         let config = test_config();
-        assert_eq!(config.resolve(None), "deepseek-v4-flash");
-    }
-
-    #[test]
-    fn resolve_unmapped_hint_returns_default() {
-        // Re-use a hint not in routes — simulating future hint
-        let config = test_config();
-        // ModelHint doesn't have other variants yet, so None tests the fallback.
         assert_eq!(config.resolve(None), "deepseek-v4-flash");
     }
 

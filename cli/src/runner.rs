@@ -61,6 +61,9 @@ pub async fn run_single(
         ResolvedProvider::DeepSeek(p) => {
             run_with_provider(&mut session, &p, &tools, prompt, memory_store.clone()).await?;
         }
+        ResolvedProvider::Routed(p) => {
+            run_with_provider(&mut session, &p, &tools, prompt, memory_store.clone()).await?;
+        }
         ResolvedProvider::Mock(_) => {
             eprintln!("Note: using mock provider; no real model call is made.");
             let mock = MockProvider::new(vec![CompletionResponse {

@@ -4,7 +4,10 @@ use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use telos_agent::{AgentConfig, ApprovalHandler, DeepSeekConfig, DeepSeekProvider, MockProvider};
+use telos_agent::{
+    AgentConfig, ApprovalHandler, DeepSeekConfig, DeepSeekProvider, MockProvider,
+    RoutedModelConfig, RoutedProvider,
+};
 
 use crate::cli::{ProviderArg, SharedOptions};
 use crate::onboarding::OnboardingResult;
@@ -32,11 +35,19 @@ pub struct CodeqlConfigSection {
     pub database_path: Option<String>,
 }
 
+/// Model routing configuration from [agent.models] TOML section.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ModelsSection {
+    pub thinking: Option<String>,
+    pub fast: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct AgentSection {
     pub model: Option<String>,
     pub provider: Option<String>,
     pub max_iterations: Option<usize>,
+    pub models: Option<ModelsSection>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -119,16 +130,19 @@ fn merge_agent(
             model: u.model.clone(),
             provider: u.provider.clone(),
             max_iterations: u.max_iterations,
+            models: u.models.clone(),
         }),
         (None, Some(p)) => Some(AgentSection {
             model: p.model.clone(),
             provider: p.provider.clone(),
             max_iterations: p.max_iterations,
+            models: p.models.clone(),
         }),
         (Some(u), Some(p)) => Some(AgentSection {
             model: p.model.clone().or_else(|| u.model.clone()),
             provider: p.provider.clone().or_else(|| u.provider.clone()),
             max_iterations: p.max_iterations.or(u.max_iterations),
+            models: p.models.clone().or_else(|| u.models.clone()),
         }),
     }
 }
@@ -175,6 +189,7 @@ fn merge_codeql(
 
 pub enum ResolvedProvider {
     DeepSeek(DeepSeekProvider),
+    Routed(RoutedProvider),
     Mock(MockProvider),
 }
 
@@ -223,15 +238,37 @@ pub fn build_provider(options: &SharedOptions, config: &FileConfig) -> Result<Re
 
     match provider {
         ProviderArg::Deepseek => {
-            let model = options
+            let default_model = options
                 .model
                 .clone()
                 .or_else(|| config.agent.as_ref()?.model.clone())
                 .unwrap_or_else(|| "deepseek-v4-flash".into());
+
+            let thinking_model = options
+                .thinking_model
+                .clone()
+                .or_else(|| config.agent.as_ref()?.models.as_ref()?.thinking.clone());
+
+            let fast_model = options
+                .fast_model
+                .clone()
+                .or_else(|| config.agent.as_ref()?.models.as_ref()?.fast.clone());
+
             let api_key =
                 resolve_api_key(provider, options.api_key.clone(), config_env, "DEEPSEEK_API_KEY")?;
-            let cfg = DeepSeekConfig::new(api_key, model);
-            Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
+
+            match (thinking_model.clone(), fast_model.clone()) {
+                (Some(thinking), Some(fast)) if thinking != fast => {
+                    let routed_config = RoutedModelConfig::dual(api_key, thinking, fast);
+                    Ok(ResolvedProvider::Routed(RoutedProvider::new(routed_config)))
+                }
+                _ => {
+                    // Single model or both same — use plain DeepSeekProvider
+                    let model = thinking_model.or(fast_model).unwrap_or(default_model);
+                    let cfg = DeepSeekConfig::new(api_key, model);
+                    Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
+                }
+            }
         }
         ProviderArg::Mock => Ok(ResolvedProvider::Mock(MockProvider::new(vec![]))),
     }
@@ -349,6 +386,7 @@ mod tests {
                 provider: Some("deepseek".into()),
                 model: Some("deepseek-chat".into()),
                 max_iterations: None,
+                models: None,
             }),
             ..FileConfig::default()
         };
@@ -446,6 +484,53 @@ mod tests {
         };
         let config = FileConfig {
             env: Some(HashMap::from([("DEEPSEEK_API_KEY".into(), "sk-from-config".into())])),
+            ..FileConfig::default()
+        };
+        let result = build_provider(&options, &config).unwrap();
+        assert!(matches!(result, ResolvedProvider::DeepSeek(_)));
+    }
+
+    #[test]
+    fn build_provider_with_dual_models_creates_routed() {
+        let options = SharedOptions {
+            api_key: Some("sk-test".into()),
+            thinking_model: Some("deepseek-v4-pro".into()),
+            fast_model: Some("deepseek-v4-flash".into()),
+            ..Default::default()
+        };
+        let config = FileConfig {
+            agent: Some(AgentSection { provider: Some("deepseek".into()), ..Default::default() }),
+            ..FileConfig::default()
+        };
+        let result = build_provider(&options, &config).unwrap();
+        assert!(matches!(result, ResolvedProvider::Routed(_)));
+    }
+
+    #[test]
+    fn build_provider_with_same_models_creates_plain_deepseek() {
+        let options = SharedOptions {
+            api_key: Some("sk-test".into()),
+            thinking_model: Some("deepseek-v4-pro".into()),
+            fast_model: Some("deepseek-v4-pro".into()),
+            ..Default::default()
+        };
+        let config = FileConfig {
+            agent: Some(AgentSection { provider: Some("deepseek".into()), ..Default::default() }),
+            ..FileConfig::default()
+        };
+        let result = build_provider(&options, &config).unwrap();
+        assert!(matches!(result, ResolvedProvider::DeepSeek(_)));
+    }
+
+    #[test]
+    fn build_provider_without_model_flags_creates_plain_deepseek() {
+        let options = SharedOptions {
+            api_key: Some("sk-test".into()),
+            model: Some("deepseek-v4-flash".into()),
+            ..Default::default()
+        };
+        let config = FileConfig {
+            agent: Some(AgentSection { provider: Some("deepseek".into()), ..Default::default() }),
             ..FileConfig::default()
         };
         let result = build_provider(&options, &config).unwrap();

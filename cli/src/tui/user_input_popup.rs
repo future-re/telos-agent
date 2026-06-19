@@ -41,7 +41,7 @@ impl UserInputPopup {
 
 impl Overlay for UserInputPopup {
     fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let popup_w = area.width.saturating_sub(10).min(60).max(40);
+        let popup_w = area.width.saturating_sub(10).clamp(40, 60);
         let field_count = self.questions.len();
         let popup_h = (field_count as u16 * 3 + 4).max(8).min(area.height.saturating_sub(4));
 

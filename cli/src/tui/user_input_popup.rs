@@ -1,4 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent};
+use std::any::Any;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -137,5 +138,13 @@ impl Overlay for UserInputPopup {
             }
             _ => OverlayAction::None,
         }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

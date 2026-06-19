@@ -16,6 +16,7 @@ use crate::tui::event::{AppEvent, Event};
 use crate::tui::history_cell::*;
 use crate::tui::input_panel::{InputEvent, InputPanel};
 use crate::tui::overlay::{ApprovalOverlay, Overlay, OverlayAction};
+use crate::tui::selection_popup::SelectionPopup;
 use crate::tui::status_bar;
 use crate::tui::theme::Theme;
 
@@ -221,7 +222,8 @@ impl App {
                         if let Some(overlay) = self.overlays.last_mut()
                             && overlay.handle_key(key) == OverlayAction::Pop
                         {
-                            self.overlays.pop();
+                            let popped = self.overlays.pop();
+                            self.handle_overlay_popped(popped);
                             self.mode = if self.overlays.is_empty() {
                                 if self.turn_active { Mode::Streaming } else { Mode::Normal }
                             } else {
@@ -382,7 +384,6 @@ impl App {
         self.turn_active = true;
     }
 
-    #[allow(unused)]
     async fn handle_slash_command(&mut self, cmd: SlashCommand) {
         match cmd {
             SlashCommand::Help => {
@@ -409,11 +410,42 @@ Available commands:\n\n  /tool   — configure tools\n\
                 self.auto_mode.store(on, Ordering::Relaxed);
                 self.update_auto_mode_status();
             }
-            _ => {
+            SlashCommand::Model => {
+                let models = vec!["deepseek-v4-flash", "deepseek-v4-pro"];
+                let popup = SelectionPopup::new(" Select model ", models);
+                self.overlays.push(Box::new(popup));
+                self.mode = Mode::Approving;
+            }
+            SlashCommand::Tool => {
                 self.chat.push_cell(Box::new(AgentCell {
-                    buffer: format!("Command `/{cmd:?}` not yet implemented").to_string(),
+                    buffer: "Tool configuration not yet available.".to_string(),
                     is_streaming: false,
                 }));
+            }
+            SlashCommand::Session => {
+                self.chat.push_cell(Box::new(AgentCell {
+                    buffer: "Session management not yet available.".to_string(),
+                    is_streaming: false,
+                }));
+            }
+        }
+    }
+
+    /// Process a popped overlay — extract results from selection popups, etc.
+    fn handle_overlay_popped(&mut self, popped: Option<Box<dyn Overlay>>) {
+        let Some(overlay) = popped else { return };
+        if let Some(popup) = overlay.as_any().downcast_ref::<SelectionPopup>() {
+            if let Some(idx) = popup.selected_index() {
+                const MODELS: [&str; 2] = ["deepseek-v4-flash", "deepseek-v4-pro"];
+                if let Some(model) = MODELS.get(idx) {
+                    self.chat.push_cell(Box::new(UserCell {
+                        content: format!("/model {model}"),
+                    }));
+                    self.chat.push_cell(Box::new(AgentCell {
+                        buffer: format!("Switched model to: {model}"),
+                        is_streaming: false,
+                    }));
+                }
             }
         }
     }

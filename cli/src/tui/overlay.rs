@@ -4,6 +4,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use std::any::Any;
 
 use crate::tui::approval::PendingApproval;
 use crate::tui::theme::Theme;
@@ -26,6 +27,13 @@ pub trait Overlay: Send {
 
     /// Handle a key event. Returns what the app should do next.
     fn handle_key(&mut self, key: KeyEvent) -> OverlayAction;
+
+    /// Downcast to `&dyn Any` for type-specific queries (e.g. reading the
+    /// selected index from a selection popup after it is popped).
+    fn as_any(&self) -> &dyn Any;
+
+    /// Downcast to `&mut dyn Any`.
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 /// Overlay that shows an approval request popup.
@@ -156,6 +164,14 @@ impl Overlay for ApprovalOverlay {
             }
             _ => OverlayAction::None,
         }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 

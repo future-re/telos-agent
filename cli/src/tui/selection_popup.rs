@@ -1,10 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent};
+use std::any::Any;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use std::borrow::Cow;
 
 use crate::tui::overlay::{Overlay, OverlayAction};
 use crate::tui::theme::Theme;
@@ -16,20 +16,17 @@ const MAX_VISIBLE: usize = 12;
 ///
 /// Shows a scrollable list of items. User navigates with Up/Down.
 /// Enter selects, Esc cancels.
-pub struct SelectionPopup<'a> {
-    title: Cow<'a, str>,
-    items: Vec<Cow<'a, str>>,
+pub struct SelectionPopup {
+    title: String,
+    items: Vec<String>,
     selected: usize,
     scroll_offset: usize,
     result: Option<Option<usize>>, // None = cancelled, Some(Some(idx)) = selected
 }
 
-impl<'a> SelectionPopup<'a> {
-    pub fn new<T: Into<Cow<'a, str>>, I: IntoIterator<Item = T>>(
-        title: impl Into<Cow<'a, str>>,
-        items: I,
-    ) -> Self {
-        let items: Vec<Cow<'a, str>> = items.into_iter().map(Into::into).collect();
+impl SelectionPopup {
+    pub fn new(title: impl Into<String>, items: Vec<impl Into<String>>) -> Self {
+        let items: Vec<String> = items.into_iter().map(Into::into).collect();
         Self { title: title.into(), items, selected: 0, scroll_offset: 0, result: None }
     }
 
@@ -41,17 +38,17 @@ impl<'a> SelectionPopup<'a> {
 
     /// The selected item text (useful for display).
     pub fn selected_item(&self) -> Option<&str> {
-        self.selected_index().and_then(|i| self.items.get(i).map(|s| s.as_ref()))
+        self.selected_index().and_then(|i| self.items.get(i).map(|s| s.as_str()))
     }
 
-    fn visible_items(&self, max_height: usize) -> &[Cow<'a, str>] {
+    fn visible_items(&self, max_height: usize) -> &[String] {
         let start = self.scroll_offset;
         let end = (start + max_height).min(self.items.len());
         &self.items[start..end]
     }
 }
 
-impl Overlay for SelectionPopup<'_> {
+impl Overlay for SelectionPopup {
     fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let popup_w = area.width.saturating_sub(10).clamp(30, 50);
         let max_visible = (area.height.saturating_sub(6) as usize).min(MAX_VISIBLE);
@@ -124,5 +121,13 @@ impl Overlay for SelectionPopup<'_> {
             }
             _ => OverlayAction::None,
         }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

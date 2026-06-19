@@ -168,40 +168,38 @@ impl Tool for CodeQLTool {
             ])
             .output();
 
-        let output =
-            match tokio::time::timeout(Duration::from_secs(self.config.query_timeout_secs), child)
-                .await
-            {
-                Ok(Ok(o)) if o.status.success() => o,
-                Ok(Ok(o)) => {
-                    let stderr = String::from_utf8_lossy(&o.stderr);
-                    let _ = std::fs::remove_file(&result_file);
-                    return Ok(ToolOutput::json(json!({
-                        "error": format!("codeql analyze failed: {stderr}"),
-                        "query": query,
-                        "results": [],
-                        "count": 0
-                    })));
-                }
-                Ok(Err(e)) => {
-                    let _ = std::fs::remove_file(&result_file);
-                    return Ok(ToolOutput::json(json!({
-                        "error": format!("failed to run codeql: {e}"),
-                        "query": query,
-                        "results": [],
-                        "count": 0
-                    })));
-                }
-                Err(_) => {
-                    let _ = std::fs::remove_file(&result_file);
-                    return Ok(ToolOutput::json(json!({
-                        "error": "codeql analyze timed out",
-                        "query": query,
-                        "results": [],
-                        "count": 0
-                    })));
-                }
-            };
+        match tokio::time::timeout(Duration::from_secs(self.config.query_timeout_secs), child).await
+        {
+            Ok(Ok(o)) if o.status.success() => o,
+            Ok(Ok(o)) => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                let _ = std::fs::remove_file(&result_file);
+                return Ok(ToolOutput::json(json!({
+                    "error": format!("codeql analyze failed: {stderr}"),
+                    "query": query,
+                    "results": [],
+                    "count": 0
+                })));
+            }
+            Ok(Err(e)) => {
+                let _ = std::fs::remove_file(&result_file);
+                return Ok(ToolOutput::json(json!({
+                    "error": format!("failed to run codeql: {e}"),
+                    "query": query,
+                    "results": [],
+                    "count": 0
+                })));
+            }
+            Err(_) => {
+                let _ = std::fs::remove_file(&result_file);
+                return Ok(ToolOutput::json(json!({
+                    "error": "codeql analyze timed out",
+                    "query": query,
+                    "results": [],
+                    "count": 0
+                })));
+            }
+        };
 
         // 4. Parse SARIF output.
         let sarif_json = std::fs::read_to_string(&result_file).unwrap_or_default();

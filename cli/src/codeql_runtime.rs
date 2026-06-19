@@ -5,7 +5,7 @@
 //! registry and appends a [`CodeqlSection`] to the prompt assembly, then
 //! returns an optional [`CodeQLRuntime`] for background startup analysis.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -14,7 +14,7 @@ use telos_agent::{
     ToolRegistry,
 };
 
-use crate::config::{CodeqlConfigSection, FileConfig};
+use crate::config::FileConfig;
 
 /// Report produced after the startup analysis completes (or is skipped).
 #[derive(Debug)]
@@ -106,7 +106,6 @@ impl CodeQLRuntime {
 
         // 4. Run queries.
         let mut total_findings = 0;
-        let mut total_stored = 0;
 
         for pack in &self.config.query_packs {
             let result_file = std::env::temp_dir()
@@ -124,7 +123,7 @@ impl CodeQLRuntime {
                 ])
                 .output();
 
-            let output = match tokio::time::timeout(
+            let _ = match tokio::time::timeout(
                 std::time::Duration::from_secs(self.config.query_timeout_secs),
                 child,
             )
@@ -169,12 +168,10 @@ impl CodeQLRuntime {
                 };
 
             total_findings += findings.len();
-
-            // Store findings.
             let store = self.store.clone();
             let source = "codeql-startup".to_string();
             let findings_for_store = findings;
-            let store_count = tokio::task::spawn_blocking(move || {
+            let _store_count = tokio::task::spawn_blocking(move || {
                 let mut store = store.lock().map_err(|e| {
                     tracing::warn!("memory store poisoned: {e}");
                     0
@@ -193,8 +190,6 @@ impl CodeQLRuntime {
             })
             .await
             .unwrap_or(0);
-
-            total_stored += store_count;
         }
 
         // 5. Mark stale findings as deprecated.

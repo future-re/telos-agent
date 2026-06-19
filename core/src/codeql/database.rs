@@ -112,12 +112,11 @@ impl CodeqlDatabase {
         };
 
         // Check git HEAD if we have one stored.
-        if let Some(ref stored_head) = meta.git_head {
-            if let Some(current_head) = current_git_head(project_root) {
-                if current_head != *stored_head {
-                    return true;
-                }
-            }
+        if let Some(ref stored_head) = meta.git_head
+            && let Some(current_head) = current_git_head(project_root)
+            && current_head != *stored_head
+        {
+            return true;
         }
 
         // Check file mtimes for key project files.
@@ -129,10 +128,9 @@ impl CodeqlDatabase {
                     .ok()
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_secs())
+                    && mtime_secs > stored_mtime
                 {
-                    if mtime_secs > stored_mtime {
-                        return true;
-                    }
+                    return true;
                 }
             } else {
                 // File deleted or moved — rebuild to be safe.
@@ -222,7 +220,6 @@ impl CodeqlDatabase {
             .await?;
             // Re-read the language from the database after creation since it may
             // be more precise than our heuristic.
-            let actual_lang = language.to_string();
             "created"
         } else if Self::needs_rebuild(&db_path, project_root).await {
             Self::update(&db_path, Duration::from_secs(config.db_create_timeout_secs)).await?;
@@ -253,11 +250,11 @@ async fn write_meta(db_path: &Path, language: &str, project_root: &Path) -> std:
         if rel.ends_with('/') {
             // Directory — collect files up to depth 2.
             collect_mtimes(&abs, &mut file_mtimes, project_root, 2);
-        } else if let Ok(meta) = tokio::fs::metadata(&abs).await {
-            if let Ok(mtime) = meta.modified().and_then(|t| t.duration_since(std::time::UNIX_EPOCH))
-            {
-                file_mtimes.insert(rel.to_string(), mtime.as_secs());
-            }
+        } else if let Ok(meta) = tokio::fs::metadata(&abs).await
+            && let Some(mtime) =
+                meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        {
+            file_mtimes.insert(rel.to_string(), mtime.as_secs());
         }
     }
 
@@ -289,15 +286,14 @@ fn collect_mtimes(dir: &Path, map: &mut HashMap<String, u64>, root: &Path, max_d
         }
         if path.is_dir() {
             collect_mtimes(&path, map, root, max_depth - 1);
-        } else if let Ok(file_meta) = std::fs::metadata(&path) {
-            if let Some(mtime_secs) = file_meta
+        } else if let Ok(file_meta) = std::fs::metadata(&path)
+            && let Some(mtime_secs) = file_meta
                 .modified()
                 .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs())
-            {
-                map.insert(rel_str, mtime_secs);
-            }
+        {
+            map.insert(rel_str, mtime_secs);
         }
     }
 }
@@ -364,8 +360,10 @@ mod tests {
 
     #[test]
     fn db_path_resolution_uses_explicit_path() {
-        let mut config = CodeqlConfig::default();
-        config.database_path = Some(PathBuf::from("/opt/codeql-dbs/my-project"));
+        let config = CodeqlConfig {
+            database_path: Some(PathBuf::from("/opt/codeql-dbs/my-project")),
+            ..Default::default()
+        };
         let root = Path::new("/fake/project");
         let path = CodeqlDatabase::resolve_path(&config, "rust", root);
         assert_eq!(path, Path::new("/opt/codeql-dbs/my-project"));

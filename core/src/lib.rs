@@ -63,7 +63,7 @@ pub use message::{ContentBlock, Message, Role, TextBlock, ThinkingBlock, ToolCal
 pub use memory::ProfileManager;
 pub use memory::{
     MemoryCategory, MemoryEntry, MemoryFormat, MemoryQuery, MemorySort, MemoryStatus, MemoryStore,
-    UpsertOutcome,
+    UpsertOutcome, unix_timestamp,
 };
 pub use tools::{
     MemoryEditTool, MemoryGrepTool, MemoryReadTool, MemoryStatusTool, MemoryWriteTool,

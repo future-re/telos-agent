@@ -3,6 +3,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Paragraph, Wrap};
+use std::any::Any;
 use std::time::Duration;
 
 use crate::tui::theme::Theme;
@@ -29,6 +30,17 @@ pub trait HistoryCell: Send {
 
     /// Append text to a streaming cell. No-op for non-streaming cells.
     fn push_text(&mut self, _text: &str) {}
+
+    /// Optional tool_call_id for ToolCallCell lookups.
+    fn tool_call_id(&self) -> Option<&str> {
+        None
+    }
+
+    /// Downcast to &dyn Any for type-specific operations.
+    fn as_any(&self) -> &dyn Any;
+
+    /// Downcast to &mut dyn Any for type-specific operations.
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 // ─── UserCell ────────────────────────────────────────────────────────────────
@@ -67,6 +79,14 @@ impl HistoryCell for UserCell {
         let text = Text::from(lines);
         frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), area);
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
 }
 
 // ─── AgentCell ───────────────────────────────────────────────────────────────
@@ -101,6 +121,14 @@ impl HistoryCell for AgentCell {
         }
         let md_text = crate::tui::markdown::render_markdown(&self.buffer, area.width as usize);
         frame.render_widget(Paragraph::new(md_text).wrap(Wrap { trim: true }), area);
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -144,6 +172,14 @@ impl HistoryCell for ThinkingCell {
             .map(|l| Line::from(Span::styled(l.to_string(), theme.thinking_style())))
             .collect();
         frame.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }), area);
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -196,6 +232,10 @@ impl HistoryCell for ToolCallCell {
         lines
     }
 
+    fn tool_call_id(&self) -> Option<&str> {
+        Some(&self.tool_call_id)
+    }
+
     fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let mut spans = Vec::new();
 
@@ -235,6 +275,14 @@ impl HistoryCell for ToolCallCell {
 
         frame.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }), area);
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
 }
 
 // ─── SeparatorCell ───────────────────────────────────────────────────────────
@@ -253,6 +301,14 @@ impl HistoryCell for SeparatorCell {
             Line::from(""),
         ];
         frame.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }), area);
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -285,5 +341,13 @@ impl HistoryCell for ErrorCell {
             .map(|l| Line::from(Span::styled(format!("✗ {l}"), theme.tool_error_style())))
             .collect();
         frame.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }), area);
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

@@ -15,7 +15,7 @@ use telos_agent::{MemoryStore, TurnEvent};
 use tokio::sync::mpsc;
 
 use crate::tui::approval::PendingApproval;
-use crate::tui::chat_panel::ChatPanel;
+use crate::tui::chat_widget::ChatWidget;
 use crate::tui::event::Event;
 use crate::tui::input_panel::InputPanel;
 use crate::tui::status_bar;
@@ -63,8 +63,8 @@ pub struct App {
     pub status_text: String,
     /// Accumulated messages for display.
     pub messages: Vec<UiMessage>,
-    /// Chat panel (rendering + scrolling).
-    pub chat: ChatPanel,
+    /// Chat widget (rendering + scrolling).
+    pub chat: ChatWidget,
     /// Input panel at the bottom.
     pub input: InputPanel,
     /// Approval requests waiting for user decision.
@@ -172,7 +172,7 @@ impl App {
             status_text: status_text.clone(),
             base_status: status_text,
             messages: Vec::new(),
-            chat: ChatPanel::new(),
+            chat: ChatWidget::new(),
             input: InputPanel::new(),
             pending_approvals: VecDeque::new(),
             turn_active: false,
@@ -540,7 +540,7 @@ impl App {
 
         let mut idx = 0;
 
-        self.chat.render(frame, layout[idx], &self.messages);
+        self.chat.render(frame, layout[idx], &theme);
         idx += 1;
 
         // ── Render approval popup in its own layout slot ──────────────

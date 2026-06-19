@@ -55,10 +55,10 @@ impl SarifResult {
         } else {
             body.push_str(&format!(":{}", self.start_line));
         }
-        if let (Some(el), Some(sl)) = (self.end_line, self.start_line) {
-            if el > sl {
-                body.push_str(&format!("-{}", el));
-            }
+        if let Some(el) = self.end_line
+            && el > self.start_line
+        {
+            body.push_str(&format!("-{el}"));
         }
         body.push_str("\n\n");
         body.push_str(&self.message);

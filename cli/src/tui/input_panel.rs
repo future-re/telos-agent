@@ -97,9 +97,10 @@ impl InputPanel {
         }
 
         match (key.code, key.modifiers) {
-            (KeyCode::Up | KeyCode::Down, KeyModifiers::NONE) => {
+            (KeyCode::Up, KeyModifiers::NONE) => {
                 self.history_pos.is_some() || !self.is_empty() || !self.history.is_empty()
             }
+            (KeyCode::Down, KeyModifiers::NONE) => self.history_pos.is_some() || !self.is_empty(),
             (KeyCode::Up | KeyCode::Down, KeyModifiers::CONTROL) => !self.history.is_empty(),
             _ => true,
         }
@@ -517,7 +518,7 @@ mod tests {
         panel.clear_text();
         panel.submit_text("previous".into());
         assert!(panel.wants_key(key(KeyCode::Up)));
-        assert!(panel.wants_key(key(KeyCode::Down)));
+        assert!(!panel.wants_key(key(KeyCode::Down)));
 
         panel.handle_key(ctrl_key(KeyCode::Up));
         assert_eq!(text(&panel), "previous");

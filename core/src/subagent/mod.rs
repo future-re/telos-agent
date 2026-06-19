@@ -183,7 +183,8 @@ impl Tool for SubagentTool {
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use the Subagent tool to delegate self-contained tasks, run parallel explore lenses, or protect the main context window. \
-Provide a clear prompt and optional system_prompt. Do not duplicate work already being performed in the parent session.",
+Provide a clear description and prompt. Use subagent_type to choose a specialized agent when appropriate: general-purpose, Explore, Plan, or Verification. \
+Do not duplicate work already being performed in the parent session.",
         )
     }
 
@@ -314,13 +315,14 @@ Provide a clear prompt and optional system_prompt. Do not duplicate work already
                         let event = event?;
                         // Forward a coarse-grained progress message to the parent's
                         // tool-progress channel so callers can show "subagent is doing X".
-                        if let Some(progress) = progress_summary(&event)
+                        if let Some((progress, data)) =
+                            progress_summary(&event, &agent_id, &agent.name)
                             && let Some(tx) = &context.progress
                         {
                             let _ = tx.send(crate::tool::ToolProgress {
                                 tool_call_id: context.tool_call_id.clone(),
                                 message: progress,
-                                data: None,
+                                data: Some(data),
                             });
                         }
                         events.push(event);
@@ -366,15 +368,44 @@ fn new_agent_id(agent_type: &str) -> String {
 
 /// Translate a subset of subagent events into human-readable progress strings
 /// for the parent agent to surface.
-fn progress_summary(event: &TurnEvent) -> Option<String> {
+fn progress_summary(
+    event: &TurnEvent,
+    agent_id: &str,
+    agent_type: &str,
+) -> Option<(String, Value)> {
     match event {
-        TurnEvent::ProviderRequest { iteration, .. } => {
-            Some(format!("subagent provider request iteration {iteration}"))
-        }
-        TurnEvent::ToolCall { name, .. } => Some(format!("subagent tool call {name}")),
-        TurnEvent::TurnFinished { stop_reason, .. } => {
-            Some(format!("subagent finished with {stop_reason:?}"))
-        }
+        TurnEvent::ProviderRequest { iteration, .. } => Some((
+            format!("subagent provider request iteration {iteration}"),
+            json!({
+                "kind": "subagent",
+                "agent_id": agent_id,
+                "agent_type": agent_type,
+                "event": "provider_request",
+                "iteration": iteration,
+            }),
+        )),
+        TurnEvent::ToolCall { tool_call_id, name, detail } => Some((
+            format!("subagent tool call {name}"),
+            json!({
+                "kind": "subagent",
+                "agent_id": agent_id,
+                "agent_type": agent_type,
+                "event": "tool_call",
+                "tool_call_id": tool_call_id,
+                "name": name,
+                "detail": detail,
+            }),
+        )),
+        TurnEvent::TurnFinished { stop_reason, .. } => Some((
+            format!("subagent finished with {stop_reason:?}"),
+            json!({
+                "kind": "subagent",
+                "agent_id": agent_id,
+                "agent_type": agent_type,
+                "event": "finished",
+                "stop_reason": format!("{stop_reason:?}"),
+            }),
+        )),
         _ => None,
     }
 }
@@ -422,6 +453,21 @@ mod tests {
         assert!(properties.contains_key("model"));
         assert!(properties.contains_key("run_in_background"));
         assert!(properties.contains_key("isolation"));
+    }
+
+    #[test]
+    fn subagent_prompt_text_names_supported_agent_types() {
+        let tool = SubagentTool::new(
+            Arc::new(MockProvider::new(vec![])),
+            ToolRegistry::new(),
+            AgentConfig::default(),
+        );
+        let prompt = tool.prompt_text().unwrap();
+        assert!(prompt.contains("subagent_type"));
+        assert!(prompt.contains("general-purpose"));
+        assert!(prompt.contains("Explore"));
+        assert!(prompt.contains("Plan"));
+        assert!(prompt.contains("Verification"));
     }
 
     #[tokio::test]
@@ -479,6 +525,57 @@ mod tests {
         assert_eq!(output.content["status"], "completed");
         assert_eq!(output.content["final_text"], "explore result");
         assert!(output.content["agent_id"].as_str().unwrap().starts_with("agent_"));
+    }
+
+    #[tokio::test]
+    async fn subagent_progress_is_attached_to_parent_tool_call_with_data() {
+        let provider = Arc::new(MockProvider::new(vec![
+            crate::provider::CompletionResponse {
+                message: crate::Message {
+                    role: crate::Role::Assistant,
+                    blocks: vec![crate::ContentBlock::ToolCall(crate::ToolCall {
+                        id: "child-call".into(),
+                        name: "Read".into(),
+                        arguments: json!({ "file_path": "src/lib.rs" }),
+                    })],
+                },
+                stop_reason: crate::provider::StopReason::ToolUse,
+                usage: None,
+            },
+            crate::provider::CompletionResponse {
+                message: crate::Message::assistant("done"),
+                stop_reason: crate::provider::StopReason::EndTurn,
+                usage: None,
+            },
+        ]));
+        let tool = SubagentTool::new(provider, ToolRegistry::new(), AgentConfig::default());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut context = ToolContext::dummy();
+        context.tool_call_id = Some("parent-call".into());
+        context.progress = Some(tx);
+
+        tool.invoke(
+            json!({
+                "description": "Explore code",
+                "prompt": "Find the runtime loop",
+                "subagent_type": "Explore"
+            }),
+            context,
+        )
+        .await
+        .unwrap();
+
+        let mut progress = Vec::new();
+        while let Ok(item) = rx.try_recv() {
+            progress.push(item);
+        }
+
+        assert!(progress.iter().any(|item| {
+            item.tool_call_id.as_deref() == Some("parent-call")
+                && item.data.as_ref().and_then(|data| data["kind"].as_str()) == Some("subagent")
+                && item.data.as_ref().and_then(|data| data["event"].as_str()) == Some("tool_call")
+                && item.data.as_ref().and_then(|data| data["name"].as_str()) == Some("Read")
+        }));
     }
 
     #[test]

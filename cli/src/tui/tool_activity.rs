@@ -20,6 +20,7 @@ struct ToolActivityItem {
     detail: String,
     state: ToolState,
     progress_messages: Vec<String>,
+    approval_messages: Vec<String>,
     result_lines: Vec<String>,
     expanded: bool,
     selected: bool,
@@ -33,6 +34,7 @@ impl ToolActivityItem {
             detail,
             state: ToolState::Pending,
             progress_messages: Vec::new(),
+            approval_messages: Vec::new(),
             result_lines: Vec::new(),
             expanded: false,
             selected: false,
@@ -44,7 +46,9 @@ impl ToolActivityItem {
     }
 
     fn can_expand(&self) -> bool {
-        !self.progress_messages.is_empty() || !self.result_lines.is_empty()
+        !self.approval_messages.is_empty()
+            || !self.progress_messages.is_empty()
+            || !self.result_lines.is_empty()
     }
 
     fn set_running(&mut self) {
@@ -117,7 +121,14 @@ impl ToolActivityItem {
                 ));
             }
 
+            for msg in self.approval_messages.iter().take(remaining_line_budget(lines.len())) {
+                lines.push(transcript_line(msg, width, theme));
+            }
+
             for msg in self.progress_messages.iter().take(MAX_EXPANDED_PROGRESS_LINES) {
+                if remaining_line_budget(lines.len()) == 0 {
+                    break;
+                }
                 lines.push(transcript_line(msg, width, theme));
             }
 
@@ -170,9 +181,12 @@ impl ToolActivityPanel {
     }
 
     pub fn set_progress(&mut self, id: &str, message: String) {
-        if let Some(item) = self.find_mut(id) {
+        if let Some(idx) = self.find_idx(id) {
+            let was_expandable = self.items[idx].can_expand();
+            let item = &mut self.items[idx];
             item.set_running();
             item.progress_messages.push(message);
+            self.select_latest_if_became_expandable(idx, was_expandable);
         }
     }
 
@@ -190,8 +204,11 @@ impl ToolActivityPanel {
     }
 
     pub fn add_result_content(&mut self, id: &str, content: &serde_json::Value, is_error: bool) {
-        if let Some(item) = self.find_mut(id) {
+        if let Some(idx) = self.find_idx(id) {
+            let was_expandable = self.items[idx].can_expand();
+            let item = &mut self.items[idx];
             item.result_lines = extract_result_lines(content, is_error);
+            self.select_latest_if_became_expandable(idx, was_expandable);
         }
     }
 
@@ -239,14 +256,20 @@ impl ToolActivityPanel {
         self.items.iter_mut().find(|item| item.id == id)
     }
 
+    fn find_idx(&self, id: &str) -> Option<usize> {
+        self.items.iter().position(|item| item.id == id)
+    }
+
     fn annotate(&mut self, id: &str, name: String, message: String) {
-        if let Some(item) = self.find_mut(id) {
-            item.progress_messages.push(message);
+        if let Some(idx) = self.find_idx(id) {
+            let was_expandable = self.items[idx].can_expand();
+            self.items[idx].approval_messages.push(message);
+            self.select_latest_if_became_expandable(idx, was_expandable);
             return;
         }
 
         let mut item = ToolActivityItem::new(id.to_string(), name, String::new());
-        item.progress_messages.push(message);
+        item.approval_messages.push(message);
         self.items.push(item);
         if self.items.len() > MAX_ITEMS {
             self.items.remove(0);
@@ -403,6 +426,12 @@ impl ToolActivityPanel {
         self.set_selected_idx(idx);
     }
 
+    fn select_latest_if_became_expandable(&mut self, idx: usize, was_expandable: bool) {
+        if !was_expandable && idx + 1 == self.items.len() && self.items[idx].can_expand() {
+            self.set_selected_idx(Some(idx));
+        }
+    }
+
     fn set_selected_idx(&mut self, idx: Option<usize>) {
         if let Some(old) = self.selected_idx
             && let Some(item) = self.items.get_mut(old)
@@ -425,6 +454,10 @@ fn is_shell_name(name: &str) -> bool {
 fn expanded_result_line_budget(current_lines: usize, result_line_count: usize) -> usize {
     let remaining = MAX_VISIBLE_ITEM_LINES.saturating_sub(current_lines);
     if result_line_count > remaining { remaining.saturating_sub(1) } else { remaining }
+}
+
+fn remaining_line_budget(current_lines: usize) -> usize {
+    MAX_VISIBLE_ITEM_LINES.saturating_sub(current_lines)
 }
 
 fn push_result_preview(
@@ -465,6 +498,14 @@ fn transcript_line(line: &str, width: usize, theme: &Theme) -> Line<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rendered_text(lines: &[Line<'static>]) -> String {
+        lines
+            .iter()
+            .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
     #[test]
     fn shell_activity_keeps_folded_transcript_preview() {
@@ -530,6 +571,39 @@ mod tests {
         let rendered = format!("{expanded:?}");
         assert!(rendered.contains("approval requested: requires approval"));
         assert!(rendered.contains("approval resolved: approved"));
+    }
+
+    #[test]
+    fn approval_events_remain_visible_after_prior_progress_when_expanded() {
+        let mut panel = ToolActivityPanel::new();
+        panel.push_call("call-1".into(), "Bash".into(), "rm important-file".into());
+        panel.set_progress("call-1", "checking command".into());
+        panel.set_progress("call-1", "preparing sandbox".into());
+
+        panel.approval_requested("call-1", "Bash".into(), "requires approval".into());
+        panel.approval_resolved("call-1", "Bash".into(), "approved".into());
+
+        assert!(panel.toggle_selected());
+        let expanded = panel.render_lines(80, &Theme::default());
+        assert!(expanded.len() <= MAX_VISIBLE_LINES as usize);
+        let rendered = rendered_text(&expanded);
+        assert!(rendered.contains("approval requested: requires approval"));
+        assert!(rendered.contains("approval resolved: approved"));
+    }
+
+    #[test]
+    fn latest_non_shell_item_becomes_focused_when_it_gains_result_content() {
+        let mut panel = ToolActivityPanel::new();
+        panel.push_call("old".into(), "Read".into(), "old.md".into());
+        panel.set_progress("old", "old progress".into());
+        assert!(panel.toggle_selected());
+
+        panel.push_call("new".into(), "Read".into(), "new.md".into());
+        panel.add_result_content("new", &serde_json::json!({"text": "new result"}), false);
+
+        let rendered = rendered_text(&panel.render_lines(80, &Theme::default()));
+        assert!(rendered.contains("Read new.md"));
+        assert!(!rendered.contains("old progress"));
     }
 
     #[test]

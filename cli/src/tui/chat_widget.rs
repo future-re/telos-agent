@@ -397,6 +397,27 @@ mod tests {
     }
 
     #[test]
+    fn user_and_assistant_blocks_have_breathing_room() {
+        let mut chat = ChatWidget::new();
+        chat.push_cell(Box::new(UserCell { content: "make it readable".to_string() }));
+        chat.push_cell(Box::new(AgentCell {
+            buffer: "Done.\n\nI adjusted the spacing.".to_string(),
+            is_streaming: false,
+        }));
+
+        let backend = TestBackend::new(40, 8);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = Theme::default();
+        terminal.draw(|frame| chat.render(frame, frame.area(), &theme)).unwrap();
+
+        assert!(rendered_row(&terminal, 2).trim().is_empty());
+        assert!(rendered_row(&terminal, 3).contains("▸ make it readable"));
+        assert!(rendered_row(&terminal, 4).trim().is_empty());
+        assert!(rendered_row(&terminal, 5).contains("Done."));
+        assert!(rendered_row(&terminal, 7).contains("I adjusted the spacing."));
+    }
+
+    #[test]
     fn overscrolling_past_top_still_renders_history() {
         let mut chat = ChatWidget::new();
         chat.push_cell(Box::new(AgentCell {

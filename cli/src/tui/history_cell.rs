@@ -67,6 +67,18 @@ pub struct UserCell {
     pub content: String,
 }
 
+fn user_lines(content: &str, theme: &Theme) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line> = vec![Line::from("")];
+    lines.extend(content.lines().enumerate().map(|(idx, line)| {
+        let marker = if idx == 0 { "▸ " } else { "  " };
+        Line::from(vec![
+            Span::styled(marker.to_string(), theme.user_style()),
+            Span::styled(line.to_string(), theme.user_style()),
+        ])
+    }));
+    lines
+}
+
 impl HistoryCell for UserCell {
     fn needed_lines(&self, width: usize) -> u16 {
         let chars_per_line = width.max(20);
@@ -83,28 +95,12 @@ impl HistoryCell for UserCell {
     }
 
     fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let mut lines: Vec<Line> = vec![Line::from("")];
-        lines.extend(self.content.lines().map(|line| {
-            Line::from(vec![
-                Span::styled("▸ ", theme.user_style()),
-                Span::styled(line.to_string(), theme.user_style()),
-            ])
-        }));
-
-        let text = Text::from(lines);
+        let text = Text::from(user_lines(&self.content, theme));
         frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }), area);
     }
 
     fn render_scrolled(&self, frame: &mut Frame, area: Rect, theme: &Theme, top_skip: u16) {
-        let mut lines: Vec<Line> = vec![Line::from("")];
-        lines.extend(self.content.lines().map(|line| {
-            Line::from(vec![
-                Span::styled("▸ ", theme.user_style()),
-                Span::styled(line.to_string(), theme.user_style()),
-            ])
-        }));
-
-        let text = Text::from(lines);
+        let text = Text::from(user_lines(&self.content, theme));
         frame.render_widget(
             Paragraph::new(text).wrap(Wrap { trim: true }).scroll((top_skip, 0)),
             area,
@@ -183,7 +179,7 @@ impl HistoryCell for AgentCell {
         }
         // Re-render markdown to measure — simple line count
         let rendered = crate::tui::markdown::render_markdown(&self.buffer, width);
-        rendered.lines.len() as u16
+        rendered.lines.len() as u16 + 1
     }
 
     fn is_streaming(&self) -> bool {
@@ -202,12 +198,21 @@ impl HistoryCell for AgentCell {
         if self.buffer.is_empty() {
             return;
         }
+        let content_area = Rect {
+            x: area.x,
+            y: area.y.saturating_add(1),
+            width: area.width,
+            height: area.height.saturating_sub(1),
+        };
+        if content_area.height == 0 {
+            return;
+        }
         if is_diff_content(&self.buffer) {
             let diff_text = render_diff(&self.buffer, theme);
-            frame.render_widget(Paragraph::new(diff_text).wrap(Wrap { trim: true }), area);
+            frame.render_widget(Paragraph::new(diff_text).wrap(Wrap { trim: true }), content_area);
         } else {
             let md_text = crate::tui::markdown::render_markdown(&self.buffer, area.width as usize);
-            frame.render_widget(Paragraph::new(md_text).wrap(Wrap { trim: true }), area);
+            frame.render_widget(Paragraph::new(md_text).wrap(Wrap { trim: true }), content_area);
         }
     }
 
@@ -215,17 +220,31 @@ impl HistoryCell for AgentCell {
         if self.buffer.is_empty() {
             return;
         }
+        let (content_area, adjusted_skip) = if top_skip == 0 {
+            let content_area = Rect {
+                x: area.x,
+                y: area.y.saturating_add(1),
+                width: area.width,
+                height: area.height.saturating_sub(1),
+            };
+            (content_area, 0)
+        } else {
+            (area, top_skip.saturating_sub(1))
+        };
+        if content_area.height == 0 {
+            return;
+        }
         if is_diff_content(&self.buffer) {
             let diff_text = render_diff(&self.buffer, theme);
             frame.render_widget(
-                Paragraph::new(diff_text).wrap(Wrap { trim: true }).scroll((top_skip, 0)),
-                area,
+                Paragraph::new(diff_text).wrap(Wrap { trim: true }).scroll((adjusted_skip, 0)),
+                content_area,
             );
         } else {
             let md_text = crate::tui::markdown::render_markdown(&self.buffer, area.width as usize);
             frame.render_widget(
-                Paragraph::new(md_text).wrap(Wrap { trim: true }).scroll((top_skip, 0)),
-                area,
+                Paragraph::new(md_text).wrap(Wrap { trim: true }).scroll((adjusted_skip, 0)),
+                content_area,
             );
         }
     }

@@ -19,3 +19,17 @@ pub enum Event {
     /// Request to redraw (e.g. from a timer tick).
     Tick,
 }
+
+/// Internal application events for component-to-component communication.
+///
+/// Components that hold a clone of the [`UnboundedSender<AppEvent>`] can emit
+/// these to update shared state without coupling directly to the App struct.
+#[derive(Debug, Clone)]
+pub enum AppEvent {
+    /// Update the status bar text.
+    StatusChanged(String),
+    /// Token usage update from the background task or runtime.
+    TokenUsage { used: u64, max: u64 },
+    /// A configuration value changed (e.g. auto-mode toggled).
+    ConfigChanged(String),
+}

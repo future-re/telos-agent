@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use crate::tui::approval::PendingApproval;
 use crate::tui::chat_widget::ChatWidget;
 use crate::tui::command_popup::SlashCommand;
-use crate::tui::event::Event;
+use crate::tui::event::{AppEvent, Event};
 use crate::tui::history_cell::*;
 use crate::tui::input_panel::{InputEvent, InputPanel};
 use crate::tui::overlay::{ApprovalOverlay, Overlay, OverlayAction};
@@ -69,6 +69,10 @@ pub struct App {
     turn_rx: mpsc::UnboundedReceiver<Event>,
     /// Receive pending approvals from the TuiApprovalHandler.
     approval_rx: mpsc::UnboundedReceiver<PendingApproval>,
+    /// Sender side of the internal event bus — cloned and shared with sub-components.
+    pub app_event_tx: mpsc::UnboundedSender<AppEvent>,
+    /// Receiver side of the internal event bus.
+    app_event_rx: mpsc::UnboundedReceiver<AppEvent>,
 }
 
 impl App {
@@ -103,6 +107,7 @@ impl App {
         let (prompt_tx, mut prompt_rx) = mpsc::unbounded_channel::<String>();
         let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
         let (approval_tx, approval_rx) = mpsc::unbounded_channel::<PendingApproval>();
+        let (app_event_tx, app_event_rx) = mpsc::unbounded_channel::<AppEvent>();
 
         // Background task owns the AgentSession because run_turn_stream needs &mut self.
         tokio::spawn(async move {
@@ -164,6 +169,8 @@ impl App {
             turn_tx: prompt_tx,
             turn_rx: event_rx,
             approval_rx,
+            app_event_tx,
+            app_event_rx,
         })
     }
 
@@ -299,6 +306,21 @@ impl App {
                 while let Ok(pending) = self.approval_rx.try_recv() {
                     self.overlays.push(Box::new(ApprovalOverlay::new(pending)));
                     self.mode = Mode::Approving;
+                }
+                // ── Process internal event bus ────────────────────────
+                while let Ok(app_event) = self.app_event_rx.try_recv() {
+                    match app_event {
+                        AppEvent::StatusChanged(text) => {
+                            self.status_text = text;
+                        }
+                        AppEvent::TokenUsage { used, max } => {
+                            self.turn_input_tokens = used;
+                            self.token_budget_max = Some(max);
+                        }
+                        AppEvent::ConfigChanged(key) => {
+                            tracing::debug!("config changed: {key}");
+                        }
+                    }
                 }
             }
             Event::Resize { .. } => {}

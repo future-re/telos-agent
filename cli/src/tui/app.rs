@@ -4,7 +4,6 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::pin::pin;
 use std::sync::Arc;
@@ -17,6 +16,7 @@ use tokio::sync::mpsc;
 use crate::tui::approval::PendingApproval;
 use crate::tui::chat_widget::ChatWidget;
 use crate::tui::event::Event;
+use crate::tui::history_cell::*;
 use crate::tui::input_panel::InputPanel;
 use crate::tui::status_bar;
 use crate::tui::theme::Theme;
@@ -32,27 +32,6 @@ pub enum Mode {
     Approving,
 }
 
-/// A UI-facing message fragment.
-#[derive(Debug, Clone)]
-pub enum UiMessage {
-    /// Full user prompt.
-    User(String),
-    /// Incremental assistant text fragment.
-    AssistantDelta(String),
-    /// Incremental reasoning/thinking fragment.
-    ThinkingDelta(String),
-    /// Tool call started.
-    ToolCall { id: String, name: String, detail: String },
-    /// Tool progress update (detail shown inline under the tool).
-    ToolProgress { id: Option<String>, name: String, message: String },
-    /// Tool call finished.
-    ToolCompleted { id: String, name: String, detail: String, is_error: bool },
-    /// Marks the end of a turn.
-    TurnComplete,
-    /// An error message (turn stream failure, session error, etc.).
-    Error(String),
-}
-
 /// Root application state for the TUI.
 pub struct App {
     /// Current UI mode.
@@ -61,8 +40,6 @@ pub struct App {
     pub should_quit: bool,
     /// Status text shown in the top bar.
     pub status_text: String,
-    /// Accumulated messages for display.
-    pub messages: Vec<UiMessage>,
     /// Chat widget (rendering + scrolling).
     pub chat: ChatWidget,
     /// Input panel at the bottom.
@@ -84,8 +61,6 @@ pub struct App {
     turn_output_tokens: u64,
     /// Shared memory store for tools, prompt injection, and automatic feedback.
     memory: Arc<Mutex<MemoryStore>>,
-    /// Tool call details keyed by tool_call_id for automatic memory entries.
-    tool_details: HashMap<String, String>,
     /// Send prompts to the background agent task.
     turn_tx: mpsc::UnboundedSender<String>,
     /// Receive TurnEvents from the background agent task.
@@ -171,7 +146,6 @@ impl App {
             should_quit: false,
             status_text: status_text.clone(),
             base_status: status_text,
-            messages: Vec::new(),
             chat: ChatWidget::new(),
             input: InputPanel::new(),
             pending_approvals: VecDeque::new(),
@@ -182,7 +156,6 @@ impl App {
             turn_input_tokens: 0,
             turn_output_tokens: 0,
             memory,
-            tool_details: HashMap::new(),
             turn_tx: prompt_tx,
             turn_rx: event_rx,
             approval_rx,
@@ -209,7 +182,7 @@ impl App {
                         return Ok(());
                     }
                     (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
-                        self.messages.clear();
+                        self.chat.clear();
                         self.chat.scroll_to_bottom();
                         return Ok(());
                     }
@@ -223,7 +196,7 @@ impl App {
                         // Full session reset requires recreating the background AgentSession,
                         // which is a follow-up enhancement. For now, clear the chat and indicate
                         // that a new session will begin on the next prompt.
-                        self.messages.clear();
+                        self.chat.clear();
                         self.chat.scroll_to_bottom();
                         self.status_text = "telos · new session (next prompt)".to_string();
                         return Ok(());
@@ -293,7 +266,7 @@ impl App {
                     match event {
                         Event::Turn(turn_event) => self.handle_turn_event(turn_event).await,
                         Event::TurnComplete => {
-                            self.messages.push(UiMessage::TurnComplete);
+                            self.chat.push_cell(Box::new(SeparatorCell));
                             self.mode = Mode::Normal;
                             self.turn_active = false;
                             self.turn_started = None;
@@ -302,7 +275,7 @@ impl App {
                             self.status_text = self.base_status.clone();
                         }
                         Event::SessionError { message } => {
-                            self.messages.push(UiMessage::Error(message));
+                            self.chat.push_cell(Box::new(ErrorCell { message }));
                             self.mode = Mode::Normal;
                             self.turn_active = false;
                             self.turn_started = None;
@@ -370,7 +343,7 @@ impl App {
     /// Send a user prompt to the background agent task.
     pub async fn send_prompt(&mut self, prompt: String) {
         crate::memory_runtime::record_user_preference(&self.memory, &prompt).await;
-        self.messages.push(UiMessage::User(prompt.clone()));
+        self.chat.push_cell(Box::new(UserCell { content: prompt.clone() }));
         self.base_status = self.status_text.clone();
         let _ = self.turn_tx.send(prompt);
         self.mode = Mode::Streaming;
@@ -399,7 +372,6 @@ impl App {
         }
     }
 
-    /// Convert an agent `TurnEvent` into a `UiMessage`.
     async fn handle_turn_event(&mut self, event: TurnEvent) {
         match event {
             TurnEvent::TurnStarted { .. } => {
@@ -410,59 +382,74 @@ impl App {
             }
             TurnEvent::AssistantDelta { text } => {
                 self.status_text = "streaming…".to_string();
-                self.messages.push(UiMessage::AssistantDelta(text));
+                if self
+                    .chat
+                    .active_mut()
+                    .map_or(true, |c| !c.is_streaming())
+                {
+                    // New agent turn — push a fresh streaming cell
+                    self.chat.push_cell(Box::new(AgentCell {
+                        buffer: text.clone(),
+                        is_streaming: true,
+                    }));
+                } else {
+                    self.chat.push_text(&text);
+                }
                 self.chat.scroll_to_bottom();
             }
             TurnEvent::ThinkingDelta { text } => {
-                self.messages.push(UiMessage::ThinkingDelta(text));
+                if self
+                    .chat
+                    .active_mut()
+                    .map_or(true, |c| !c.is_streaming())
+                {
+                    self.chat.push_cell(Box::new(ThinkingCell { buffer: text.clone() }));
+                } else {
+                    self.chat.push_text(&text);
+                }
             }
             TurnEvent::ToolCall { tool_call_id, name, detail } => {
-                self.tool_details.insert(tool_call_id.clone(), detail.clone());
                 let label = if detail.is_empty() { name.clone() } else { detail.clone() };
                 self.status_text = label;
-                self.messages.push(UiMessage::ToolCall { id: tool_call_id, name, detail });
+                self.chat.push_cell(Box::new(ToolCallCell::new(
+                    tool_call_id,
+                    name,
+                    detail,
+                )));
             }
-            TurnEvent::ToolProgress { tool_call_id, name, message, .. } => {
+            TurnEvent::ToolProgress { tool_call_id, message, .. } => {
                 if !message.starts_with("running command with") {
-                    self.status_text = format!("{} | {}", name, message);
+                    self.status_text = format!("{}", message);
                 }
-                self.messages.push(UiMessage::ToolProgress { id: tool_call_id, name, message });
+                // Find the ToolCallCell and add progress
+                if let Some(ref id) = tool_call_id {
+                    if let Some(cell) = self.chat.find_tool_call_mut(id) {
+                        if let Some(tc) = cell.as_any_mut().downcast_mut::<ToolCallCell>() {
+                            tc.add_progress(message);
+                        }
+                    }
+                }
             }
             TurnEvent::ToolCompleted { tool_call_id, name, is_error } => {
-                // Grab the detail from the pending ToolCall before removing it.
+                // Replace the pending ToolCallCell with a completed one
                 let detail = self
-                    .messages
-                    .iter()
-                    .find_map(|m| match m {
-                        UiMessage::ToolCall { id, detail, .. } if id == &tool_call_id => {
-                            Some(detail.clone())
-                        }
-                        _ => None,
-                    })
+                    .chat
+                    .find_tool_call(&tool_call_id)
+                    .and_then(|c| c.as_any().downcast_ref::<ToolCallCell>())
+                    .map(|tc| tc.detail.clone())
                     .unwrap_or_default();
-                // Remove pending + progress, replace with completed.
-                // Also remove any id-less ToolProgress (they're stale once the tool completes).
-                self.messages.retain(|m| match m {
-                    UiMessage::ToolCall { id, .. } => id != &tool_call_id,
-                    UiMessage::ToolProgress { id, .. } => {
-                        // Remove if the id matches, OR if id is None (stale).
-                        id.is_some() && id.as_deref() != Some(&tool_call_id)
-                    }
-                    _ => true,
-                });
-                self.messages.push(UiMessage::ToolCompleted {
-                    id: tool_call_id.clone(),
-                    name: name.clone(),
-                    detail: detail.clone(),
-                    is_error,
-                });
+
+                self.chat.remove_tool_call(&tool_call_id);
+                let mut cell = ToolCallCell::new(tool_call_id.clone(), name.clone(), detail.clone());
+                cell.set_completed(!is_error);
+                self.chat.push_cell(Box::new(cell));
 
                 if !is_error {
                     crate::memory_runtime::record_successful_tool(
                         &self.memory,
                         &name,
                         &tool_call_id,
-                        self.tool_details.get(&tool_call_id).map(String::as_str),
+                        Some(&detail),
                     )
                     .await;
                 }
@@ -473,7 +460,7 @@ impl App {
                         crate::memory_runtime::record_tool_error(
                             &self.memory,
                             result,
-                            self.tool_details.get(&result.tool_call_id).map(String::as_str),
+                            None,
                         )
                         .await;
                     }
@@ -481,18 +468,25 @@ impl App {
             }
             TurnEvent::TurnFinished { final_text, .. } => {
                 if !final_text.is_empty() {
-                    self.messages.push(UiMessage::AssistantDelta(final_text));
+                    // Mark the streaming cell as done and add final text
+                    if let Some(active) = self.chat.active_mut() {
+                        if active.is_streaming() {
+                            // AgentCell is no longer streaming
+                        }
+                    }
+                    self.chat.push_cell(Box::new(AgentCell {
+                        buffer: final_text,
+                        is_streaming: false,
+                    }));
                 }
             }
             TurnEvent::TokenBudgetExceeded { used_tokens, max_tokens } => {
-                self.messages.push(UiMessage::Error(format!(
-                    "token budget exceeded: {used_tokens}/{max_tokens}"
-                )));
+                self.chat.push_cell(Box::new(ErrorCell {
+                    message: format!("token budget exceeded: {used_tokens}/{max_tokens}"),
+                }));
             }
             TurnEvent::ProviderRetry { attempt, max_retries, delay_ms } => {
-                let elapsed = self.format_elapsed();
-                self.status_text =
-                    format!("retrying ({attempt}/{max_retries}, {delay_ms}ms){elapsed}");
+                self.status_text = format!("retrying ({attempt}/{max_retries}, {delay_ms}ms)");
             }
             TurnEvent::ProviderUsage { input_tokens, output_tokens } => {
                 self.turn_input_tokens = input_tokens as u64;

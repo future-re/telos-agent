@@ -87,6 +87,12 @@ impl ChatWidget {
         self.scroll_offset = 0;
     }
 
+    pub fn clear(&mut self) {
+        self.cells.clear();
+        self.active_idx = None;
+        self.scroll_offset = 0;
+    }
+
     /// Total height (in terminal lines) of all cells at the given width.
     pub fn total_height(&self, width: usize) -> u16 {
         self.cells.iter().map(|c| c.needed_lines(width)).sum()

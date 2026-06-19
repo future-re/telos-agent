@@ -15,7 +15,7 @@ pub enum OverlayAction {
     None,
     /// Pop this overlay from the stack.
     Pop,
-    /// Pop and push a different mode.
+    /// Key was handled; the app should check overlay state after.
     Handled,
 }
 
@@ -36,14 +36,6 @@ pub struct ApprovalOverlay {
 impl ApprovalOverlay {
     pub fn new(pending: PendingApproval) -> Self {
         Self { pending }
-    }
-
-    #[allow(dead_code)]
-    fn count_content_lines(&self, width: usize) -> usize {
-        let args = &self.pending.request.arguments;
-        let tool_name = &self.pending.request.tool_name;
-        let inner_w = width.saturating_sub(4).max(40);
-        approval_content_lines(tool_name, args, inner_w)
     }
 }
 

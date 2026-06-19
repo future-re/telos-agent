@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 #[derive(Debug)]
 pub struct PendingApproval {
     pub request: ApprovalRequest,
-    pub respond: oneshot::Sender<ApprovalDecision>,
+    pub respond: Option<oneshot::Sender<ApprovalDecision>>,
 }
 
 pub struct TuiApprovalHandler {
@@ -56,7 +56,7 @@ impl ApprovalHandler for TuiApprovalHandler {
         }
 
         let (tx, rx) = oneshot::channel();
-        let pending = PendingApproval { request, respond: tx };
+        let pending = PendingApproval { request, respond: Some(tx) };
         if self.tx.send(pending).is_err() {
             return ApprovalDecision::Deny { reason: "TUI approval channel closed".into() };
         }

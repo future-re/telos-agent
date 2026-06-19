@@ -1,7 +1,6 @@
 use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::Style;
 use std::pin::pin;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -205,22 +204,15 @@ impl App {
 
                 match self.mode {
                     Mode::Approving => {
-                        if let Some(overlay) = self.overlays.last_mut() {
-                            match overlay.handle_key(key) {
-                                OverlayAction::Pop => {
-                                    self.overlays.pop();
-                                    self.mode = if self.overlays.is_empty() {
-                                        if self.turn_active {
-                                            Mode::Streaming
-                                        } else {
-                                            Mode::Normal
-                                        }
-                                    } else {
-                                        Mode::Approving
-                                    };
-                                }
-                                _ => {}
-                            }
+                        if let Some(overlay) = self.overlays.last_mut()
+                            && overlay.handle_key(key) == OverlayAction::Pop
+                        {
+                            self.overlays.pop();
+                            self.mode = if self.overlays.is_empty() {
+                                if self.turn_active { Mode::Streaming } else { Mode::Normal }
+                            } else {
+                                Mode::Approving
+                            };
                         }
                         return Ok(());
                     }

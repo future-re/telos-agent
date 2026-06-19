@@ -17,7 +17,7 @@ mod test;
 pub mod deepseek;
 pub mod routed;
 mod traits;
-mod types;
+pub(crate) mod types;
 
 pub use deepseek::{DeepSeekConfig, DeepSeekProvider};
 pub use routed::{RoutedModelConfig, RoutedProvider};

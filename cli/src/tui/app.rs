@@ -377,9 +377,7 @@ impl App {
                                 }
                                 return Ok(());
                             }
-                            (KeyCode::Enter, _)
-                            | (KeyCode::Char(' '), _)
-                            | (KeyCode::Char('t'), true)
+                            (KeyCode::Char('t'), true)
                                 if self.tool_activity.toggle_selected()
                                     || self.chat.toggle_selected_tool() =>
                             {
@@ -1234,6 +1232,44 @@ mod tests {
         app.send_prompt("hello".into()).await;
 
         assert!(!cancelled.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn normal_enter_does_not_toggle_activity() {
+        let config = telos_agent::AgentConfig::default();
+        let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
+        let tools = telos_agent::ToolRegistry::new();
+        let temp = tempfile::tempdir().unwrap();
+        let memory = Arc::new(Mutex::new(MemoryStore::new(temp.path().join("memory"))));
+
+        let mut app = App::new(
+            config,
+            provider,
+            tools,
+            "telos".into(),
+            Some(temp.path()),
+            false,
+            memory,
+            ModelSwitchConfig::default(),
+        )
+        .unwrap();
+        app.tool_activity.push_call("call-1".into(), "Bash".into(), "cargo test".into());
+        app.tool_activity.complete("call-1", "Bash".into(), true);
+        app.tool_activity.add_result_content(
+            "call-1",
+            &serde_json::json!({"stdout": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n", "stderr": ""}),
+            false,
+        );
+
+        let before = app.tool_activity.height(80);
+        app.handle_event(Event::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        )))
+        .await
+        .unwrap();
+
+        assert_eq!(app.tool_activity.height(80), before);
     }
 
     #[test]

@@ -239,10 +239,8 @@ pub fn build_provider(options: &SharedOptions, config: &FileConfig) -> Result<Re
     match provider {
         ProviderArg::Deepseek => {
             // --model overrides both thinking and fast (single-model mode)
-            let explicit_model = options
-                .model
-                .clone()
-                .or_else(|| config.agent.as_ref()?.model.clone());
+            let explicit_model =
+                options.model.clone().or_else(|| config.agent.as_ref()?.model.clone());
 
             // Default: thinking = deepseek-v4-pro, fast = deepseek-v4-flash
             // Individual overrides via --thinking-model / --fast-model or config
@@ -267,8 +265,8 @@ pub fn build_provider(options: &SharedOptions, config: &FileConfig) -> Result<Re
                 let routed_config = RoutedModelConfig::dual(api_key, thinking_model, fast_model);
                 Ok(ResolvedProvider::Routed(RoutedProvider::new(routed_config)))
             } else {
-                    let cfg = DeepSeekConfig::new(api_key, thinking_model);
-                    Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
+                let cfg = DeepSeekConfig::new(api_key, thinking_model);
+                Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
             }
         }
         ProviderArg::Mock => Ok(ResolvedProvider::Mock(MockProvider::new(vec![]))),
@@ -525,10 +523,7 @@ mod tests {
 
     #[test]
     fn build_provider_without_model_flags_creates_routed_by_default() {
-        let options = SharedOptions {
-            api_key: Some("sk-test".into()),
-            ..Default::default()
-        };
+        let options = SharedOptions { api_key: Some("sk-test".into()), ..Default::default() };
         let config = FileConfig {
             agent: Some(AgentSection { provider: Some("deepseek".into()), ..Default::default() }),
             ..FileConfig::default()

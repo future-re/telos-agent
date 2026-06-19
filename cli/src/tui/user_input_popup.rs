@@ -92,6 +92,10 @@ impl Overlay for UserInputPopup {
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> OverlayAction {
+        // Guard: empty questions = nothing to interact with; avoid div-by-zero.
+        if self.questions.is_empty() {
+            return OverlayAction::None;
+        }
         match key.code {
             KeyCode::Tab => {
                 self.active_field = (self.active_field + 1) % self.questions.len();

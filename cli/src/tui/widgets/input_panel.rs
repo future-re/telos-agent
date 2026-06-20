@@ -86,6 +86,10 @@ impl InputPanel {
         self.textarea.lines().join("").trim().is_empty()
     }
 
+    pub fn text(&self) -> String {
+        self.textarea.lines().join("\n")
+    }
+
     /// Current input mode.
     pub fn input_mode(&self) -> InputMode {
         self.mode
@@ -523,5 +527,13 @@ mod tests {
         panel.handle_key(ctrl_key(KeyCode::Up));
         assert_eq!(text(&panel), "previous");
         assert!(panel.wants_vertical_nav_key(key(KeyCode::Down)));
+    }
+
+    #[test]
+    fn text_returns_multiline_composer_contents() {
+        let mut panel = InputPanel::new();
+        set_text(&mut panel, "line one\nline two");
+
+        assert_eq!(panel.text(), "line one\nline two");
     }
 }

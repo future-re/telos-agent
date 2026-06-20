@@ -129,6 +129,8 @@ pub mod mock;
 pub mod permissions;
 /// Plugin manifest, marketplace, registry, and tool loading.
 pub mod plugin;
+/// PowerShell command safety analysis used by PowerShell permissions.
+pub mod powershell_security;
 /// System-prompt section and assembly system.
 pub mod prompt;
 /// Model provider trait and built-in providers.

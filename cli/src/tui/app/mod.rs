@@ -686,6 +686,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shift_tab_encoded_as_shift_modified_tab_toggles_auto_mode() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+
+        app.handle_event(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT)))
+            .await
+            .unwrap();
+
+        assert!(app.auto_mode.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
     async fn empty_composer_down_scrolls_chat_when_not_browsing_history() {
         let config = telos_agent::AgentConfig::default();
         let provider = Arc::new(telos_agent::MockProvider::new(vec![]));

@@ -22,6 +22,15 @@ pub fn is_ctrl_char(key: KeyEvent, target: char) -> bool {
     }
 }
 
+pub fn is_shift_tab(key: KeyEvent) -> bool {
+    if key.modifiers.contains(KeyModifiers::ALT) || key.modifiers.contains(KeyModifiers::CONTROL) {
+        return false;
+    }
+
+    key.code == KeyCode::BackTab
+        || (key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT))
+}
+
 fn ascii_control_char(target: char) -> Option<char> {
     let lower = target.to_ascii_lowercase();
     if !lower.is_ascii_lowercase() {
@@ -60,5 +69,20 @@ mod tests {
         let key = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
 
         assert!(!is_ctrl_char(key, 'a'));
+    }
+
+    #[test]
+    fn shift_tab_accepts_backtab_and_shift_modified_tab() {
+        assert!(is_shift_tab(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)));
+        assert!(is_shift_tab(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT)));
+    }
+
+    #[test]
+    fn shift_tab_rejects_plain_tab_and_other_modified_tabs() {
+        assert!(!is_shift_tab(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
+        assert!(!is_shift_tab(KeyEvent::new(
+            KeyCode::Tab,
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        )));
     }
 }

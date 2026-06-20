@@ -547,7 +547,7 @@ impl Default for InputPanel {
 
 #[cfg(test)]
 mod tests {
-    use super::{ComposerHints, InputMode, InputPanel};
+    use super::{ComposerHints, InputMode, InputPanel, SlashCommand};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -559,6 +559,10 @@ mod tests {
 
     fn ctrl_key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    fn modified_key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, modifiers)
     }
 
     fn text(panel: &InputPanel) -> String {
@@ -705,6 +709,30 @@ mod tests {
         panel.handle_key(key(KeyCode::Down));
 
         assert_eq!(text(&panel), "");
+    }
+
+    #[test]
+    fn ctrl_shift_up_down_navigates_history() {
+        let mut panel = InputPanel::new();
+        panel.submit_text("previous".into());
+
+        panel.handle_key(modified_key(KeyCode::Up, KeyModifiers::CONTROL | KeyModifiers::SHIFT));
+        assert_eq!(text(&panel), "previous");
+
+        panel.handle_key(modified_key(KeyCode::Down, KeyModifiers::CONTROL | KeyModifiers::SHIFT));
+        assert_eq!(text(&panel), "");
+    }
+
+    #[test]
+    fn slash_command_popup_accepts_shift_modified_arrows() {
+        let mut panel = InputPanel::new();
+        panel.handle_key(key(KeyCode::Char('/')));
+
+        panel.handle_key(modified_key(KeyCode::Down, KeyModifiers::SHIFT));
+        assert_eq!(panel.popup.selected_command(), Some(&SlashCommand::Model));
+
+        panel.handle_key(modified_key(KeyCode::Up, KeyModifiers::SHIFT));
+        assert_eq!(panel.popup.selected_command(), Some(&SlashCommand::Tool));
     }
 
     #[test]

@@ -31,7 +31,10 @@ pub mod user_input_popup;
 use crate::tui::app::{App, ModelSwitchConfig, TuiLayoutSettings};
 use crate::tui::event::Event;
 use anyhow::Result;
-use crossterm::event::{Event as CEvent, EventStream};
+use crossterm::event::{
+    Event as CEvent, EventStream, KeyEventKind, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
 use futures_util::StreamExt;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -42,11 +45,16 @@ use telos_agent::{AgentConfig, MemoryStore, ModelProvider, ToolRegistry};
 
 /// Ensures the terminal leaves raw mode and the alternate screen on panic or
 /// early return.
-struct TuiGuard;
+struct TuiGuard {
+    keyboard_enhancement_enabled: bool,
+}
 
 impl Drop for TuiGuard {
     fn drop(&mut self) {
         let _ = crossterm::terminal::disable_raw_mode();
+        if self.keyboard_enhancement_enabled {
+            let _ = crossterm::execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
+        }
         let _ = crossterm::execute!(
             std::io::stdout(),
             crossterm::event::DisableBracketedPaste,
@@ -76,8 +84,15 @@ pub async fn run(
         crossterm::terminal::EnterAlternateScreen,
         crossterm::event::EnableMouseCapture
     )?;
+    let keyboard_enhancement_enabled =
+        matches!(crossterm::terminal::supports_keyboard_enhancement(), Ok(true))
+            && crossterm::execute!(
+                stdout,
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+            )
+            .is_ok();
     let _ = crossterm::execute!(stdout, crossterm::event::EnableBracketedPaste);
-    let _guard = TuiGuard;
+    let _guard = TuiGuard { keyboard_enhancement_enabled };
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -103,10 +118,10 @@ pub async fn run(
         let event = tokio::select! {
             maybe_event = reader.next() => {
                 match maybe_event {
-                    Some(Ok(CEvent::Key(key))) => Event::Key(key),
-                    Some(Ok(CEvent::Mouse(mouse))) => Event::Mouse(mouse),
-                    Some(Ok(CEvent::Paste(text))) => Event::Paste(text),
-                    Some(Ok(CEvent::Resize(cols, rows))) => Event::Resize { cols, rows },
+                    Some(Ok(event)) => match crossterm_event_to_app_event(event) {
+                        Some(event) => event,
+                        None => continue,
+                    },
                     _ => continue,
                 }
             }
@@ -123,4 +138,43 @@ pub async fn run(
     }
 
     Ok(())
+}
+
+fn crossterm_event_to_app_event(event: CEvent) -> Option<Event> {
+    match event {
+        CEvent::Key(key) if key.kind == KeyEventKind::Release => None,
+        CEvent::Key(key) => Some(Event::Key(key)),
+        CEvent::Mouse(mouse) => Some(Event::Mouse(mouse)),
+        CEvent::Paste(text) => Some(Event::Paste(text)),
+        CEvent::Resize(cols, rows) => Some(Event::Resize { cols, rows }),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn crossterm_event_mapping_ignores_key_release_events() {
+        let event = CEvent::Key(KeyEvent::new_with_kind(
+            KeyCode::BackTab,
+            KeyModifiers::SHIFT,
+            KeyEventKind::Release,
+        ));
+
+        assert!(crossterm_event_to_app_event(event).is_none());
+    }
+
+    #[test]
+    fn crossterm_event_mapping_keeps_key_press_events() {
+        let event = CEvent::Key(KeyEvent::new_with_kind(
+            KeyCode::Up,
+            KeyModifiers::CONTROL,
+            KeyEventKind::Press,
+        ));
+
+        assert!(matches!(crossterm_event_to_app_event(event), Some(Event::Key(_))));
+    }
 }

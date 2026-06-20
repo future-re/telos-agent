@@ -5,7 +5,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use crate::tui::event::{AppEvent, Event};
 use crate::tui::history_cell::{ErrorCell, SeparatorCell};
 use crate::tui::input_panel::InputMode;
-use crate::tui::keymap::is_ctrl_char;
+use crate::tui::keymap::{is_ctrl_char, is_shift_tab};
 use crate::tui::overlay::{ApprovalOverlay, OverlayAction};
 
 use super::{App, Mode};
@@ -40,7 +40,7 @@ impl App {
                     return Ok(());
                 }
 
-                if key.code == KeyCode::BackTab {
+                if is_shift_tab(key) {
                     let on = !self.auto_mode.load(Ordering::Relaxed);
                     self.auto_mode.store(on, Ordering::Relaxed);
                     self.update_auto_mode_status();

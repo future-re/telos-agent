@@ -222,8 +222,9 @@ pub use plugin::{BUILTIN_MARKETPLACE, PluginError, PluginId, PluginPromptSection
 // Prompt system — modular, cache-aware construction of the system prompt.
 pub use prompt::{
     CwdSection, DateSection, GitStatusSection, IdentitySection, McpSection, MemorySection,
-    ProfileSection, PromptAssembly, PromptSection, PromptStability, SafetySection, SkillsSection,
-    TaskGuidanceSection, ToneStyleSection, ToolUsageSection, ToolsSection,
+    ProfileSection, PromptAssembly, PromptSection, PromptStability, SafetySection,
+    ShellAwareToolUsageSection, SkillsSection, TaskGuidanceSection, ToneStyleSection,
+    ToolUsageSection, ToolsSection,
 };
 // Tool abstraction — the trait every callable capability implements, plus its registry.
 pub use tool::validate::{ValidationError, ValidationResult, validate_arguments};
@@ -236,8 +237,8 @@ pub use tools::{
     AskUserQuestionTool, BrowserBackTool, BrowserClickTool, BrowserCloseTool, BrowserFindUrlTool,
     BrowserManager, BrowserNavigateTool, BrowserScreenshotTool, BrowserScrollTool,
     BrowserSelectTool, BrowserStartTool, BrowserStateTool, BrowserTypeTool, CodeContextTool,
-    CodeIndexRefreshTool, CodeSearchTool, FileEditTool, FileReadTool, FileWriteTool, GlobTool,
-    GrepTool, PowerShellTool, ShellTool, SkillTool, TaskCreateTool, TaskGetTool, TaskListTool,
-    TaskUpdateTool, WebFetchTool, WebSearchTool, register_core_tools, register_memory_tools,
-    register_task_tools,
+    CodeIndexRefreshTool, CodeSearchTool, DefaultShell, FileEditTool, FileReadTool, FileWriteTool,
+    GlobTool, GrepTool, PowerShellTool, ShellTool, SkillTool, TaskCreateTool, TaskGetTool,
+    TaskListTool, TaskUpdateTool, WebFetchTool, WebSearchTool, register_core_tools,
+    register_core_tools_with_shell, register_memory_tools, register_task_tools,
 };

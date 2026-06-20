@@ -38,8 +38,9 @@ fn powershell_available() -> bool {
 #[test]
 fn register_core_tools_includes_powershell() {
     let mut tools = ToolRegistry::new();
-    register_core_tools(&mut tools);
+    register_core_tools_with_shell(&mut tools, DefaultShell::PowerShell);
     assert!(tools.get("PowerShell").is_ok());
+    assert_eq!(tools.get("shell").unwrap().definition().name, "PowerShell");
 }
 
 #[tokio::test]

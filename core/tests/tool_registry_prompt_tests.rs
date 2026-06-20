@@ -13,13 +13,44 @@ fn core_tools_expose_claude_names_and_accept_legacy_aliases() {
 
     let names =
         tools.definitions().into_iter().map(|definition| definition.name).collect::<Vec<_>>();
-    assert!(names.contains(&"Bash".to_string()));
+    assert!(names.contains(&DefaultShell::current_platform().tool_name().to_string()));
     assert!(names.contains(&"Read".to_string()));
     assert!(names.contains(&"Edit".to_string()));
     assert!(names.contains(&"Write".to_string()));
     assert!(!names.contains(&"shell".to_string()));
     assert!(tools.get("shell").is_ok());
     assert!(tools.get("file_read").is_ok());
+}
+
+#[test]
+fn default_shell_detects_windows_as_powershell_and_unix_as_bash() {
+    assert_eq!(DefaultShell::for_target_os("windows"), DefaultShell::PowerShell);
+    assert_eq!(DefaultShell::for_target_os("macos"), DefaultShell::Bash);
+    assert_eq!(DefaultShell::for_target_os("linux"), DefaultShell::Bash);
+}
+
+#[test]
+fn core_tools_can_register_powershell_as_default_shell() {
+    let mut tools = ToolRegistry::new();
+    register_core_tools_with_shell(&mut tools, DefaultShell::PowerShell);
+
+    let names =
+        tools.definitions().into_iter().map(|definition| definition.name).collect::<Vec<_>>();
+    assert!(names.contains(&"PowerShell".to_string()));
+    assert!(!names.contains(&"Bash".to_string()));
+    assert_eq!(tools.get("shell").unwrap().definition().name, "PowerShell");
+}
+
+#[test]
+fn core_tools_can_register_bash_as_default_shell() {
+    let mut tools = ToolRegistry::new();
+    register_core_tools_with_shell(&mut tools, DefaultShell::Bash);
+
+    let names =
+        tools.definitions().into_iter().map(|definition| definition.name).collect::<Vec<_>>();
+    assert!(names.contains(&"Bash".to_string()));
+    assert!(!names.contains(&"PowerShell".to_string()));
+    assert_eq!(tools.get("shell").unwrap().definition().name, "Bash");
 }
 
 #[test]
@@ -90,7 +121,7 @@ fn default_assembly_includes_tool_prompts() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
         let mut tools = ToolRegistry::new();
-        register_core_tools(&mut tools);
+        register_core_tools_with_shell(&mut tools, DefaultShell::PowerShell);
         let assembly = telos_agent::prompt::default_coding_assembly(
             Arc::new(tools),
             std::env::current_dir().unwrap(),
@@ -99,7 +130,9 @@ fn default_assembly_includes_tool_prompts() {
         );
         let text = assembly.build().await;
         assert!(text.contains("## Tool-specific guidance"));
-        assert!(text.contains("### Bash"));
+        assert!(text.contains("Use the PowerShell tool for shell commands"));
+        assert!(text.contains("Use PowerShell syntax, not Bash syntax"));
+        assert!(text.contains("### PowerShell"));
         assert!(text.contains("### Read"));
     });
 }

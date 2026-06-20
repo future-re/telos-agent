@@ -180,7 +180,7 @@ async fn main() -> Result<(), AgentError> {
 ### 工具系统
 
 - `Tool` trait + `ToolRegistry`，支持别名、JSON Schema 自动校验。
-- 内置工具：Bash、PowerShell、Read、Edit、Write、Glob、Grep、WebFetch、WebSearch、AskUserQuestion、Browser、CodeIndex。
+- 内置工具：默认 Shell（Linux/macOS 为 Bash，Windows 为 PowerShell，可配置覆盖）、Read、Edit、Write、Glob、Grep、WebFetch、WebSearch、AskUserQuestion、Browser、CodeIndex。
 - `SubagentTool`（完整子会话 + fork 并发多视角）、`SkillTool`（slash-command）。
 - Memory 工具（Read/Write/Grep/Edit/Status）、Task 工具（Create/Get/List/Update）。
 - MCP 工具桥接（stdio JSON-RPC，自动注册为 `mcp__<server>__<tool>`）。

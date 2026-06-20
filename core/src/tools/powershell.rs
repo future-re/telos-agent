@@ -81,9 +81,13 @@ impl Tool for PowerShellTool {
         }
     }
 
+    fn aliases(&self) -> &'static [&'static str] {
+        &["shell"]
+    }
+
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
-            "Use the PowerShell tool for Windows-native shell commands. \
+            "Use the PowerShell tool for shell commands in this environment. \
 Prefer Read, Edit, Write, Glob, or Grep for file operations. \
 Use PowerShell syntax, not Bash syntax. \
 Provide a short `description` summarizing the command's intent.",

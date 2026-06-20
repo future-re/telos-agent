@@ -14,8 +14,8 @@ use std::sync::Arc;
 pub use assembly::PromptAssembly;
 pub use builtins::{
     CwdSection, DateSection, GitStatusSection, IdentitySection, McpSection, MemorySection,
-    PathSection, ProfileSection, SafetySection, SkillsSection, TaskGuidanceSection,
-    ToneStyleSection, ToolPromptsSection, ToolUsageSection, ToolsSection,
+    PathSection, ProfileSection, SafetySection, ShellAwareToolUsageSection, SkillsSection,
+    TaskGuidanceSection, ToneStyleSection, ToolPromptsSection, ToolUsageSection, ToolsSection,
 };
 pub use section::{CacheHint, PromptBlock, PromptSection, PromptStability};
 
@@ -43,7 +43,7 @@ pub fn default_coding_assembly(
     assembly.add(TaskGuidanceSection);
     assembly.add(SafetySection);
     assembly.add(PathSection::new(path));
-    assembly.add(ToolUsageSection);
+    assembly.add(ShellAwareToolUsageSection::new(Arc::clone(&tools)));
     assembly.add(ToolsSection::new(Arc::clone(&tools)));
     assembly.add(ToolPromptsSection::new(Arc::clone(&tools)));
     assembly.add(DateSection);

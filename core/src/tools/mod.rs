@@ -6,6 +6,8 @@
 
 use std::sync::{Arc, Mutex};
 
+use serde::{Deserialize, Serialize};
+
 use crate::skills::SkillRegistry;
 use crate::tasks::TaskManager;
 use crate::tool::ToolRegistry;
@@ -51,11 +53,47 @@ pub use tasks::{TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool};
 pub use web_fetch::WebFetchTool;
 pub use web_search::WebSearchTool;
 
-/// Register every built-in tool with the supplied registry.
+/// Default shell exposed to the model for shell-style commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DefaultShell {
+    Bash,
+    #[serde(rename = "powershell")]
+    PowerShell,
+}
+
+impl DefaultShell {
+    /// Choose the platform default for the current Rust target.
+    pub fn current_platform() -> Self {
+        Self::for_target_os(std::env::consts::OS)
+    }
+
+    /// Choose the platform default for a Rust `target_os` value.
+    pub fn for_target_os(target_os: &str) -> Self {
+        if target_os == "windows" { Self::PowerShell } else { Self::Bash }
+    }
+
+    /// Canonical tool name for this shell.
+    pub fn tool_name(self) -> &'static str {
+        match self {
+            Self::Bash => "Bash",
+            Self::PowerShell => "PowerShell",
+        }
+    }
+}
+
+/// Register every built-in tool with the current platform's default shell.
 pub fn register_core_tools(registry: &mut ToolRegistry) {
+    register_core_tools_with_shell(registry, DefaultShell::current_platform());
+}
+
+/// Register every built-in tool with an explicit default shell.
+pub fn register_core_tools_with_shell(registry: &mut ToolRegistry, default_shell: DefaultShell) {
     let browser_manager = BrowserManager::new();
-    registry.register(ShellTool);
-    registry.register(PowerShellTool);
+    match default_shell {
+        DefaultShell::Bash => registry.register(ShellTool),
+        DefaultShell::PowerShell => registry.register(PowerShellTool),
+    }
     registry.register(FileReadTool);
     registry.register(FileWriteTool);
     registry.register(FileEditTool);

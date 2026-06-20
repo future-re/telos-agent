@@ -226,6 +226,50 @@ impl PromptSection for PathSection {
 /// General tool-selection and parallelism guidance.
 pub struct ToolUsageSection;
 
+/// Tool-selection guidance that reflects the registered default shell.
+pub struct ShellAwareToolUsageSection {
+    tools: Arc<ToolRegistry>,
+}
+
+impl ShellAwareToolUsageSection {
+    pub fn new(tools: Arc<ToolRegistry>) -> Self {
+        Self { tools }
+    }
+
+    fn default_shell(&self) -> &'static str {
+        if self.tools.definitions().iter().any(|definition| definition.name == "PowerShell") {
+            "PowerShell"
+        } else {
+            "Bash"
+        }
+    }
+}
+
+fn render_tool_usage(shell_tool: &str) -> String {
+    let shell_syntax = if shell_tool == "PowerShell" {
+        "- The default shell tool for this environment is PowerShell. Use PowerShell syntax, not Bash syntax, for shell commands."
+    } else {
+        "- The default shell tool for this environment is Bash. Use Bash syntax for shell commands."
+    };
+    [
+        "# Using your tools".to_string(),
+        format!("- Do NOT use the {shell_tool} tool to run commands when a relevant dedicated tool is provided. Using dedicated tools allows the user to better understand and review your work. This is CRITICAL to assisting the user:"),
+        "  - To read files use Read instead of cat, head, tail, or sed".to_string(),
+        "  - To edit files use Edit instead of sed or awk".to_string(),
+        "  - To create files use Write instead of cat with heredoc or echo redirection".to_string(),
+        "  - To search for files use Glob instead of find or ls".to_string(),
+        "  - To search the content of files, use Grep instead of grep or rg".to_string(),
+        format!("  - Reserve using the {shell_tool} tool exclusively for system commands and terminal operations that require shell execution. If you are unsure and there is a relevant dedicated tool, default to using the dedicated tool and only fallback on using the {shell_tool} tool for these if it is absolutely necessary."),
+        shell_syntax.to_string(),
+        "- Use the Subagent tool with specialized agents when the task at hand matches the agent's description. Subagents are valuable for parallelizing independent queries or for protecting the main context window from excessive results, but they should not be used excessively when not needed. Importantly, avoid duplicating work that subagents are already doing - if you delegate research to a subagent, do not also perform the same searches yourself.".to_string(),
+        "- For simple, directed codebase searches (e.g. for a specific file/class/function) use the Glob or Grep tools directly.".to_string(),
+        "- For broader codebase exploration and deep research, use the Subagent tool with subagent_type Explore. This is slower than using the Glob or Grep tools directly, so use this only when a simple, directed search proves to be insufficient or when your task will clearly require more than 3 queries.".to_string(),
+        "- Use the Skill tool to invoke loaded skills. IMPORTANT: Only use Skill for skills that are listed as available - do not guess or use built-in CLI commands.".to_string(),
+        "- You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel.".to_string(),
+    ]
+    .join("\n")
+}
+
 #[async_trait]
 impl PromptSection for ToolUsageSection {
     fn name(&self) -> &str {
@@ -236,22 +280,21 @@ impl PromptSection for ToolUsageSection {
     }
 
     async fn render(&self, _ctx: &()) -> String {
-        [
-            "# Using your tools",
-            "- Do NOT use the Bash tool to run commands when a relevant dedicated tool is provided. Using dedicated tools allows the user to better understand and review your work. This is CRITICAL to assisting the user:",
-            "  - To read files use Read instead of cat, head, tail, or sed",
-            "  - To edit files use Edit instead of sed or awk",
-            "  - To create files use Write instead of cat with heredoc or echo redirection",
-            "  - To search for files use Glob instead of find or ls",
-            "  - To search the content of files, use Grep instead of grep or rg",
-            "  - Reserve using the Bash tool exclusively for system commands and terminal operations that require shell execution. If you are unsure and there is a relevant dedicated tool, default to using the dedicated tool and only fallback on using the Bash tool for these if it is absolutely necessary.",
-            "- Use the Subagent tool with specialized agents when the task at hand matches the agent's description. Subagents are valuable for parallelizing independent queries or for protecting the main context window from excessive results, but they should not be used excessively when not needed. Importantly, avoid duplicating work that subagents are already doing - if you delegate research to a subagent, do not also perform the same searches yourself.",
-            "- For simple, directed codebase searches (e.g. for a specific file/class/function) use the Glob or Grep tools directly.",
-            "- For broader codebase exploration and deep research, use the Subagent tool with subagent_type Explore. This is slower than using the Glob or Grep tools directly, so use this only when a simple, directed search proves to be insufficient or when your task will clearly require more than 3 queries.",
-            "- Use the Skill tool to invoke loaded skills. IMPORTANT: Only use Skill for skills that are listed as available - do not guess or use built-in CLI commands.",
-            "- You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel.",
-        ]
-        .join("\n")
+        render_tool_usage("Bash")
+    }
+}
+
+#[async_trait]
+impl PromptSection for ShellAwareToolUsageSection {
+    fn name(&self) -> &str {
+        "tool_usage"
+    }
+    fn stability(&self) -> PromptStability {
+        PromptStability::Static
+    }
+
+    async fn render(&self, _ctx: &()) -> String {
+        render_tool_usage(self.default_shell())
     }
 }
 

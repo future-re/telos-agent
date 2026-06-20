@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use telos_agent::{AgentConfig, ApprovalHandler, MemoryStore, ToolRegistry};
+use telos_agent::{AgentConfig, ApprovalHandler, DefaultShell, MemoryStore, ToolRegistry};
 
 use crate::cli::SharedOptions;
 use crate::config::{self, FileConfig};
@@ -42,11 +42,19 @@ pub(crate) fn prepare_runtime(
     )?;
 
     let mut tools = ToolRegistry::new();
-    telos_agent::register_core_tools(&mut tools);
+    let default_shell = resolve_default_shell(file_config);
+    telos_agent::register_core_tools_with_shell(&mut tools, default_shell);
     register_cli_task_tools(&mut tools, &project_root_or_cwd);
 
-    let mut assembly = context::build_prompt_assembly(&context);
-    crate::memory_runtime::register_memory_runtime(&mut tools, &mut assembly, memory_store.clone());
+    telos_agent::register_memory_tools(&mut tools, memory_store.clone());
+    let mut assembly = telos_agent::prompt::default_coding_assembly(
+        Arc::new(tools.clone()),
+        agent_config.cwd.clone(),
+        agent_config.skill_registry.clone(),
+        agent_config.path,
+    );
+    context::append_prompt_context(&mut assembly, &context);
+    assembly.add(telos_agent::MemorySection::new(memory_store.clone()));
     agent_config.prompt_assembly = Some(Arc::new(assembly));
 
     Ok(PreparedRuntime {
@@ -66,6 +74,14 @@ pub(crate) fn register_cli_task_tools(registry: &mut ToolRegistry, project_root_
     telos_agent::register_task_tools(registry, task_manager);
 }
 
+pub(crate) fn resolve_default_shell(file_config: &FileConfig) -> DefaultShell {
+    file_config
+        .agent
+        .as_ref()
+        .and_then(|agent| agent.default_shell)
+        .unwrap_or_else(DefaultShell::current_platform)
+}
+
 pub(crate) async fn process_diagnostics(
     runtime: &Option<DiagnosticsRuntime>,
     file_config: &FileConfig,
@@ -79,13 +95,14 @@ pub(crate) async fn process_diagnostics(
 
 #[cfg(test)]
 mod tests {
-    use super::register_cli_task_tools;
+    use super::{register_cli_task_tools, resolve_default_shell};
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::Arc;
 
+    use crate::config::{AgentSection, FileConfig};
     use serde_json::json;
-    use telos_agent::{Message, ToolContext, ToolRegistry};
+    use telos_agent::{DefaultShell, Message, ToolContext, ToolRegistry};
 
     fn tool_context() -> ToolContext {
         ToolContext {
@@ -131,5 +148,18 @@ mod tests {
 
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0]["subject"], "Wire CLI task tools");
+    }
+
+    #[test]
+    fn resolve_default_shell_uses_config_override() {
+        let config = FileConfig {
+            agent: Some(AgentSection {
+                default_shell: Some(DefaultShell::PowerShell),
+                ..Default::default()
+            }),
+            ..FileConfig::default()
+        };
+
+        assert_eq!(resolve_default_shell(&config), DefaultShell::PowerShell);
     }
 }

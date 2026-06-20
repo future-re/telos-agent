@@ -159,7 +159,7 @@ fn permission_engine_allows_shell_by_command_prefix() {
             },
         ]);
         let mut tools = ToolRegistry::new();
-        register_core_tools(&mut tools);
+        register_core_tools_with_shell(&mut tools, DefaultShell::Bash);
         let mut session = AgentSession::new(AgentConfig {
             permission_engine: Some(engine),
             ..AgentConfig::default()
@@ -200,7 +200,7 @@ fn permission_engine_allows_powershell_by_command_prefix() {
             },
         ]);
         let mut tools = ToolRegistry::new();
-        register_core_tools(&mut tools);
+        register_core_tools_with_shell(&mut tools, DefaultShell::PowerShell);
         let mut session = AgentSession::new(AgentConfig {
             permission_engine: Some(engine),
             ..AgentConfig::default()
@@ -211,6 +211,7 @@ fn permission_engine_allows_powershell_by_command_prefix() {
         let tool_result =
             result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
         assert!(!tool_result.text().contains("permission_required"), "{}", tool_result.text());
+        assert!(!tool_result.text().contains("tool_not_found"), "{}", tool_result.text());
     });
 }
 

@@ -53,7 +53,9 @@ min_occurrences = 3
 
 `[agent.models].thinking` controls planning, first iteration, recovery, and periodic rethink. `[agent.models].fast` controls tool execution and routine follow-up iterations. If no model is configured, DeepSeek defaults to `deepseek-v4-pro` for thinking and `deepseek-v4-flash` for fast execution.
 
-`[agent].default_shell` accepts `bash` or `powershell`. `[agent].max_iterations` defaults to `30`.
+`[agent].default_shell` accepts `bash` or `powershell`. When unset, Linux and
+macOS use `bash`, and Windows uses `powershell`. `[agent].max_iterations`
+defaults to `30`.
 
 ## Environment
 

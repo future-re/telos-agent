@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+pub use telos_agent::DefaultShell;
 
 /// Configuration loaded from toml files (user-level ~/.config/telos/config.toml
 /// and project-level .telos.toml).
@@ -53,14 +54,6 @@ pub struct DiagnosticsGithubSection {
 pub struct ModelsSection {
     pub thinking: Option<String>,
     pub fast: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DefaultShell {
-    Bash,
-    #[serde(rename = "powershell")]
-    PowerShell,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

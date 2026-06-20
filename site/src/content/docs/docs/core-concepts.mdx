@@ -19,7 +19,7 @@ A `ModelProvider` connects the runtime to an LLM backend. The core crate include
 
 Tools implement the `Tool` trait and are registered in a `ToolRegistry`. A tool describes its callable shape with `ToolDefinition`, receives a `ToolContext`, and returns `ToolOutput`.
 
-Built-in tools can be registered with `register_core_tools`, including Bash and PowerShell shells, file read/write/edit, glob, grep, code index, web fetch, web search, and browser automation tools.
+Built-in tools can be registered with `register_core_tools`, including the platform/default configured shell, file read/write/edit, glob, grep, code index, web fetch, web search, and browser automation tools.
 
 The CLI adds task tools and project memory tools on top of the core tool set. Task data is stored under `.telos/tasks/`, and memory is opened for the detected project root.
 

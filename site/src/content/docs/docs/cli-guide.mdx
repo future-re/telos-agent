@@ -142,8 +142,9 @@ thinking = "deepseek-v4-pro"
 fast = "deepseek-v4-flash"
 ```
 
-`default_shell` accepts `bash` or `powershell`. `max_iterations` defaults to
-`30` unless set in config or overridden with `--max-iterations`.
+`default_shell` accepts `bash` or `powershell`. When unset, Linux and macOS
+default to `bash`, and Windows defaults to `powershell`. `max_iterations`
+defaults to `30` unless set in config or overridden with `--max-iterations`.
 
 ## Approval and Auto Mode
 

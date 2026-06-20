@@ -18,7 +18,7 @@ cargo add telos_agent
 | Session runtime | `AgentSession`, `AgentConfig`, `TurnEvent`, `TurnResult` | Run blocking or streaming agent turns. |
 | Providers | `ModelProvider`, `DeepSeekProvider`, `RoutedProvider`, `MockProvider` | Connect the runtime to LLM backends. |
 | Tools | `Tool`, `ToolRegistry`, `ToolDefinition`, `ToolOutput`, `ToolContext` | Define and register callable capabilities. |
-| Built-in tools | `register_core_tools`, `ShellTool`, `PowerShellTool`, file tools, code index tools, browser tools, `WebFetchTool`, `WebSearchTool` | Add default filesystem, shell, search, browser, and web tools. |
+| Built-in tools | `register_core_tools`, `register_core_tools_with_shell`, `ShellTool`, `PowerShellTool`, file tools, code index tools, browser tools, `WebFetchTool`, `WebSearchTool` | Add filesystem, the platform/default configured shell, search, browser, and web tools. |
 | Human approval | `ApprovalHandler`, `ApprovalRequest`, `ApprovalDecision`, `PermissionEngine`, `PermissionRule` | Gate dangerous tool execution. |
 | Persistence | `Storage`, `JsonlStorage`, `NoopStorage` | Save and resume sessions. |
 | Prompt | `PromptAssembly`, `PromptSection`, built-in prompt sections | Build dynamic system prompts. |

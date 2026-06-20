@@ -80,7 +80,12 @@ impl PromptSection for StaticTextSection {
 /// as separate static sections.
 pub fn build_prompt_assembly(ctx: &ProjectContext) -> PromptAssembly {
     let mut assembly = PromptAssembly::new();
+    append_prompt_context(&mut assembly, ctx);
+    assembly
+}
 
+/// Append project context sections to an existing prompt assembly.
+pub fn append_prompt_context(assembly: &mut PromptAssembly, ctx: &ProjectContext) {
     if let Some(ref instructions) = ctx.project_instructions {
         let file = ctx.instructions_file.as_deref().unwrap_or("unknown");
         assembly.add(StaticTextSection {
@@ -95,8 +100,6 @@ pub fn build_prompt_assembly(ctx: &ProjectContext) -> PromptAssembly {
             text: format!("## Git Status\n\n```\n{}\n```", status),
         });
     }
-
-    assembly
 }
 
 /// Build the status-bar text shown when the TUI launches.

@@ -1,0 +1,61 @@
+---
+title: CLI Guide
+description: Use telos from the terminal in TUI or one-shot mode.
+---
+
+The `telos` CLI provides a Codex-style full-screen terminal interface and a single-prompt mode for one-shot tasks.
+
+## Install
+
+```bash
+cargo install telos-cli
+export DEEPSEEK_API_KEY=sk-...
+```
+
+API keys are resolved in this order: `--api-key`, provider-specific environment variable such as `DEEPSEEK_API_KEY`, config file `[env]`, then interactive prompt.
+
+## TUI Mode
+
+Run without a prompt to start the full-screen TUI:
+
+```bash
+telos
+```
+
+The TUI streams markdown output, displays tool-call indicators, supports inline approval, can toggle automatic approval, and auto-saves sessions under `.telos/sessions/`.
+
+## One-Shot Mode
+
+Pass a prompt to run a single task and exit:
+
+```bash
+telos "Review src/lib.rs"
+```
+
+## Provider and Model Flags
+
+Choose the DeepSeek provider and one model:
+
+```bash
+telos --provider deepseek --model deepseek-v4-pro "Refactor error handling"
+```
+
+Use separate thinking and fast models:
+
+```bash
+telos --provider deepseek \
+  --thinking-model deepseek-v4-pro \
+  --fast-model deepseek-v4-flash \
+  "Refactor error handling"
+```
+
+The CLI accepts `deepseek`, `deep`, or `mock` for provider resolution. Without explicit DeepSeek model settings, it defaults to `deepseek-v4-pro` for thinking and `deepseek-v4-flash` for fast execution.
+
+## Completions
+
+Generate shell completions with:
+
+```bash
+telos completion bash > /usr/share/bash-completion/completions/telos
+telos completion zsh  > /usr/local/share/zsh/site-functions/_telos
+```

@@ -1,0 +1,48 @@
+---
+title: Deployment
+description: Publish telos crates, install the CLI, and deploy the documentation website.
+---
+
+telos is distributed across Rust crates, a CLI package, generated API docs, and the website.
+
+## Crates
+
+`telos_agent` is the library crate. Add it to a Rust project with:
+
+```bash
+cargo add telos_agent
+```
+
+The generated rustdoc entry point is `target/doc/telos_agent/index.html` when built locally.
+
+## CLI Install
+
+Install the terminal client from crates.io:
+
+```bash
+cargo install telos-cli
+```
+
+For local development from the repository:
+
+```bash
+cd cli
+cargo install --path .
+```
+
+## GitHub Pages Docs
+
+The website is an Astro and Starlight project under `site/`. Its configured public base is `/telos-agent`, with GitHub Pages hosting at `https://future-re.github.io`.
+
+Build the site locally with:
+
+```bash
+cd site
+npm run build
+```
+
+The wider website plan copies generated Rust API docs into the static output after Astro builds, because Astro clears `site/dist` during each build.
+
+## Desktop Releases
+
+The desktop client is currently a Tauri, Vite, React, and TypeScript scaffold for a future macOS and Windows product direction. The repository docs do not yet describe a packaged desktop release process.

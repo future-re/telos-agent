@@ -1,0 +1,68 @@
+---
+title: Quick Start
+description: Install the CLI or library crate and run your first telos turn.
+---
+
+Use the CLI when you want an agent in the terminal. Use the Rust library when you want to embed the runtime in your own application.
+
+## Install the CLI
+
+```bash
+cargo install telos-cli
+export DEEPSEEK_API_KEY=sk-...
+```
+
+Start the full-screen TUI:
+
+```bash
+telos
+```
+
+Run one prompt and exit:
+
+```bash
+telos "Review src/lib.rs"
+```
+
+Choose a provider and model explicitly:
+
+```bash
+telos --provider deepseek --model deepseek-v4-pro "Refactor error handling"
+```
+
+Use separate thinking and fast execution models:
+
+```bash
+telos --provider deepseek \
+  --thinking-model deepseek-v4-pro \
+  --fast-model deepseek-v4-flash \
+  "Refactor error handling"
+```
+
+## Add the Library
+
+```bash
+cargo add telos_agent
+```
+
+Minimal runtime example:
+
+```rust
+use telos_agent::{
+    AgentConfig, AgentSession, DeepSeekConfig, DeepSeekProvider, ToolRegistry,
+    register_core_tools,
+};
+
+# async fn example() -> Result<(), telos_agent::AgentError> {
+let provider = DeepSeekProvider::new(DeepSeekConfig::from_env("deepseek-v4-pro")?);
+let mut tools = ToolRegistry::new();
+register_core_tools(&mut tools);
+
+let mut session = AgentSession::new(AgentConfig::default())?;
+let result = session.run_turn(&provider, &tools, "Summarize this project").await?;
+println!("{}", result.final_message.text_content());
+# Ok(())
+# }
+```
+
+The DeepSeek provider reads `DEEPSEEK_API_KEY` from the environment when created with `DeepSeekConfig::from_env`.

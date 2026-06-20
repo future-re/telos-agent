@@ -1,0 +1,16 @@
+---
+title: Desktop Client
+description: Track the current desktop client scaffold and product direction.
+---
+
+The desktop client is currently a scaffold for a future macOS and Windows product direction. It uses Tauri with Vite, React, and TypeScript.
+
+The runtime boundary remains the Rust agent core: the desktop product direction can build on the same session, provider, tool, approval, storage, memory, plugin, and MCP concepts used by the library and CLI.
+
+## Current Status
+
+- Tauri provides the native desktop shell.
+- Vite, React, and TypeScript provide the frontend scaffold.
+- The target product direction is desktop distribution for macOS and Windows.
+
+The repository docs do not yet describe a packaged desktop release flow. For current usage, install the CLI or embed the `telos_agent` library.

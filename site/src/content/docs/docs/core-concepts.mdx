@@ -1,0 +1,38 @@
+---
+title: Core Concepts
+description: Understand the runtime pieces that make up a telos agent turn.
+---
+
+telos is organized around a small set of runtime concepts that can be used from the library, CLI, or product clients.
+
+## AgentSession
+
+`AgentSession` holds conversation state and configuration for the turn loop. It exposes blocking and streaming turn APIs through `run_turn` and `run_turn_stream`, returning `TurnResult` data and emitting `TurnEvent` values as work progresses.
+
+## Provider
+
+A `ModelProvider` connects the runtime to an LLM backend. The core crate includes `DeepSeekProvider`, `RoutedProvider`, and `MockProvider`. The CLI currently supports `deepseek` and `mock` providers.
+
+`RoutedProvider` supports dual-model routing, with a thinking model for planning and recovery and a fast model for tool execution and routine follow-up iterations.
+
+## Tools
+
+Tools implement the `Tool` trait and are registered in a `ToolRegistry`. A tool describes its callable shape with `ToolDefinition`, receives a `ToolContext`, and returns `ToolOutput`.
+
+Built-in tools can be registered with `register_core_tools`, including shell, file read/write/edit, glob, grep, web fetch, and web search capabilities.
+
+## Approvals
+
+Sensitive tool calls can be gated by `ApprovalHandler`, `ApprovalRequest`, and `ApprovalDecision`. `PermissionEngine` and `PermissionRule` evaluate policy before execution. CLI policies support `allow`, `ask`, and `deny`.
+
+## Events
+
+`TurnEvent` exposes runtime progress such as sampling, tool execution, compaction, and stop phases. The TUI consumes these events to render streaming model output, tool status, approvals, and turn summaries.
+
+## Storage
+
+The `Storage` trait supports persistent session state. The core crate includes `JsonlStorage` for JSONL persistence and `NoopStorage` for sessions that should not write state.
+
+## Memory
+
+`MemoryStore`, `ProfileManager`, and memory tools provide cross-session knowledge and profile context. The CLI registers project memory by default.

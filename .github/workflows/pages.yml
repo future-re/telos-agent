@@ -1,0 +1,82 @@
+name: Pages
+
+on:
+  push:
+    tags: ["*"]
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-pages-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-pages-
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Generate Rust API docs
+        run: ./scripts/generate-core-api-docs.sh
+
+      - name: Install site dependencies
+        working-directory: site
+        run: npm ci
+
+      - name: Check site
+        working-directory: site
+        run: npm run check
+
+      - name: Build site
+        working-directory: site
+        run: npm run build
+
+      - name: Add Rust API docs to site output
+        run: |
+          mkdir -p site/dist/api/rust
+          cp -R target/doc/. site/dist/api/rust/
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    name: Deploy site
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

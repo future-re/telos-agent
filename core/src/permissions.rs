@@ -9,6 +9,13 @@
 use crate::bash_security::extract_command_prefix;
 use crate::bash_security::prefix::PrefixResult;
 
+/// Shell dialect used for command-prefix extraction and matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellKind {
+    Bash,
+    PowerShell,
+}
+
 /// Outcome of a permission check for a tool call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleDecision {
@@ -150,6 +157,7 @@ impl PermissionEngine {
     /// usual, so a blanket `deny_tool("Bash")` continues to work.
     pub fn evaluate_shell_call(
         &self,
+        shell_kind: ShellKind,
         tool_names: &[&str],
         command: &str,
         _arguments: &serde_json::Value,
@@ -158,27 +166,22 @@ impl PermissionEngine {
         // `_arguments` is reserved for future use (e.g. argument-based rules).
         let _ = _arguments;
 
-        let extracted = match extract_command_prefix(command) {
-            PrefixResult::Prefix(p) => Some(p),
-            PrefixResult::None => None,
-            // When the command cannot be safely analyzed (contains injections,
-            // parse errors, etc.), prefix rules must not auto-allow it. Only
-            // general tool-level rules without a command_prefix are considered,
-            // and the engine defaults to Deny if nothing matches so injection-like
-            // commands fail closed.
-            PrefixResult::NeedsReview => {
-                let mut result = None;
-                for rule in &self.rules {
-                    if tool_names
-                        .iter()
-                        .any(|tool_name| Self::match_name(&rule.tool_name, tool_name))
-                        && rule.command_prefix.is_none()
-                        && Self::match_cwd_prefix(rule, cwd)
-                    {
-                        result = Some(rule.decision.clone());
+        let extracted = match shell_kind {
+            ShellKind::Bash => match extract_command_prefix(command) {
+                PrefixResult::Prefix(p) => Some(p),
+                PrefixResult::None => None,
+                PrefixResult::NeedsReview => {
+                    return self.evaluate_needs_review_shell(tool_names, cwd);
+                }
+            },
+            ShellKind::PowerShell => {
+                match crate::powershell_security::extract_command_prefix(command) {
+                    crate::powershell_security::PrefixResult::Prefix(p) => Some(p),
+                    crate::powershell_security::PrefixResult::None => None,
+                    crate::powershell_security::PrefixResult::NeedsReview => {
+                        return self.evaluate_needs_review_shell(tool_names, cwd);
                     }
                 }
-                return result.or(Some(RuleDecision::Deny));
             }
         };
 
@@ -192,13 +195,41 @@ impl PermissionEngine {
             }
             if let Some(prefix) = &rule.command_prefix {
                 let haystack = extracted.as_deref().unwrap_or_else(|| command.trim_start());
-                if !haystack.starts_with(prefix) {
+                let matches_prefix = match shell_kind {
+                    ShellKind::Bash => haystack.starts_with(prefix),
+                    ShellKind::PowerShell => {
+                        haystack.to_ascii_lowercase().starts_with(&prefix.to_ascii_lowercase())
+                    }
+                };
+                if !matches_prefix {
                     continue;
                 }
             }
             result = Some(rule.decision.clone());
         }
         result
+    }
+
+    fn evaluate_needs_review_shell(
+        &self,
+        tool_names: &[&str],
+        cwd: &std::path::Path,
+    ) -> Option<RuleDecision> {
+        // When the command cannot be safely analyzed (contains injections,
+        // parse errors, etc.), prefix rules must not auto-allow it. Only
+        // general tool-level rules without a command_prefix are considered,
+        // and the engine defaults to Deny if nothing matches so injection-like
+        // commands fail closed.
+        let mut result = None;
+        for rule in &self.rules {
+            if tool_names.iter().any(|tool_name| Self::match_name(&rule.tool_name, tool_name))
+                && rule.command_prefix.is_none()
+                && Self::match_cwd_prefix(rule, cwd)
+            {
+                result = Some(rule.decision.clone());
+            }
+        }
+        result.or(Some(RuleDecision::Deny))
     }
 
     /// Match `pattern` against `name` with `*` wildcard support (trailing or solo).
@@ -422,6 +453,7 @@ mod tests {
         engine.add_rule(PermissionRule::allow_tool("Bash").command_prefix("git status"));
         assert_eq!(
             engine.evaluate_shell_call(
+                ShellKind::Bash,
                 &["Bash"],
                 "git status --short",
                 &json!({"command": "git status --short"}),
@@ -437,6 +469,7 @@ mod tests {
         engine.add_rule(PermissionRule::allow_tool("Bash").command_prefix("git status"));
         assert_eq!(
             engine.evaluate_shell_call(
+                ShellKind::Bash,
                 &["Bash"],
                 "git status 2>&1",
                 &json!({"command": "git status 2>&1"}),
@@ -455,6 +488,7 @@ mod tests {
         // the engine defaults to Deny for unanalyzable commands.
         assert_eq!(
             engine.evaluate_shell_call(
+                ShellKind::Bash,
                 &["Bash"],
                 "git status; rm -rf /",
                 &json!({"command": "git status; rm -rf /"}),
@@ -471,12 +505,61 @@ mod tests {
         engine.add_rule(PermissionRule::deny_tool("Bash"));
         assert_eq!(
             engine.evaluate_shell_call(
+                ShellKind::Bash,
                 &["Bash"],
                 "git status; rm -rf /",
                 &json!({"command": "git status; rm -rf /"}),
                 std::path::Path::new(".")
             ),
             Some(RuleDecision::Deny)
+        );
+    }
+
+    #[test]
+    fn powershell_shell_call_matches_prefix_case_insensitively() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::allow_tool("PowerShell").command_prefix("get-process"));
+        assert_eq!(
+            engine.evaluate_shell_call(
+                ShellKind::PowerShell,
+                &["PowerShell"],
+                "Get-Process -Name pwsh",
+                &json!({"command": "Get-Process -Name pwsh"}),
+                std::path::Path::new(".")
+            ),
+            Some(RuleDecision::Allow)
+        );
+    }
+
+    #[test]
+    fn powershell_alias_matches_canonical_deny_rule() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::deny_tool("PowerShell").command_prefix("Remove-Item"));
+        assert_eq!(
+            engine.evaluate_shell_call(
+                ShellKind::PowerShell,
+                &["PowerShell"],
+                "rm ./file.txt",
+                &json!({"command": "rm ./file.txt"}),
+                std::path::Path::new(".")
+            ),
+            Some(RuleDecision::Deny)
+        );
+    }
+
+    #[test]
+    fn bash_and_powershell_rules_are_separate() {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::allow_tool("Bash").command_prefix("Get-Process"));
+        assert_eq!(
+            engine.evaluate_shell_call(
+                ShellKind::PowerShell,
+                &["PowerShell"],
+                "Get-Process",
+                &json!({"command": "Get-Process"}),
+                std::path::Path::new(".")
+            ),
+            None
         );
     }
 }

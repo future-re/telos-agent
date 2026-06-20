@@ -4,7 +4,7 @@ use crate::config::AgentConfig;
 use crate::diagnostics::{ToolFailureKind, sanitized_event_for_failure};
 use crate::error::AgentError;
 use crate::message::{ToolCall, ToolResult};
-use crate::permissions::RuleDecision;
+use crate::permissions::{RuleDecision, ShellKind};
 use crate::tool::{PermissionDecision, ToolContext, ToolRegistry};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -317,12 +317,17 @@ async fn evaluate_permission(
     // otherwise we ask the tool itself.
     let canonical_name = tool.definition().name;
     let permission_names_ref: Vec<&str> = permission_names.iter().map(|s| s.as_str()).collect();
-    let is_shell_tool = canonical_name == "Bash";
+    let shell_kind = match canonical_name.as_str() {
+        "Bash" => Some(ShellKind::Bash),
+        "PowerShell" => Some(ShellKind::PowerShell),
+        _ => None,
+    };
     let engine_decision = config.permission_engine.as_ref().and_then(|engine| {
-        if is_shell_tool {
+        if let Some(shell_kind) = shell_kind {
             let command =
                 call.arguments.get("command").and_then(|value| value.as_str()).unwrap_or("");
             engine.evaluate_shell_call(
+                shell_kind,
                 &permission_names_ref,
                 command,
                 &call.arguments,

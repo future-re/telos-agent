@@ -166,11 +166,16 @@ struct ProcessCleanupGuard {
 }
 
 impl ProcessCleanupGuard {
+    #[cfg(unix)]
     fn new(child: &tokio::process::Child) -> Self {
         Self {
-            #[cfg(unix)]
             process_group_id: child.id().map(|pid| pid as i32),
         }
+    }
+
+    #[cfg(not(unix))]
+    fn new(_child: &tokio::process::Child) -> Self {
+        Self {}
     }
 
     fn disarm(&mut self) {

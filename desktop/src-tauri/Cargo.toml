@@ -7,7 +7,7 @@ description = "Desktop client for telos-agent"
 repository = "https://github.com/future-re/telos-agent"
 
 [lib]
-name = "telos_desktop"
+name = "telos_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]

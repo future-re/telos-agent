@@ -65,6 +65,18 @@ pub fn map_turn_event(event: TurnEvent) -> DesktopEvent {
             is_error: Some(is_error),
             ..DesktopEvent::new("tool_completed")
         },
+        TurnEvent::ApprovalRequested { tool_call_id, name, reason } => DesktopEvent {
+            tool_call_id: Some(tool_call_id),
+            tool_name: Some(name),
+            message: Some(reason),
+            ..DesktopEvent::new("approval_requested")
+        },
+        TurnEvent::ApprovalResolved { tool_call_id, name, decision } => DesktopEvent {
+            tool_call_id: Some(tool_call_id),
+            tool_name: Some(name),
+            message: Some(decision),
+            ..DesktopEvent::new("approval_resolved")
+        },
         TurnEvent::ProviderUsage {
             input_tokens,
             output_tokens,

@@ -23,6 +23,17 @@ import { MemoryOverviewDialog } from "@/components/MemoryOverviewDialog";
 import { RunInspector } from "@/components/RunInspector";
 import { TopBar } from "@/components/TopBar";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import {
   ConversationSession,
   createConversationSession,
@@ -50,6 +61,14 @@ import {
 
 interface PromptResult {
   finalText: string;
+}
+
+interface PendingApproval {
+  approvalId: string;
+  toolName: string;
+  arguments: unknown;
+  cwd?: string;
+  reason?: string;
 }
 
 type Action =
@@ -112,6 +131,9 @@ export function App() {
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryOverview, setMemoryOverview] = useState<MemoryOverview | undefined>();
+  const [pendingApproval, setPendingApproval] = useState<PendingApproval | undefined>();
+  const [approvalDraft, setApprovalDraft] = useState("");
+  const [approvalError, setApprovalError] = useState("");
   const [usageHistory, setUsageHistory] = useState<TokenUsageHistory>(() =>
     typeof window === "undefined" ? {} : loadTokenUsageHistory(),
   );
@@ -142,7 +164,20 @@ export function App() {
 
   useEffect(() => {
     const unlisten = listen<TelosEvent>("telos://event", (event) => {
-      dispatch({ type: "event", event: event.payload }, runningSessionIdRef.current);
+      const payload = event.payload;
+      if (payload.kind === "approval_required" && payload.approvalId) {
+        const nextApproval = {
+          approvalId: payload.approvalId,
+          toolName: payload.toolName ?? "Tool",
+          arguments: payload.arguments ?? {},
+          cwd: payload.cwd,
+          reason: payload.reason,
+        };
+        setPendingApproval(nextApproval);
+        setApprovalDraft(formatJson(nextApproval.arguments));
+        setApprovalError("");
+      }
+      dispatch({ type: "event", event: payload }, runningSessionIdRef.current);
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -294,11 +329,49 @@ export function App() {
       },
       runningSessionIdRef.current,
     );
+    setPendingApproval(undefined);
+    setApprovalError("");
   }
 
   async function resetSession() {
     await invoke("reset_session").catch(() => undefined);
     dispatch({ type: "reset" });
+    setPendingApproval(undefined);
+    setApprovalError("");
+  }
+
+  async function resolveApproval(decision: "allow" | "deny" | "modify") {
+    if (!pendingApproval) {
+      return;
+    }
+
+    let parsedArguments: unknown | undefined;
+    if (decision === "modify") {
+      try {
+        parsedArguments = JSON.parse(approvalDraft);
+      } catch (error) {
+        setApprovalError(`JSON 无效：${String(error)}`);
+        return;
+      }
+    }
+
+    const approvalId = pendingApproval.approvalId;
+    setPendingApproval(undefined);
+    setApprovalError("");
+
+    try {
+      if (isTauriRuntime()) {
+        await invoke("resolve_approval", {
+          request: {
+            approvalId,
+            decision,
+            arguments: parsedArguments,
+          },
+        });
+      }
+    } catch (error) {
+      dispatch({ type: "error", message: `处理审批失败：${String(error)}` }, runningSessionIdRef.current);
+    }
   }
 
   function createNewConversation() {
@@ -479,7 +552,103 @@ export function App() {
         open={memoryOpen}
         onOpenChange={setMemoryOpen}
       />
+      <ApprovalDialog
+        approval={pendingApproval}
+        draft={approvalDraft}
+        error={approvalError}
+        onDraftChange={(value) => {
+          setApprovalDraft(value);
+          setApprovalError("");
+        }}
+        onApprove={() => resolveApproval("allow")}
+        onDeny={() => resolveApproval("deny")}
+        onModify={() => resolveApproval("modify")}
+      />
     </TooltipProvider>
+  );
+}
+
+function ApprovalDialog({
+  approval,
+  draft,
+  error,
+  onApprove,
+  onDeny,
+  onDraftChange,
+  onModify,
+}: {
+  approval?: PendingApproval;
+  draft: string;
+  error: string;
+  onApprove: () => void;
+  onDeny: () => void;
+  onDraftChange: (value: string) => void;
+  onModify: () => void;
+}) {
+  return (
+    <Dialog
+      open={Boolean(approval)}
+      onOpenChange={(open) => {
+        if (!open && approval) {
+          onDeny();
+        }
+      }}
+    >
+      <DialogContent
+        className="max-w-2xl"
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onPointerDownOutside={(event) => event.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            命令需要确认
+            {approval?.toolName ? <Badge variant="outline">{approval.toolName}</Badge> : null}
+          </DialogTitle>
+          <DialogDescription>
+            自动批准关闭时，需审批的工具调用会暂停在这里等待你的决定。
+          </DialogDescription>
+        </DialogHeader>
+
+        {approval && (
+          <div className="grid gap-3">
+            <div className="grid gap-1 rounded-md border bg-muted/30 p-3 text-sm">
+              <span className="font-medium">原因</span>
+              <span className="text-muted-foreground">{approval.reason || "需要人工确认"}</span>
+            </div>
+            {approval.cwd ? (
+              <div className="grid gap-1 rounded-md border bg-muted/30 p-3 text-sm">
+                <span className="font-medium">工作目录</span>
+                <span className="break-all font-mono text-xs text-muted-foreground">
+                  {approval.cwd}
+                </span>
+              </div>
+            ) : null}
+            <label className="grid gap-1.5">
+              <span className="text-sm font-medium">调用参数</span>
+              <Textarea
+                className="min-h-44 font-mono text-xs leading-5"
+                value={draft}
+                onChange={(event) => onDraftChange(event.target.value)}
+                spellCheck={false}
+              />
+            </label>
+            {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button type="button" variant="destructive" onClick={onDeny}>
+            拒绝
+          </Button>
+          <Button type="button" variant="outline" onClick={onModify}>
+            按编辑参数批准
+          </Button>
+          <Button type="button" onClick={onApprove}>
+            批准
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -520,4 +689,12 @@ function usageFromEvent(event: TelosEvent) {
     promptCacheMissTokens: event.promptCacheMissTokens,
     reasoningTokens: event.reasoningTokens,
   };
+}
+
+function formatJson(value: unknown): string {
+  try {
+    return JSON.stringify(value ?? {}, null, 2);
+  } catch {
+    return "{}";
+  }
 }

@@ -211,7 +211,7 @@ pub use storage::{JsonlStorage, NoopStorage, Storage};
 // Subagent — nested agent run exposed as a tool and Fork concurrent-execution engine.
 pub use subagent::{
     AgentDefinition, AgentIsolation, AgentSource, ForkExecution, ForkLens, ForkResult, ForkShared,
-    SubagentRegistry, SubagentTool, Synapse,
+    SubagentRegistry, SubagentTool, Synapse, register_subagent_tool,
 };
 // Tasks — task management system with tracking, persistence, and tool integration.
 pub use tasks::{Task, TaskManager, TaskStatus};

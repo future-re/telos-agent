@@ -12,6 +12,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 anyhow = "1"
+async-trait = "0.1"
 dirs = "6"
 dunce = "1"
 futures-util = "0.3"

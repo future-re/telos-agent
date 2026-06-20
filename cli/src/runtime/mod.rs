@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use telos_agent::{AgentConfig, ApprovalHandler, DefaultShell, MemoryStore, ToolRegistry};
+use telos_agent::{
+    AgentConfig, ApprovalHandler, DefaultShell, MemoryStore, ModelProvider, ToolRegistry,
+};
 
 use crate::cli::SharedOptions;
 use crate::config::{self, FileConfig};
@@ -47,15 +49,12 @@ pub(crate) fn prepare_runtime(
     register_cli_task_tools(&mut tools, &project_root_or_cwd);
 
     telos_agent::register_memory_tools(&mut tools, memory_store.clone());
-    let mut assembly = telos_agent::prompt::default_coding_assembly(
-        Arc::new(tools.clone()),
-        agent_config.cwd.clone(),
-        agent_config.skill_registry.clone(),
-        agent_config.path,
-    );
-    context::append_prompt_context(&mut assembly, &context);
-    assembly.add(telos_agent::MemorySection::new(memory_store.clone()));
-    agent_config.prompt_assembly = Some(Arc::new(assembly));
+    agent_config.prompt_assembly = Some(Arc::new(build_prompt_assembly(
+        &agent_config,
+        &tools,
+        &context,
+        memory_store.clone(),
+    )));
 
     Ok(PreparedRuntime {
         agent_config,
@@ -66,6 +65,41 @@ pub(crate) fn prepare_runtime(
         memory_store,
         diagnostics,
     })
+}
+
+pub(crate) fn register_cli_subagent_tool(
+    tools: &mut ToolRegistry,
+    agent_config: &AgentConfig,
+    provider: Arc<dyn ModelProvider + Send + Sync>,
+) -> Result<()> {
+    telos_agent::register_subagent_tool(tools, provider, agent_config)?;
+    Ok(())
+}
+
+pub(crate) fn rebuild_prompt_assembly(runtime: &mut PreparedRuntime) {
+    runtime.agent_config.prompt_assembly = Some(Arc::new(build_prompt_assembly(
+        &runtime.agent_config,
+        &runtime.tools,
+        &runtime.context,
+        runtime.memory_store.clone(),
+    )));
+}
+
+fn build_prompt_assembly(
+    agent_config: &AgentConfig,
+    tools: &ToolRegistry,
+    context: &ProjectContext,
+    memory_store: Arc<Mutex<MemoryStore>>,
+) -> telos_agent::PromptAssembly {
+    let mut assembly = telos_agent::prompt::default_coding_assembly(
+        Arc::new(tools.clone()),
+        agent_config.cwd.clone(),
+        agent_config.skill_registry.clone(),
+        agent_config.path,
+    );
+    context::append_prompt_context(&mut assembly, &context);
+    assembly.add(telos_agent::MemorySection::new(memory_store));
+    assembly
 }
 
 pub(crate) fn register_cli_task_tools(registry: &mut ToolRegistry, project_root_or_cwd: &Path) {
@@ -95,14 +129,17 @@ pub(crate) async fn process_diagnostics(
 
 #[cfg(test)]
 mod tests {
-    use super::{register_cli_task_tools, resolve_default_shell};
+    use super::{
+        rebuild_prompt_assembly, register_cli_subagent_tool, register_cli_task_tools,
+        resolve_default_shell,
+    };
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::Arc;
 
     use crate::config::{AgentSection, FileConfig};
     use serde_json::json;
-    use telos_agent::{DefaultShell, Message, ToolContext, ToolRegistry};
+    use telos_agent::{DefaultShell, Message, MockProvider, ToolContext, ToolRegistry};
 
     fn tool_context() -> ToolContext {
         ToolContext {
@@ -161,5 +198,24 @@ mod tests {
         };
 
         assert_eq!(resolve_default_shell(&config), DefaultShell::PowerShell);
+    }
+
+    #[tokio::test]
+    async fn cli_runtime_registers_subagent_tool_and_prompt() {
+        let temp = tempfile::tempdir().unwrap();
+        let options = crate::cli::SharedOptions {
+            cwd: Some(temp.path().to_path_buf()),
+            ..crate::cli::SharedOptions::default()
+        };
+        let mut runtime = super::prepare_runtime(&options, &FileConfig::default(), None).unwrap();
+        let provider = Arc::new(MockProvider::new(vec![]));
+
+        register_cli_subagent_tool(&mut runtime.tools, &runtime.agent_config, provider).unwrap();
+        rebuild_prompt_assembly(&mut runtime);
+
+        assert!(runtime.tools.get("subagent").is_ok());
+        let prompt = runtime.agent_config.prompt_assembly.unwrap().build().await;
+        assert!(prompt.contains("Subagent"));
+        assert!(prompt.contains("subagent_type"));
     }
 }

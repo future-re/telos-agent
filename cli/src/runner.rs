@@ -18,10 +18,7 @@ pub async fn run_single(
     prompt: String,
     approval_handler: Option<Arc<dyn ApprovalHandler>>,
 ) -> Result<()> {
-    let runtime = crate::runtime::prepare_runtime(options, config, approval_handler)?;
-
-    let mut session =
-        AgentSession::new(runtime.agent_config).context("failed to create agent session")?;
+    let mut runtime = crate::runtime::prepare_runtime(options, config, approval_handler)?;
 
     let provider = if let Some(ref onb) = onboarding {
         config::build_provider_from_onboarding(onb)?
@@ -31,9 +28,18 @@ pub async fn run_single(
 
     match provider {
         ResolvedProvider::DeepSeek(p) => {
+            let provider = Arc::new(p);
+            crate::runtime::register_cli_subagent_tool(
+                &mut runtime.tools,
+                &runtime.agent_config,
+                provider.clone(),
+            )?;
+            crate::runtime::rebuild_prompt_assembly(&mut runtime);
+            let mut session = AgentSession::new(runtime.agent_config)
+                .context("failed to create agent session")?;
             run_with_provider(
                 &mut session,
-                &p,
+                provider.as_ref(),
                 &runtime.tools,
                 prompt,
                 runtime.memory_store.clone(),
@@ -41,9 +47,18 @@ pub async fn run_single(
             .await?;
         }
         ResolvedProvider::Routed(p) => {
+            let provider = Arc::new(p);
+            crate::runtime::register_cli_subagent_tool(
+                &mut runtime.tools,
+                &runtime.agent_config,
+                provider.clone(),
+            )?;
+            crate::runtime::rebuild_prompt_assembly(&mut runtime);
+            let mut session = AgentSession::new(runtime.agent_config)
+                .context("failed to create agent session")?;
             run_with_provider(
                 &mut session,
-                &p,
+                provider.as_ref(),
                 &runtime.tools,
                 prompt,
                 runtime.memory_store.clone(),
@@ -52,14 +67,22 @@ pub async fn run_single(
         }
         ResolvedProvider::Mock(_) => {
             eprintln!("Note: using mock provider; no real model call is made.");
-            let mock = MockProvider::new(vec![CompletionResponse {
+            let provider = Arc::new(MockProvider::new(vec![CompletionResponse {
                 message: Message::assistant("Mock provider has no real response configured."),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
-            }]);
+            }]));
+            crate::runtime::register_cli_subagent_tool(
+                &mut runtime.tools,
+                &runtime.agent_config,
+                provider.clone(),
+            )?;
+            crate::runtime::rebuild_prompt_assembly(&mut runtime);
+            let mut session = AgentSession::new(runtime.agent_config)
+                .context("failed to create agent session")?;
             run_with_provider(
                 &mut session,
-                &mock,
+                provider.as_ref(),
                 &runtime.tools,
                 prompt,
                 runtime.memory_store.clone(),
@@ -79,12 +102,18 @@ pub async fn run_chat(
     onboarding: Option<crate::onboarding::OnboardingResult>,
     approval_handler: Option<Arc<dyn ApprovalHandler>>,
 ) -> Result<()> {
-    let runtime = crate::runtime::prepare_runtime(options, config, approval_handler)?;
+    let mut runtime = crate::runtime::prepare_runtime(options, config, approval_handler)?;
     let provider = if let Some(ref onb) = onboarding {
         crate::build_erased_from_onboarding(onb)?
     } else {
         crate::build_erased_provider(options, config)?
     };
+    crate::runtime::register_cli_subagent_tool(
+        &mut runtime.tools,
+        &runtime.agent_config,
+        provider.clone(),
+    )?;
+    crate::runtime::rebuild_prompt_assembly(&mut runtime);
 
     let status = crate::context::build_status_text(
         options.model.as_deref(),

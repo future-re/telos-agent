@@ -30,6 +30,7 @@ export interface ToolActivity {
 export interface TelosEvent {
   kind: string;
   text?: string;
+  approvalId?: string;
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
@@ -38,6 +39,9 @@ export interface TelosEvent {
   reasoningTokens?: number;
   toolCallId?: string;
   toolName?: string;
+  arguments?: unknown;
+  cwd?: string;
+  reason?: string;
   detail?: string;
   isError?: boolean;
   message?: string;
@@ -138,6 +142,17 @@ export function reduceTelosEvent(state: ChatState, event: TelosEvent): ChatState
         tools: state.tools.map((tool) =>
           tool.status === "running" ? { ...tool, status: "failed", detail: "已停止" } : tool,
         ),
+      };
+    case "approval_required":
+    case "approval_requested":
+      return {
+        ...state,
+        status: event.reason ?? event.message ?? "等待工具审批",
+      };
+    case "approval_resolved":
+      return {
+        ...state,
+        status: event.message ?? "审批已处理",
       };
     case "provider_retry":
     case "token_budget_exceeded":

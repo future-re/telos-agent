@@ -148,7 +148,7 @@ export function AgentStatusRail({
           <div className="mt-3 grid gap-1.5">
             {subagents.length === 0 ? (
               <div className="rounded-md border border-dashed bg-background px-2.5 py-2 text-xs leading-5 text-muted-foreground">
-                当前还没有运行时 subagent。模型调用 Subagent 工具或 fork 模式后会显示在这里。
+                当前没有正在运行的 subagent。模型调用 Subagent 工具或 fork 模式时会显示在这里。
               </div>
             ) : (
               subagents.map((item) => (
@@ -301,9 +301,9 @@ interface RuntimeSubagent {
   status: ToolActivity["status"];
 }
 
-function deriveRuntimeSubagents(tools: ToolActivity[]): RuntimeSubagent[] {
+export function deriveRuntimeSubagents(tools: ToolActivity[]): RuntimeSubagent[] {
   return tools
-    .filter((tool) => isSubagentTool(tool.name))
+    .filter((tool) => isSubagentTool(tool.name) && tool.status === "running")
     .map((tool, index) => ({
       id: tool.id,
       name: runtimeSubagentName(tool, index),

@@ -181,7 +181,7 @@ Use an empty `old_string` only to create a new file. Do not use Edit on binary f
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use serde_json::json;

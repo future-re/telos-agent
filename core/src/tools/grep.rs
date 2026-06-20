@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::AgentError;
 use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
@@ -42,7 +42,8 @@ impl Tool for GrepTool {
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use Grep to search UTF-8 files for a literal text pattern. Searches are substring matches, not regex. \
-Results include path, 1-indexed line number, and matched line. Use `glob` to scope the search; default is `**/*`.",
+Results include path, 1-indexed line number, and matched line. Use `glob` to scope the search; default is `**/*`. \
+Absolute globs must stay under the working directory.",
         )
     }
 
@@ -62,15 +63,19 @@ Results include path, 1-indexed line number, and matched line. Use `glob` to sco
         let pattern = required_string(&arguments, "pattern")?.to_string();
         // Default to a recursive glob so plain "grep for X" works out of the box.
         let file_glob = arguments.get("glob").and_then(|value| value.as_str()).unwrap_or("**/*");
-        // Reject absolute globs — they would bypass the cwd anchor.
-        if Path::new(file_glob).is_absolute() {
-            return Err(AgentError::PermissionDenied(format!(
-                "absolute glob patterns are not allowed: {file_glob}"
-            )));
-        }
         let max_results =
             arguments.get("max_results").and_then(|value| value.as_u64()).unwrap_or(200) as usize;
-        let full_pattern = context.cwd.join(file_glob).to_string_lossy().to_string();
+        let full_pattern = if Path::new(file_glob).is_absolute() {
+            let anchor = absolute_glob_anchor(file_glob);
+            canonicalize_within_cwd(&context.cwd, &anchor).await.map_err(|_| {
+                AgentError::PermissionDenied(format!(
+                    "absolute glob pattern must stay under cwd: {file_glob}"
+                ))
+            })?;
+            file_glob.to_string()
+        } else {
+            context.cwd.join(file_glob).to_string_lossy().to_string()
+        };
         let mut results = Vec::new();
         for entry in
             glob::glob(&full_pattern).map_err(|err| AgentError::Validation(err.to_string()))?
@@ -118,6 +123,18 @@ Results include path, 1-indexed line number, and matched line. Use `glob` to sco
     }
 }
 
+fn absolute_glob_anchor(pattern: &str) -> PathBuf {
+    let mut anchor = PathBuf::new();
+    for component in Path::new(pattern).components() {
+        let text = component.as_os_str().to_string_lossy();
+        if text.contains('*') || text.contains('?') || text.contains('[') {
+            break;
+        }
+        anchor.push(component.as_os_str());
+    }
+    anchor
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,14 +158,42 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_absolute_glob() {
+        let dir = std::env::temp_dir().join("tiny_agent_grep_absolute_cwd_test");
+        let outside = std::env::temp_dir().join("tiny_agent_grep_absolute_outside_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
         let tool = GrepTool;
-        let result = tool
-            .invoke(
-                json!({ "pattern": "root", "glob": "/etc/*" }),
-                ctx(std::path::PathBuf::from("/workspace")),
-            )
-            .await;
+        let file_glob = outside.join("*").to_string_lossy().to_string();
+        let result =
+            tool.invoke(json!({ "pattern": "root", "glob": file_glob }), ctx(dir.clone())).await;
         assert!(matches!(result, Err(AgentError::PermissionDenied(_))));
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[tokio::test]
+    async fn accepts_absolute_glob_under_cwd() {
+        let dir = std::env::temp_dir().join("tiny_agent_grep_absolute_under_cwd_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("sample.txt"), "alpha\nneedle\n").unwrap();
+
+        let tool = GrepTool;
+        let file_glob = dir.join("*.txt").to_string_lossy().to_string();
+        let output = tool
+            .invoke(json!({ "pattern": "needle", "glob": file_glob }), ctx(dir.clone()))
+            .await
+            .unwrap();
+        let matches = output.content["matches"].as_array().unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0]["path"], "sample.txt");
+        assert_eq!(matches[0]["line"], 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
@@ -170,6 +215,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn rejects_symlink_escape() {
         let dir = std::env::temp_dir().join("tiny_agent_grep_symlink_test");

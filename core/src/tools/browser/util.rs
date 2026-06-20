@@ -75,21 +75,12 @@ pub(super) fn find_browser_path(context: &ToolContext) -> Result<PathBuf, AgentE
     if let Some(path) = context.env.get("TELOS_CHROME_PATH").filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(path));
     }
-    for candidate in [
-        "chromium",
-        "chromium-browser",
-        "google-chrome",
-        "google-chrome-stable",
-        "microsoft-edge",
-        "msedge",
-        "msedge.exe",
-    ] {
-        if command_exists(candidate) {
-            return Ok(PathBuf::from(candidate));
-        }
-    }
-    for candidate in windows_edge_candidates() {
-        if candidate.exists() {
+    for candidate in browser_candidates() {
+        if candidate.components().count() == 1 {
+            if command_exists(candidate.as_os_str().to_string_lossy().as_ref()) {
+                return Ok(candidate);
+            }
+        } else if candidate.exists() {
             return Ok(candidate);
         }
     }
@@ -107,8 +98,19 @@ fn command_exists(command: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn windows_edge_candidates() -> Vec<PathBuf> {
+fn browser_candidates() -> Vec<PathBuf> {
     vec![
+        PathBuf::from("chromium"),
+        PathBuf::from("chromium-browser"),
+        PathBuf::from("google-chrome"),
+        PathBuf::from("google-chrome-stable"),
+        PathBuf::from("microsoft-edge"),
+        PathBuf::from("msedge"),
+        PathBuf::from("msedge.exe"),
+        PathBuf::from(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+        PathBuf::from(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+        PathBuf::from(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+        PathBuf::from(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
         PathBuf::from("/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"),
         PathBuf::from("/mnt/c/Program Files/Microsoft/Edge/Application/msedge.exe"),
     ]
@@ -284,13 +286,39 @@ pub(super) fn now_millis() -> u128 {
 }
 
 pub(super) fn candidate_bookmark_paths() -> Vec<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    candidate_bookmark_paths_from_env(home.as_deref(), local_app_data.as_deref())
+}
+
+fn candidate_bookmark_paths_from_env(
+    home: Option<&Path>,
+    local_app_data: Option<&Path>,
+) -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+    if let Some(home) = home {
         paths.push(home.join(".config/google-chrome/Default/Bookmarks"));
         paths.push(home.join(".config/chromium/Default/Bookmarks"));
         paths.push(home.join(".config/microsoft-edge/Default/Bookmarks"));
     }
+    if let Some(local_app_data) = local_app_data {
+        paths
+            .push(windows_child_path(local_app_data, r"Google\Chrome\User Data\Default\Bookmarks"));
+        paths.push(windows_child_path(
+            local_app_data,
+            r"Microsoft\Edge\User Data\Default\Bookmarks",
+        ));
+    }
     paths
+}
+
+fn windows_child_path(base: &Path, child: &str) -> PathBuf {
+    let mut path = base.display().to_string();
+    if !path.ends_with('\\') && !path.ends_with('/') {
+        path.push('\\');
+    }
+    path.push_str(child);
+    PathBuf::from(path)
 }
 
 pub(super) fn collect_bookmark_matches(
@@ -367,5 +395,39 @@ mod tests {
             "/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
         )));
         assert!(!is_windows_browser_path(Path::new("microsoft-edge")));
+    }
+
+    #[test]
+    fn browser_candidates_include_native_windows_chrome_and_edge() {
+        let candidates = browser_candidates();
+
+        assert!(
+            candidates
+                .contains(&PathBuf::from(r"C:\Program Files\Google\Chrome\Application\chrome.exe"))
+        );
+        assert!(candidates.contains(&PathBuf::from(
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+        )));
+        assert!(
+            candidates.contains(&PathBuf::from(
+                r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+            ))
+        );
+        assert!(candidates.contains(&PathBuf::from(
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+        )));
+    }
+
+    #[test]
+    fn bookmark_candidates_include_native_windows_chrome_and_edge_profiles() {
+        let local_app_data = Path::new(r"C:\Users\alice\AppData\Local");
+        let candidates = candidate_bookmark_paths_from_env(None, Some(local_app_data));
+
+        assert!(candidates.contains(&PathBuf::from(
+            r"C:\Users\alice\AppData\Local\Google\Chrome\User Data\Default\Bookmarks"
+        )));
+        assert!(candidates.contains(&PathBuf::from(
+            r"C:\Users\alice\AppData\Local\Microsoft\Edge\User Data\Default\Bookmarks"
+        )));
     }
 }

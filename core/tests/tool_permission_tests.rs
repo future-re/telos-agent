@@ -132,6 +132,7 @@ fn permission_engine_matches_tool_aliases_with_last_rule_wins() {
     });
 }
 
+#[cfg(unix)]
 #[test]
 fn permission_engine_allows_shell_by_command_prefix() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -252,6 +253,7 @@ fn shell_requires_approval_by_default() {
     });
 }
 
+#[cfg(unix)]
 #[test]
 fn approval_modify_reruns_shell_safety_checks() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -291,6 +293,52 @@ fn approval_modify_reruns_shell_safety_checks() {
         .unwrap();
 
         let result = session.run_turn(&provider, &tools, "shell").await.unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
+        assert!(tool_result.text().contains("permission_required"), "{}", tool_result.text());
+        assert!(!marker.exists());
+    });
+}
+
+#[test]
+fn approval_modify_reruns_powershell_safety_checks() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("marker.txt");
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: telos_agent::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "shell".into(),
+                        arguments: json!({ "command": "Write-Output original > marker.txt" }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("done"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+        let mut tools = ToolRegistry::new();
+        register_core_tools_with_shell(&mut tools, DefaultShell::PowerShell);
+        let mut session = AgentSession::new(AgentConfig {
+            cwd: dir.path().to_path_buf(),
+            approval_handler: Some(Arc::new(telos_agent::FixedDecisionHandler {
+                decision: telos_agent::ApprovalDecision::Modify {
+                    arguments: json!({ "command": "Set-Content -Path marker.txt -Value modified" }),
+                },
+            })),
+            ..AgentConfig::default()
+        })
+        .unwrap();
+
+        let result = session.run_turn(&provider, &tools, "powershell").await.unwrap();
         let tool_result =
             result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
         assert!(tool_result.text().contains("permission_required"), "{}", tool_result.text());

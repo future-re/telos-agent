@@ -88,7 +88,10 @@ pub(crate) async fn invoke_existing_tool(
                                             }
                                             Err(err) => Err(err),
                                             Ok(PermissionDecision::Ask { reason })
-                                                if canonical_name == "Bash" =>
+                                                if matches!(
+                                                    canonical_name.as_str(),
+                                                    "Bash" | "PowerShell"
+                                                ) =>
                                             {
                                                 Ok(PermissionDecision::Ask {
                                                     reason: format!(

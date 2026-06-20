@@ -1,4 +1,41 @@
 #[tokio::test]
+async fn web_fetch_tool_allows_loopback_http_test_servers() {
+    use std::sync::Arc;
+    use telos_agent::tool::{Tool, ToolContext};
+    use telos_agent::tools::WebFetchTool;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/page"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "<html><body><h1>Local Fixture</h1><script>ignored()</script></body></html>",
+        ))
+        .mount(&server)
+        .await;
+
+    let tool = WebFetchTool::new();
+    let ctx = ToolContext {
+        session_id: "test".into(),
+        turn_id: 1,
+        tool_call_id: None,
+        cwd: std::env::current_dir().unwrap(),
+        env: Default::default(),
+        messages: Arc::new(vec![]),
+        progress: None,
+        read_file_state: Arc::new(tokio::sync::Mutex::new(Default::default())),
+        timeout: None,
+        max_file_read_bytes: 50 * 1024 * 1024,
+    };
+
+    let result =
+        tool.invoke(serde_json::json!({"url": server.uri() + "/page"}), ctx).await.unwrap();
+    let text = result.content["text"].as_str().unwrap();
+    assert_eq!(text, "Local Fixture");
+}
+
+#[tokio::test]
 async fn web_fetch_tool_returns_html_as_text() {
     use std::sync::Arc;
     use telos_agent::tool::{Tool, ToolContext};

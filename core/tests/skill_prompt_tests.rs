@@ -50,6 +50,47 @@ async fn skill_tool_invokes_and_returns_prompt() {
 }
 
 #[tokio::test]
+async fn skill_tool_preserves_windows_path_arguments() {
+    use std::sync::Arc;
+    use telos_agent::skills::{Skill, SkillRegistry, SkillSource};
+    use telos_agent::tool::{Tool, ToolContext};
+    use telos_agent::tools::SkillTool;
+
+    let mut reg = SkillRegistry::new();
+    reg.register(Skill {
+        name: "path-check".into(),
+        description: "Checks a path".into(),
+        when_to_use: None,
+        prompt: "Inspect {{args}}".into(),
+        arguments: vec![],
+        body: r"Use %LOCALAPPDATA%\Telos as fallback.".into(),
+        source: SkillSource::Project,
+    });
+    let tool = SkillTool::new(Arc::new(reg));
+    let ctx = ToolContext {
+        session_id: "test".into(),
+        turn_id: 1,
+        tool_call_id: None,
+        cwd: std::env::current_dir().unwrap(),
+        env: Default::default(),
+        messages: Arc::new(vec![]),
+        progress: None,
+        read_file_state: Arc::new(tokio::sync::Mutex::new(Default::default())),
+        timeout: None,
+        max_file_read_bytes: 50 * 1024 * 1024,
+    };
+
+    let result = tool
+        .invoke(serde_json::json!({"skill": "path-check", "args": r"C:\Users\alice\repo"}), ctx)
+        .await
+        .unwrap();
+
+    let text = result.content["text"].as_str().unwrap();
+    assert!(text.contains(r"Inspect C:\Users\alice\repo"));
+    assert!(text.contains(r"Use %LOCALAPPDATA%\Telos as fallback."));
+}
+
+#[tokio::test]
 async fn skill_loader_parses_valid_markdown() {
     use telos_agent::skills::{SkillLoader, SkillSource};
 
@@ -79,6 +120,29 @@ This is the body text.
     assert_eq!(s.arguments.len(), 1);
     assert_eq!(s.arguments[0].name, "args");
     assert_eq!(s.source, SkillSource::Project);
+}
+
+#[tokio::test]
+async fn skill_loader_parses_crlf_markdown_with_windows_paths() {
+    use telos_agent::skills::SkillLoader;
+
+    let dir = tempfile::tempdir().unwrap();
+    let skill_content = concat!(
+        "---\r\n",
+        "name: windows-skill\r\n",
+        "description: A Windows path skill\r\n",
+        "prompt: \"Open {{args}}\"\r\n",
+        "---\r\n",
+        "Use C:\\\\Users\\\\alice\\\\.telos.\r\n"
+    );
+    std::fs::write(dir.path().join("windows-skill.md"), skill_content).unwrap();
+
+    let skills = SkillLoader::load_from_dir(dir.path()).unwrap();
+
+    assert_eq!(skills.len(), 1);
+    assert_eq!(skills[0].name, "windows-skill");
+    assert_eq!(skills[0].prompt, "Open {{args}}");
+    assert!(skills[0].body.contains(r"C:\\Users\\alice\\.telos"));
 }
 
 #[test]

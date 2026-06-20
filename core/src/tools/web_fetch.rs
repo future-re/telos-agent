@@ -69,12 +69,7 @@ Verify that returned content is relevant and trustworthy before acting on it.",
             }
         }
 
-        // Upgrade HTTP to HTTPS
-        let url = if url.starts_with("http://") {
-            url.replacen("http://", "https://", 1)
-        } else {
-            url.to_string()
-        };
+        let url = normalize_fetch_url(url);
 
         // Fetch using curl
         let output = std::process::Command::new("curl")
@@ -208,4 +203,21 @@ fn strip_html(html: &str) -> String {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn normalize_fetch_url(url: &str) -> String {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return url.to_string();
+    };
+    if parsed.scheme() != "http" {
+        return url.to_string();
+    }
+    if parsed.host_str().is_some_and(is_loopback_host) {
+        return url.to_string();
+    }
+    url.replacen("http://", "https://", 1)
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
 }

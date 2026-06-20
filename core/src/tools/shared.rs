@@ -355,12 +355,14 @@ mod tests {
 
         let path = dir.join("a/b/c/new.txt");
         let resolved = canonicalize_within_cwd(&dir, &path).await.unwrap();
-        assert!(resolved.starts_with(&dir));
+        let canonical_dir = std::fs::canonicalize(&dir).unwrap();
+        assert!(resolved.starts_with(&canonical_dir));
         assert_eq!(resolved.file_name().unwrap(), "new.txt");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn canonicalize_rejects_symlink_ancestor_outside_cwd() {
         let dir = std::env::temp_dir().join("tiny_agent_canonicalize_symlink");
@@ -370,17 +372,7 @@ mod tests {
         std::fs::create_dir_all(&outside).unwrap();
         std::fs::create_dir_all(&dir).unwrap();
 
-        // Create a symlink inside cwd that points outside.
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&outside, dir.join("escape")).unwrap();
-
-        // For non-Unix platforms this test is a no-op.
-        #[cfg(not(unix))]
-        {
-            let _ = outside;
-            let _ = dir;
-            return;
-        }
 
         let result = canonicalize_within_cwd(&dir, &dir.join("escape/new.txt")).await;
         assert!(

@@ -137,3 +137,80 @@ Provide 2-4 concrete options with concise descriptions. Do not ask questions you
         })))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use serde_json::json;
+
+    use super::AskUserQuestionTool;
+    use crate::tool::{Tool, ToolContext};
+
+    fn test_context() -> ToolContext {
+        ToolContext {
+            session_id: "test".into(),
+            turn_id: 1,
+            tool_call_id: None,
+            cwd: std::env::current_dir().unwrap(),
+            env: Default::default(),
+            messages: Arc::new(vec![]),
+            progress: None,
+            read_file_state: Arc::new(tokio::sync::Mutex::new(Default::default())),
+            timeout: None,
+            max_file_read_bytes: 50 * 1024 * 1024,
+        }
+    }
+
+    #[tokio::test]
+    async fn preserves_windows_path_and_env_option_text() {
+        let output = AskUserQuestionTool
+            .invoke(
+                json!({
+                    "questions": [{
+                        "header": "Config",
+                        "question": "Which location should be used?",
+                        "options": [{
+                            "label": "LOCALAPPDATA",
+                            "description": r"Use %LOCALAPPDATA%\Telos\skills"
+                        }, {
+                            "label": "Project",
+                            "description": r"Use C:\Users\alice\project\.telos"
+                        }]
+                    }]
+                }),
+                test_context(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output.content["status"], "questions_ready");
+        assert_eq!(
+            output.content["questions"][0]["options"][0]["description"],
+            r"Use %LOCALAPPDATA%\Telos\skills"
+        );
+        assert_eq!(
+            output.content["questions"][0]["options"][1]["description"],
+            r"Use C:\Users\alice\project\.telos"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_empty_options_array() {
+        let err = AskUserQuestionTool
+            .invoke(
+                json!({
+                    "questions": [{
+                        "header": "Config",
+                        "question": "Pick one",
+                        "options": []
+                    }]
+                }),
+                test_context(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("empty `options` array"));
+    }
+}

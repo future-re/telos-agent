@@ -204,7 +204,7 @@ fn trim_large_output(output: &str) -> String {
     format!("{preview}\n<truncated output after {MAX_CHARS} chars>")
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use serde_json::json;

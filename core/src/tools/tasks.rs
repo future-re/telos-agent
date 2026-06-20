@@ -148,3 +148,62 @@ impl Tool for TaskUpdateTool {
         Ok(ToolOutput::json(json!({"task_id": id, "status": status_str, "updated": true})))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use serde_json::json;
+
+    use super::{TaskCreateTool, TaskGetTool, TaskUpdateTool};
+    use crate::tasks::TaskManager;
+    use crate::tool::{Tool, ToolContext};
+
+    #[tokio::test]
+    async fn task_tools_persist_windows_path_like_fields_under_nested_temp_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_dir = dir.path().join("AppData").join("Local").join("Telos").join("tasks");
+        let manager = Arc::new(TaskManager::new(task_dir.clone()));
+        let create = TaskCreateTool::new(manager.clone());
+        let get = TaskGetTool::new(manager.clone());
+        let ctx = ToolContext::dummy();
+
+        let created = create
+            .invoke(
+                json!({
+                    "subject": "Windows path task",
+                    "description": r"Check C:\Users\alice\repo before continuing",
+                    "blocked_by": [r"%LOCALAPPDATA%\Telos\state.json"]
+                }),
+                ctx.clone(),
+            )
+            .await
+            .unwrap()
+            .content;
+        let task_id = created["task_id"].as_str().unwrap();
+
+        assert!(task_dir.join(format!("{task_id}.json")).exists());
+
+        let loaded = get.invoke(json!({"task_id": task_id}), ctx).await.unwrap().content;
+        assert_eq!(loaded["description"], r"Check C:\Users\alice\repo before continuing");
+        assert_eq!(loaded["blocked_by"][0], r"%LOCALAPPDATA%\Telos\state.json");
+
+        let reopened = TaskManager::new(task_dir);
+        let persisted = reopened.get(task_id).unwrap();
+        assert_eq!(persisted.blocked_by, vec![r"%LOCALAPPDATA%\Telos\state.json".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn task_update_rejects_unknown_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = Arc::new(TaskManager::new(dir.path().to_path_buf()));
+        let update = TaskUpdateTool::new(manager);
+
+        let err = update
+            .invoke(json!({"task_id": "task_missing", "status": "blocked"}), ToolContext::dummy())
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("invalid status"));
+    }
+}

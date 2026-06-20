@@ -47,6 +47,56 @@ async fn memory_write_and_read_tools_roundtrip() {
 }
 
 #[tokio::test]
+async fn memory_write_sanitizes_windows_path_like_names_and_links_with_portable_separator() {
+    use std::sync::{Arc, Mutex};
+    use telos_agent::memory::{MemoryReadTool, MemoryStore, MemoryWriteTool};
+    use telos_agent::tool::{Tool, ToolContext};
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Mutex::new(MemoryStore::new(dir.path().to_path_buf())));
+    let write_tool = MemoryWriteTool::new(store.clone());
+    let read_tool = MemoryReadTool::new(store);
+    let ctx = ToolContext {
+        session_id: "test".into(),
+        turn_id: 1,
+        tool_call_id: None,
+        cwd: std::env::current_dir().unwrap(),
+        env: Default::default(),
+        messages: Arc::new(vec![]),
+        progress: None,
+        read_file_state: Arc::new(tokio::sync::Mutex::new(Default::default())),
+        timeout: None,
+        max_file_read_bytes: 50 * 1024 * 1024,
+    };
+
+    write_tool
+        .invoke(
+            serde_json::json!({
+                "name": r"C:\Users\alice\.telos\fact",
+                "description": "A memory named after a Windows path",
+                "category": "fact",
+                "body": r"Stored from %LOCALAPPDATA%\Telos",
+                "tags": ["windows", "path"]
+            }),
+            ctx.clone(),
+        )
+        .await
+        .unwrap();
+
+    let memory_file = dir.path().join("facts").join("c--users-alice--telos-fact.md");
+    assert!(memory_file.exists(), "expected sanitized file at {}", memory_file.display());
+    let index = std::fs::read_to_string(dir.path().join("MEMORY.md")).unwrap();
+    assert!(index.contains("facts/c--users-alice--telos-fact.md"));
+
+    let read = read_tool
+        .invoke(serde_json::json!({"name": r"C:\Users\alice\.telos\fact"}), ctx)
+        .await
+        .unwrap()
+        .content;
+    assert_eq!(read["body"], r"Stored from %LOCALAPPDATA%\Telos");
+}
+
+#[tokio::test]
 async fn memory_maintenance_tool_dry_run_and_apply() {
     use std::sync::{Arc, Mutex};
     use telos_agent::memory::{MemoryCategory, MemoryEntry, MemoryStatus, MemoryStore};

@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::AgentError;
 use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput};
@@ -38,7 +38,7 @@ impl Tool for GlobTool {
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use Glob to list files matching a pattern under the working directory. \
-Patterns are relative to cwd; absolute patterns are rejected. Use a literal extension or subdirectory anchor (e.g. `src/**/*.rs`).",
+Patterns are relative to cwd; absolute patterns must stay under cwd. Use a literal extension or subdirectory anchor (e.g. `src/**/*.rs`).",
         )
     }
 
@@ -56,17 +56,21 @@ Patterns are relative to cwd; absolute patterns are rejected. Use a literal exte
         context: ToolContext,
     ) -> Result<ToolOutput, AgentError> {
         let pattern = required_string(&arguments, "pattern")?;
-        // Reject absolute patterns outright — they would bypass the cwd anchor.
-        if Path::new(pattern).is_absolute() {
-            return Err(AgentError::PermissionDenied(format!(
-                "absolute glob patterns are not allowed: {pattern}"
-            )));
-        }
         // Cap results so a pathological `**/*` doesn't dump millions of paths into the context.
         let max_results =
             arguments.get("max_results").and_then(|value| value.as_u64()).unwrap_or(200) as usize;
-        // Anchor the pattern at cwd so the model can write relative globs.
-        let full_pattern = context.cwd.join(pattern).to_string_lossy().to_string();
+        let full_pattern = if Path::new(pattern).is_absolute() {
+            let anchor = absolute_glob_anchor(pattern);
+            canonicalize_within_cwd(&context.cwd, &anchor).await.map_err(|_| {
+                AgentError::PermissionDenied(format!(
+                    "absolute glob pattern must stay under cwd: {pattern}"
+                ))
+            })?;
+            pattern.to_string()
+        } else {
+            // Anchor relative patterns at cwd so the model can write concise globs.
+            context.cwd.join(pattern).to_string_lossy().to_string()
+        };
         let mut matches = Vec::new();
         for entry in
             glob::glob(&full_pattern).map_err(|err| AgentError::Validation(err.to_string()))?
@@ -87,6 +91,18 @@ Patterns are relative to cwd; absolute patterns are rejected. Use a literal exte
         }
         Ok(ToolOutput::json(json!({ "matches": matches })))
     }
+}
+
+fn absolute_glob_anchor(pattern: &str) -> PathBuf {
+    let mut anchor = PathBuf::new();
+    for component in Path::new(pattern).components() {
+        let text = component.as_os_str().to_string_lossy();
+        if text.contains('*') || text.contains('?') || text.contains('[') {
+            break;
+        }
+        anchor.push(component.as_os_str());
+    }
+    anchor
 }
 
 #[cfg(test)]
@@ -111,12 +127,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_absolute_pattern() {
+    async fn rejects_absolute_pattern_outside_cwd() {
+        let dir = std::env::temp_dir().join("tiny_agent_glob_absolute_cwd_test");
+        let outside = std::env::temp_dir().join("tiny_agent_glob_absolute_outside_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
         let tool = GlobTool;
-        let result = tool
-            .invoke(json!({ "pattern": "/etc/*" }), ctx(std::path::PathBuf::from("/workspace")))
-            .await;
+        let pattern = outside.join("*").to_string_lossy().to_string();
+        let result = tool.invoke(json!({ "pattern": pattern }), ctx(dir.clone())).await;
         assert!(matches!(result, Err(AgentError::PermissionDenied(_))));
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[tokio::test]
+    async fn accepts_absolute_pattern_under_cwd() {
+        let dir = std::env::temp_dir().join("tiny_agent_glob_absolute_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("sample.txt"), "x").unwrap();
+
+        let tool = GlobTool;
+        let pattern = dir.join("*.txt").to_string_lossy().to_string();
+        let output = tool.invoke(json!({ "pattern": pattern }), ctx(dir.clone())).await.unwrap();
+        let matches = output.content["matches"].as_array().unwrap();
+        assert_eq!(matches, &vec![json!("sample.txt")]);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
@@ -137,6 +178,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn rejects_symlink_escape() {
         let dir = std::env::temp_dir().join("tiny_agent_glob_symlink_test");

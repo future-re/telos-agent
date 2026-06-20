@@ -22,6 +22,32 @@ fn core_tools_expose_claude_names_and_accept_legacy_aliases() {
     assert!(tools.get("file_read").is_ok());
 }
 
+#[cfg(windows)]
+#[test]
+fn register_core_tools_uses_powershell_as_native_windows_default_shell() {
+    let mut tools = ToolRegistry::new();
+    register_core_tools(&mut tools);
+
+    let names =
+        tools.definitions().into_iter().map(|definition| definition.name).collect::<Vec<_>>();
+    assert!(names.contains(&"PowerShell".to_string()));
+    assert!(!names.contains(&"Bash".to_string()));
+    assert_eq!(tools.get("shell").unwrap().definition().name, "PowerShell");
+}
+
+#[cfg(unix)]
+#[test]
+fn register_core_tools_uses_bash_as_native_unix_default_shell() {
+    let mut tools = ToolRegistry::new();
+    register_core_tools(&mut tools);
+
+    let names =
+        tools.definitions().into_iter().map(|definition| definition.name).collect::<Vec<_>>();
+    assert!(names.contains(&"Bash".to_string()));
+    assert!(!names.contains(&"PowerShell".to_string()));
+    assert_eq!(tools.get("shell").unwrap().definition().name, "Bash");
+}
+
 #[test]
 fn default_shell_detects_windows_as_powershell_and_unix_as_bash() {
     assert_eq!(DefaultShell::for_target_os("windows"), DefaultShell::PowerShell);

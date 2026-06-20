@@ -169,3 +169,57 @@ fn required_string<'a>(arguments: &'a Value, key: &str) -> Result<&'a str, Agent
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| AgentError::Validation(format!("missing `{key}`")))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use serde_json::json;
+
+    use super::{CodeContextTool, CodeIndexRefreshTool, CodeSearchTool};
+    use crate::code_index::CodeIndex;
+    use crate::tool::{Tool, ToolContext};
+
+    fn test_context(cwd: std::path::PathBuf) -> ToolContext {
+        ToolContext {
+            session_id: "test".into(),
+            turn_id: 1,
+            tool_call_id: None,
+            cwd,
+            env: Default::default(),
+            messages: Arc::new(vec![]),
+            progress: None,
+            read_file_state: Arc::new(tokio::sync::Mutex::new(Default::default())),
+            timeout: None,
+            max_file_read_bytes: 50 * 1024 * 1024,
+        }
+    }
+
+    #[tokio::test]
+    async fn refresh_and_search_normalize_nested_paths_to_forward_slashes() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("src").join("windows");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("mod.rs"), "fn windows_path() {}\n").unwrap();
+        let ctx = test_context(dir.path().to_path_buf());
+
+        let refresh = CodeIndexRefreshTool.invoke(json!({}), ctx.clone()).await.unwrap().content;
+        assert_eq!(refresh["index_path"], json!(CodeIndex::index_path(dir.path())));
+
+        let search = CodeSearchTool
+            .invoke(json!({"query": "windows_path", "path_prefix": "src/windows"}), ctx.clone())
+            .await
+            .unwrap()
+            .content;
+        assert_eq!(search["count"], 1);
+        assert_eq!(search["matches"][0]["path"], "src/windows/mod.rs");
+        assert!(!search["matches"][0]["path"].as_str().unwrap().contains('\\'));
+
+        let context = CodeContextTool
+            .invoke(json!({"path": "src/windows/mod.rs", "line": 1, "before": 0, "after": 0}), ctx)
+            .await
+            .unwrap()
+            .content;
+        assert_eq!(context["lines"][0]["text"], "fn windows_path() {}");
+    }
+}

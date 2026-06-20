@@ -1,4 +1,6 @@
 pub mod app;
+#[path = "widgets/approval_inline.rs"]
+pub mod approval_inline;
 #[path = "overlays/approval.rs"]
 pub mod approval;
 #[path = "widgets/chat_widget.rs"]

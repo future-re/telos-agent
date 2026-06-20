@@ -21,6 +21,7 @@ mod turn_events;
 mod turn_summary;
 
 use crate::config::TuiDensity;
+use crate::tui::approval_inline;
 use crate::tui::approval::PendingApproval;
 use crate::tui::chat_widget::ChatWidget;
 use crate::tui::event::{AppEvent, Event};
@@ -373,11 +374,14 @@ impl App {
         let area = frame.area();
         let theme = Theme::default();
 
-        // Layout: chat | compact tool activity | input | status
+        // Layout: chat | compact tool activity | inline approval | input | status
         let activity_height = self.tool_activity.height(area.width as usize);
+        let approval_height =
+            if self.inline_approval.is_some() { approval_inline::INLINE_APPROVAL_HEIGHT } else { 0 };
         let constraints = vec![
             Constraint::Min(0),                                    // chat
             Constraint::Length(activity_height),                   // recent tool/command activity
+            Constraint::Length(approval_height),                   // pending approval
             Constraint::Length(self.layout_settings.input_height), // input panel
             Constraint::Length(1),                                 // status bar
         ];
@@ -387,7 +391,10 @@ impl App {
 
         self.chat.render(frame, layout[0], &theme);
         self.tool_activity.render(frame, layout[1], &theme);
-        self.input.render(frame, layout[2], self.mode == Mode::Normal);
+        if let Some(pending) = &self.inline_approval {
+            approval_inline::render(frame, layout[2], &theme, pending);
+        }
+        self.input.render(frame, layout[3], self.mode != Mode::Approving);
 
         // ── Status bar at the bottom ─────────────────────────────────
         let status = if self.turn_active {
@@ -404,7 +411,7 @@ impl App {
 
         status_bar::render(
             frame,
-            layout[3],
+            layout[4],
             &status,
             self.spinner_frame,
             self.turn_total_tokens.unwrap_or(self.turn_input_tokens + self.turn_output_tokens),

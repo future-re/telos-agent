@@ -39,8 +39,8 @@ jobs:
 
       - name: Verify publish packages
         run: |
-          cargo publish -p telos_agent --locked --dry-run
-          cargo publish -p telos-cli --locked --dry-run
+          cargo publish --manifest-path core/Cargo.toml --locked --dry-run
+          cargo publish --manifest-path cli/Cargo.toml --locked --dry-run
 
       - name: Publish telos_agent
         env:
@@ -50,7 +50,7 @@ jobs:
           if python3 .github/workflows/scripts/crate-published.py telos_agent "$VERSION"; then
             echo "telos_agent $VERSION is already published; skipping"
           else
-            cargo publish -p telos_agent --locked --token "$CARGO_REGISTRY_TOKEN"
+            cargo publish --manifest-path core/Cargo.toml --locked --token "$CARGO_REGISTRY_TOKEN"
           fi
 
       - name: Wait for telos_agent index
@@ -76,5 +76,5 @@ jobs:
           if python3 .github/workflows/scripts/crate-published.py telos-cli "$VERSION"; then
             echo "telos-cli $VERSION is already published; skipping"
           else
-            cargo publish -p telos-cli --locked --token "$CARGO_REGISTRY_TOKEN"
+            cargo publish --manifest-path cli/Cargo.toml --locked --token "$CARGO_REGISTRY_TOKEN"
           fi

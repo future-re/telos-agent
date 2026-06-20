@@ -151,8 +151,17 @@
 
 body {
   margin: 0;
+  overflow: hidden;
   min-width: 320px;
-  min-height: 100vh;
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+html,
+#root {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 button,

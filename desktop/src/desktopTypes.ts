@@ -1,5 +1,13 @@
 import { ProviderKind } from "@/runDisplay";
 
+export type SettingsSection =
+  | "appearance"
+  | "service"
+  | "key"
+  | "approval"
+  | "model"
+  | "directory";
+
 export interface DesktopSettingsOverrides {
   provider?: ProviderKind;
   apiKey?: string;

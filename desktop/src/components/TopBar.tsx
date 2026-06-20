@@ -1,4 +1,15 @@
-import { Bot, Folder, KeyRound, PanelRightClose, PanelRightOpen, Plus, Settings } from "lucide-react";
+import {
+  Bot,
+  Check,
+  Folder,
+  KeyRound,
+  Palette,
+  PanelRightClose,
+  PanelRightOpen,
+  Plus,
+  Settings,
+  SlidersHorizontal,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -30,12 +41,18 @@ import {
   fontOptions,
   themeOptions,
 } from "@/appearance";
-import { DesktopSettingsOverrides, ResolvedDesktopSettings } from "@/desktopTypes";
+import {
+  DesktopSettingsOverrides,
+  ResolvedDesktopSettings,
+  SettingsSection,
+} from "@/desktopTypes";
+import { cn } from "@/lib/utils";
 
 interface TopBarProps {
   metadata: string;
   panelOpen: boolean;
   settingsOpen: boolean;
+  settingsSection: SettingsSection;
   settings: ResolvedDesktopSettings;
   appearance: AppearanceSettings;
   overrides: DesktopSettingsOverrides;
@@ -45,6 +62,7 @@ interface TopBarProps {
   onAppearanceChange: (settings: AppearanceSettings) => void;
   onOverridesChange: (settings: DesktopSettingsOverrides) => void;
   onSettingsOpenChange: (open: boolean) => void;
+  onSettingsSectionChange: (section: SettingsSection) => void;
   onSaveApiKey: () => void;
   onTogglePanel: () => void;
   onReset: () => void;
@@ -60,12 +78,14 @@ export function TopBar({
   onReset,
   onSaveApiKey,
   onSettingsOpenChange,
+  onSettingsSectionChange,
   onTogglePanel,
   overrides,
   panelOpen,
   savingKey,
   settings,
   settingsOpen,
+  settingsSection,
 }: TopBarProps) {
   const mergedAutoApprove = overrides.autoApprove ?? settings.autoApprove;
   const mergedModel = normalizeModelValue(overrides.model ?? settings.model);
@@ -99,6 +119,8 @@ export function TopBar({
           overrides={overrides}
           savingKey={savingKey}
           settings={settings}
+          activeSection={settingsSection}
+          onActiveSectionChange={onSettingsSectionChange}
         />
         <Tooltip>
           <TooltipTrigger asChild>
@@ -128,6 +150,7 @@ export function TopBar({
 }
 
 function SettingsDialog({
+  activeSection,
   apiKeyDraft,
   appearance,
   mergedAutoApprove,
@@ -142,7 +165,9 @@ function SettingsDialog({
   overrides,
   savingKey,
   settings,
+  onActiveSectionChange,
 }: {
+  activeSection: SettingsSection;
   apiKeyDraft: string;
   appearance: AppearanceSettings;
   mergedAutoApprove: boolean;
@@ -151,6 +176,7 @@ function SettingsDialog({
   onApiKeyDraftChange: (value: string) => void;
   onAppearanceChange: (settings: AppearanceSettings) => void;
   onOpenChange: (open: boolean) => void;
+  onActiveSectionChange: (section: SettingsSection) => void;
   onOverridesChange: (settings: DesktopSettingsOverrides) => void;
   onSaveApiKey: () => void;
   open: boolean;
@@ -158,6 +184,8 @@ function SettingsDialog({
   savingKey: boolean;
   settings: ResolvedDesktopSettings;
 }) {
+  const section = sectionMeta[activeSection] ?? sectionMeta.appearance;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
@@ -166,144 +194,204 @@ function SettingsDialog({
           设置
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>运行设置</DialogTitle>
           <DialogDescription>
-            桌面端读取 CLI 的配置文件、项目配置、记忆目录和工作目录；这里的改动只作为当前桌面对话的覆盖项。
+            桌面端读取 CLI 配置、项目配置、记忆目录和工作目录；这里的改动作为当前桌面对话的覆盖项。
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4">
-          <section className="grid gap-3 rounded-md border bg-muted/25 p-3">
-            <div>
-              <h3 className="text-sm font-semibold">界面外观</h3>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                字体会随应用一起打包；背景主题只影响桌面端 UI，不写入 CLI agent 配置。
-              </p>
+        <div className="grid min-h-[360px] gap-4 md:grid-cols-[176px_minmax(0,1fr)]">
+          <nav className="grid content-start gap-1" aria-label="设置分类">
+            {settingsSections.map((item) => {
+              const Icon = item.icon;
+              const selected = activeSection === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    selected
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                  aria-current={selected ? "page" : undefined}
+                  onClick={() => onActiveSectionChange(item.id)}
+                >
+                  <Icon className="size-4 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          <section className="min-w-0 rounded-md border bg-background p-4">
+            <div className="mb-4">
+              <h3 className="text-base font-semibold">{section.title}</h3>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">{section.description}</p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
+
+            {activeSection === "appearance" && (
+              <div className="grid gap-4">
+                <label className="grid gap-1.5">
+                  <span className="text-sm font-medium">中文字体</span>
+                  <Select
+                    value={appearance.font}
+                    onValueChange={(font) =>
+                      onAppearanceChange({ ...appearance, font: font as FontChoice })
+                    }
+                  >
+                    <SelectTrigger aria-label="中文字体">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {fontOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="text-xs text-muted-foreground">
+                    {fontOptions.find((option) => option.value === appearance.font)?.description}
+                  </span>
+                </label>
+
+                <label className="grid gap-1.5">
+                  <span className="text-sm font-medium">背景主题</span>
+                  <Select
+                    value={appearance.theme}
+                    onValueChange={(theme) =>
+                      onAppearanceChange({ ...appearance, theme: theme as ThemeChoice })
+                    }
+                  >
+                    <SelectTrigger aria-label="背景主题">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {themeOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="mt-1 flex gap-1.5" aria-hidden="true">
+                    {themeOptions.map((option) => (
+                      <span
+                        key={option.value}
+                        className={`size-5 rounded-md border shadow-sm theme-swatch-${option.value}`}
+                      />
+                    ))}
+                  </div>
+                </label>
+              </div>
+            )}
+
+            {activeSection === "service" && (
               <label className="grid gap-1.5">
-                <span className="text-sm font-medium">中文字体</span>
+                <span className="text-sm font-medium">服务提供方</span>
                 <Select
-                  value={appearance.font}
-                  onValueChange={(font) =>
-                    onAppearanceChange({ ...appearance, font: font as FontChoice })
+                  value={overrides.provider ?? settings.provider}
+                  onValueChange={(provider) =>
+                    onOverridesChange({
+                      ...overrides,
+                      provider: provider as DesktopSettingsOverrides["provider"],
+                    })
                   }
                 >
-                  <SelectTrigger aria-label="中文字体">
+                  <SelectTrigger aria-label="服务提供方">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {fontOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="deepseek">DeepSeek</SelectItem>
+                    <SelectItem value="mock">Mock</SelectItem>
                   </SelectContent>
                 </Select>
-                <span className="text-xs text-muted-foreground">
-                  {fontOptions.find((option) => option.value === appearance.font)?.description}
+              </label>
+            )}
+
+            {activeSection === "key" && (
+              <label className="grid gap-1.5">
+                <span className="text-sm font-medium">DeepSeek API Key</span>
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                  <div className="relative min-w-0">
+                    <KeyRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      className="pl-9"
+                      type="password"
+                      value={apiKeyDraft}
+                      onChange={(event) => onApiKeyDraftChange(event.target.value)}
+                      placeholder={settings.apiKeyConfigured ? "已写入 CLI 配置" : "请输入 DeepSeek API Key"}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={onSaveApiKey}
+                    disabled={savingKey || !apiKeyDraft.trim()}
+                  >
+                    保存
+                  </Button>
+                </div>
+                <span className="text-xs leading-5 text-muted-foreground">
+                  保存到 {settings.configPath ?? "用户配置目录"}，CLI 和桌面端会共用这份配置。
                 </span>
               </label>
+            )}
 
-              <label className="grid gap-1.5">
-                <span className="text-sm font-medium">背景主题</span>
-                <Select
-                  value={appearance.theme}
-                  onValueChange={(theme) =>
-                    onAppearanceChange({ ...appearance, theme: theme as ThemeChoice })
+            {activeSection === "approval" && (
+              <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/30 px-3 py-2.5">
+                <div>
+                  <span className="block text-sm font-medium">自动批准工具</span>
+                  <span className="block text-xs text-muted-foreground">对应 CLI 的 auto mode。</span>
+                </div>
+                <Switch
+                  checked={mergedAutoApprove}
+                  onCheckedChange={(autoApprove) =>
+                    onOverridesChange({ ...overrides, autoApprove })
                   }
+                  aria-label="自动批准工具"
+                />
+              </div>
+            )}
+
+            {activeSection === "model" && (
+              <label className="grid gap-1.5">
+                <span className="text-sm font-medium">模型</span>
+                <Select
+                  value={mergedModel}
+                  onValueChange={(model) => onOverridesChange({ ...overrides, model })}
                 >
-                  <SelectTrigger aria-label="背景主题">
+                  <SelectTrigger aria-label="模型">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {themeOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="auto">自动</SelectItem>
+                    <SelectItem value="pro">Pro</SelectItem>
+                    <SelectItem value="flash">Flash</SelectItem>
                   </SelectContent>
                 </Select>
-                <div className="mt-1 flex gap-1.5" aria-hidden="true">
-                  {themeOptions.map((option) => (
-                    <span
-                      key={option.value}
-                      className={`size-5 rounded-md border shadow-sm theme-swatch-${option.value}`}
-                    />
-                  ))}
+              </label>
+            )}
+
+            {activeSection === "directory" && (
+              <label className="grid gap-1.5">
+                <span className="text-sm font-medium">工作目录</span>
+                <div className="relative">
+                  <Folder className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    value={mergedCwd}
+                    onChange={(event) =>
+                      onOverridesChange({ ...overrides, cwd: event.target.value })
+                    }
+                  />
                 </div>
               </label>
-            </div>
+            )}
           </section>
-
-          <label className="grid gap-1.5">
-            <span className="text-sm font-medium">DeepSeek API Key</span>
-            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-              <div className="relative min-w-0">
-                <KeyRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  className="pl-9"
-                  type="password"
-                  value={apiKeyDraft}
-                  onChange={(event) => onApiKeyDraftChange(event.target.value)}
-                  placeholder={settings.apiKeyConfigured ? "已写入 CLI 配置" : "请输入 DeepSeek API Key"}
-                />
-              </div>
-              <Button type="button" onClick={onSaveApiKey} disabled={savingKey || !apiKeyDraft.trim()}>
-                保存
-              </Button>
-            </div>
-            <span className="text-xs leading-5 text-muted-foreground">
-              保存到 {settings.configPath ?? "用户配置目录"}，CLI 和桌面端会共用这份配置。
-            </span>
-          </label>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1.5">
-              <span className="text-sm font-medium">模型</span>
-              <Select
-                value={mergedModel}
-                onValueChange={(model) => onOverridesChange({ ...overrides, model })}
-              >
-                <SelectTrigger aria-label="模型">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">自动</SelectItem>
-                  <SelectItem value="pro">Pro</SelectItem>
-                  <SelectItem value="flash">Flash</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-
-            <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/30 px-3 py-2.5">
-              <div>
-                <span className="block text-sm font-medium">自动批准工具</span>
-                <span className="block text-xs text-muted-foreground">对应 CLI 的 auto mode。</span>
-              </div>
-              <Switch
-                checked={mergedAutoApprove}
-                onCheckedChange={(autoApprove) =>
-                  onOverridesChange({ ...overrides, autoApprove })
-                }
-                aria-label="自动批准工具"
-              />
-            </div>
-          </div>
-
-          <label className="grid gap-1.5">
-            <span className="text-sm font-medium">工作目录</span>
-            <div className="relative">
-              <Folder className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                className="pl-9"
-                value={mergedCwd}
-                onChange={(event) => onOverridesChange({ ...overrides, cwd: event.target.value })}
-              />
-            </div>
-          </label>
         </div>
 
         <DialogFooter>
@@ -315,6 +403,46 @@ function SettingsDialog({
     </Dialog>
   );
 }
+
+const settingsSections: Array<{
+  id: SettingsSection;
+  label: string;
+  icon: typeof Settings;
+}> = [
+  { id: "appearance", label: "界面外观", icon: Palette },
+  { id: "service", label: "服务", icon: Bot },
+  { id: "key", label: "密钥", icon: KeyRound },
+  { id: "approval", label: "权限", icon: Check },
+  { id: "model", label: "模型", icon: SlidersHorizontal },
+  { id: "directory", label: "工作目录", icon: Folder },
+];
+
+const sectionMeta: Record<SettingsSection, { title: string; description: string }> = {
+  appearance: {
+    title: "界面外观",
+    description: "字体随桌面应用打包；背景主题只影响桌面端 UI。",
+  },
+  service: {
+    title: "服务设置",
+    description: "选择当前桌面对话使用的模型服务。",
+  },
+  key: {
+    title: "密钥设置",
+    description: "DeepSeek API Key 会写入 CLI 共用配置。",
+  },
+  approval: {
+    title: "权限设置",
+    description: "控制工具调用是否自动批准。",
+  },
+  model: {
+    title: "模型设置",
+    description: "选择自动路由、Pro 或 Flash。",
+  },
+  directory: {
+    title: "工作目录",
+    description: "覆盖当前桌面对话的运行目录。",
+  },
+};
 
 function normalizeModelValue(model?: string): string {
   switch (model?.trim().toLowerCase()) {

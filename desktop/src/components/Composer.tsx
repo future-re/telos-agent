@@ -14,15 +14,15 @@ interface ComposerProps {
 export function Composer({ disabled, disabledReason, onChange, onSubmit, value }: ComposerProps) {
   return (
     <form
-      className="grid w-full min-w-0 items-end gap-3 border-t bg-background/95 px-5 py-4 md:grid-cols-[minmax(0,1fr)_auto]"
+      className="grid max-h-40 w-full min-w-0 shrink-0 items-end gap-3 border-t bg-background/95 px-5 py-3 md:grid-cols-[minmax(0,1fr)_auto]"
       onSubmit={onSubmit}
     >
       <Textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={disabledReason ?? "让 telos 检查、解释、修改或验证..."}
-        rows={3}
-        className="min-h-24 resize-y bg-card"
+        rows={2}
+        className="max-h-28 min-h-20 resize-none bg-card"
       />
       <Button type="submit" disabled={disabled} className="w-full md:w-auto">
         <Send className="size-4" aria-hidden="true" />

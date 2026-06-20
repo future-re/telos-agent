@@ -1,6 +1,5 @@
 import {
   Activity,
-  Settings,
   Bot,
   Check,
   Circle,
@@ -12,6 +11,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { ToolActivity } from "@/chatState";
+import { SettingsSection } from "@/desktopTypes";
 import { RunDisplay } from "@/runDisplay";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 interface RunInspectorProps {
   display: RunDisplay;
   onChooseDirectory: () => void;
-  onConfigure: () => void;
+  onConfigure: (section: SettingsSection) => void;
   onOpenMemory: () => void;
   running: boolean;
   status: string;
@@ -39,7 +39,7 @@ export function RunInspector({
   tools,
 }: RunInspectorProps) {
   return (
-    <aside className="grid min-h-screen min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-3 border-l bg-muted/40 p-4 max-[920px]:min-h-0 max-[920px]:border-l-0 max-[920px]:border-t">
+    <aside className="grid h-screen min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-3 overflow-hidden border-l bg-muted/40 p-4 max-[920px]:h-auto max-[920px]:min-h-0 max-[920px]:border-l-0 max-[920px]:border-t">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-mono text-xs font-bold uppercase text-muted-foreground">运行状态</p>
@@ -54,9 +54,27 @@ export function RunInspector({
       </div>
 
       <section className="grid grid-cols-2 gap-2" aria-label="当前配置">
-        <Metric icon={<Bot className="size-4" />} label="服务" value={display.providerLabel} />
-        <Metric icon={<KeyRound className="size-4" />} label="密钥" value={display.apiKeyLabel} />
-        <Metric icon={<Check className="size-4" />} label="权限" value={display.approvalLabel} />
+        <Metric
+          actionLabel="打开服务设置"
+          icon={<Bot className="size-4" />}
+          label="服务"
+          onClick={() => onConfigure("service")}
+          value={display.providerLabel}
+        />
+        <Metric
+          actionLabel="打开密钥设置"
+          icon={<KeyRound className="size-4" />}
+          label="密钥"
+          onClick={() => onConfigure("key")}
+          value={display.apiKeyLabel}
+        />
+        <Metric
+          actionLabel="打开权限设置"
+          icon={<Check className="size-4" />}
+          label="权限"
+          onClick={() => onConfigure("approval")}
+          value={display.approvalLabel}
+        />
         <Metric
           actionLabel="查看记忆"
           icon={<Library className="size-4" />}
@@ -74,30 +92,33 @@ export function RunInspector({
         />
       </section>
 
-      <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <Activity className="size-4" aria-hidden="true" />
-            当前模型
-          </CardTitle>
-          <Button type="button" variant="ghost" size="sm" onClick={onConfigure}>
-            <Settings className="size-4" aria-hidden="true" />
-            调整
-          </Button>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-md border bg-background px-3 py-2">
-            <strong className="block truncate text-sm" title={display.modelLabel}>
-              {display.modelLabel}
-            </strong>
-            <span className="mt-1 block text-xs text-muted-foreground">
-              {display.modelDescription}
-            </span>
-          </div>
-        </CardContent>
+      <Card className="transition-colors hover:border-ring hover:bg-accent/60">
+        <button
+          type="button"
+          className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => onConfigure("model")}
+          aria-label="打开模型设置"
+        >
+          <CardHeader className="flex-row items-center space-y-0 pb-3">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Activity className="size-4" aria-hidden="true" />
+              当前模型
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="rounded-md border bg-background px-3 py-2">
+              <strong className="block truncate text-sm" title={display.modelLabel}>
+                {display.modelLabel}
+              </strong>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                {display.modelDescription}
+              </span>
+            </div>
+          </CardContent>
+        </button>
       </Card>
 
-      <Card className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
+      <Card className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
         <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
           <CardTitle className="flex items-center gap-2 text-sm">
             <Activity className="size-4" aria-hidden="true" />
@@ -107,15 +128,15 @@ export function RunInspector({
             {tools.length} 条
           </span>
         </CardHeader>
-        <CardContent className="min-h-0">
-          <ScrollArea className="h-full">
+        <CardContent className="min-h-0 min-w-0">
+          <ScrollArea className="h-full min-w-0">
             {tools.length === 0 ? (
               <div className="flex items-center gap-2 rounded-md border border-dashed bg-muted/40 p-3 text-sm text-muted-foreground">
                 <Wrench className="size-4" aria-hidden="true" />
                 运行任务时，工具调用会显示在这里。
               </div>
             ) : (
-              <div className="grid gap-2">
+              <div className="grid min-w-0 gap-2">
                 {tools.map((tool) => (
                   <ToolItem key={tool.id} tool={tool} />
                 ))}
@@ -186,7 +207,7 @@ function ToolItem({ tool }: { tool: ToolActivity }) {
   return (
     <div
       className={cn(
-        "flex min-h-14 items-center gap-2 rounded-md border bg-background p-2",
+        "flex min-h-14 min-w-0 items-center gap-2 overflow-hidden rounded-md border bg-background p-2",
         tool.status === "failed" && "border-red-200 bg-red-50",
         tool.status === "completed" && "border-emerald-200 bg-emerald-50",
       )}
@@ -200,9 +221,11 @@ function ToolItem({ tool }: { tool: ToolActivity }) {
           <Play className="size-4 text-muted-foreground" aria-hidden="true" />
         )}
       </span>
-      <div className="min-w-0">
-        <strong className="block truncate text-sm">{tool.name}</strong>
-        <span className="block truncate text-xs text-muted-foreground">
+      <div className="min-w-0 flex-1 overflow-hidden">
+        <strong className="block min-w-0 truncate text-sm" title={tool.name}>
+          {tool.name}
+        </strong>
+        <span className="block min-w-0 truncate text-xs text-muted-foreground" title={tool.detail || statusLabel(tool.status)}>
           {tool.detail || statusLabel(tool.status)}
         </span>
       </div>

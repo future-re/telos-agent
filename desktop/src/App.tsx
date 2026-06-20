@@ -25,6 +25,7 @@ import {
   DesktopSettingsOverrides,
   MemoryOverview,
   ResolvedDesktopSettings,
+  SettingsSection,
 } from "@/desktopTypes";
 import { cn } from "@/lib/utils";
 import { buildRunDisplay } from "@/runDisplay";
@@ -86,6 +87,7 @@ export function App() {
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
   const [appearance, setAppearance] = useState<AppearanceSettings>(() => loadAppearance());
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [memoryLoading, setMemoryLoading] = useState(false);
@@ -215,6 +217,11 @@ export function App() {
     dispatch({ type: "reset" });
   }
 
+  function openSettings(section: SettingsSection) {
+    setSettingsSection(section);
+    setSettingsOpen(true);
+  }
+
   async function chooseDirectory() {
     if (!isTauriRuntime()) {
       const selected = window.prompt("输入工作目录", effectiveSettings.cwd);
@@ -283,13 +290,13 @@ export function App() {
     <TooltipProvider delayDuration={250}>
       <main
         className={cn(
-          "grid min-h-screen w-full overflow-x-hidden bg-muted/40 text-foreground",
+          "grid h-screen w-full overflow-hidden bg-muted/40 text-foreground",
           inspectorOpen
             ? "lg:grid-cols-[minmax(0,1fr)_minmax(352px,388px)]"
             : "grid-cols-1",
         )}
       >
-        <section className="grid min-h-screen w-full min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
+        <section className="grid h-screen w-full min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-background">
           <TopBar
             apiKeyDraft={apiKeyDraft}
             metadata={display.runMetadata}
@@ -305,6 +312,8 @@ export function App() {
             settings={settings}
             settingsOpen={settingsOpen}
             onSettingsOpenChange={setSettingsOpen}
+            settingsSection={settingsSection}
+            onSettingsSectionChange={setSettingsSection}
             appearance={appearance}
           />
           <Conversation
@@ -329,7 +338,7 @@ export function App() {
           <RunInspector
             display={display}
             onChooseDirectory={chooseDirectory}
-            onConfigure={() => setSettingsOpen(true)}
+            onConfigure={openSettings}
             onOpenMemory={openMemoryOverview}
             running={state.running}
             status={state.status}

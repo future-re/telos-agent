@@ -8,8 +8,8 @@ const page = readFileSync(join(scriptDir, '../src/pages/index.astro'), 'utf8');
 const checks = [
   ['language switch control', 'class="language-switch"'],
   ['Chinese language label', '中文'],
-  ['English homepage copy', 'Build agents that act with policy'],
-  ['Chinese homepage copy', '构建受策略约束的智能体客户端'],
+  ['English homepage copy', 'Let agents call tools safely'],
+  ['Chinese homepage copy', '让智能体安全调用工具'],
   ['client-side language script', 'data-language-target'],
 ];
 

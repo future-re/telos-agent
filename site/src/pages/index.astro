@@ -12,10 +12,10 @@ const navItems = [
   { label: { en: 'GitHub', zh: 'GitHub' }, path: 'https://github.com/future-re/telos-agent', external: true },
 ];
 
-const metrics = [
-  { value: 'Rust', label: { en: 'runtime core', zh: '运行时核心' } },
-  { value: 'PyPI', label: { en: 'CLI install path', zh: 'CLI 安装路径' } },
-  { value: 'MCP', label: { en: 'tool bridge ready', zh: '工具桥接就绪' } },
+const proofPoints = [
+  { en: 'Rust runtime core', zh: 'Rust 运行时核心' },
+  { en: 'PyPI CLI install', zh: 'PyPI CLI 安装' },
+  { en: 'MCP-ready tools', zh: 'MCP 工具就绪' },
 ];
 
 const capabilities = [
@@ -168,25 +168,29 @@ const useCases = [
 
 const copy = {
   eyebrow: {
-    en: 'Rust agent runtime with Python installation',
-    zh: '可通过 Python 安装的 Rust 智能体运行时',
+    en: 'Controlled runtime for tool-using agents',
+    zh: '面向工具型智能体的受控运行时',
   },
   heroTitle: {
-    en: 'Build agents that act with policy.',
-    zh: '构建受策略约束的智能体客户端。',
+    en: 'Let agents call tools safely.',
+    zh: '让智能体安全调用工具。',
   },
   heroText: {
-    en: 'telos gives product teams a controlled runtime for model turns, tool execution, approvals, MCP, plugins, memory, and shippable clients.',
-    zh: 'telos 为产品团队提供受控的模型回合运行时，覆盖工具执行、审批、MCP、插件、记忆和可交付客户端。',
+    en: 'telos wraps model turns, tool execution, approvals, MCP, plugins, and memory in one runtime boundary that product clients can ship.',
+    zh: 'telos 把模型回合、工具执行、审批、MCP、插件和记忆收进同一个运行时边界，方便产品客户端直接交付。',
   },
   quickStart: { en: 'Quick Start', zh: '快速开始' },
   installCli: { en: 'Install CLI', zh: '安装 CLI' },
   installTitle: { en: 'Install and run', zh: '安装并运行' },
   installNote: {
-    en: 'Start from Python packaging, then embed the Rust crate when the client needs direct runtime control.',
-    zh: '先通过 Python 包快速安装；当客户端需要直接控制运行时时，再嵌入 Rust crate。',
+    en: 'Start with the CLI, then embed the Rust crate when your client needs direct runtime control.',
+    zh: '先用 CLI 快速开始；当客户端需要直接控制运行时时，再嵌入 Rust crate。',
   },
-  libraryTitle: { en: 'Library control path', zh: '库集成控制路径' },
+  libraryTitle: { en: 'Runtime loop', zh: '运行时循环' },
+  libraryNote: {
+    en: 'Typed events keep text, tool calls, approvals, and results visible to the client.',
+    zh: '类型化事件让文本、工具调用、审批和结果都对客户端可见。',
+  },
   sectionRuntime: { en: 'Runtime boundary', zh: '运行时边界' },
   sectionRuntimeTitle: {
     en: 'Model output and side effects meet at one controlled interface.',
@@ -259,14 +263,11 @@ const copy = {
             <a class="button primary" href={href('/docs/quick-start/')}><Lang value={copy.quickStart} /></a>
             <a class="button secondary" href={href('/docs/cli-guide/')}><Lang value={copy.installCli} /></a>
           </div>
-          <dl class="hero-metrics" aria-label="Project highlights">
-            {metrics.map((item) => (
-              <div>
-                <dt>{item.value}</dt>
-                <dd><Lang value={item.label} /></dd>
-              </div>
+          <div class="hero-proof" aria-label="Project highlights">
+            {proofPoints.map((item) => (
+              <span><Lang value={item} /></span>
             ))}
-          </dl>
+          </div>
         </div>
 
         <div class="runtime-console" aria-label="Install and runtime preview">
@@ -279,15 +280,13 @@ const copy = {
 telos "inspect this repository"</code></pre>
             <p><Lang value={copy.installNote} /></p>
           </div>
-          <div class="command-panel">
+          <div class="runtime-summary">
             <div class="panel-heading">
               <span><Lang value={copy.libraryTitle} /></span>
               <span>Rust</span>
             </div>
-            <pre><code>let mut session = AgentSession::new(config)?;
-tools.register(shell_tool.with_policy(policy));
-
-let events = session.run_turn(&provider, &tools, prompt).await?;</code></pre>
+            <p><Lang value={copy.libraryNote} /></p>
+            <code>session.run_turn(&provider, &tools, prompt).await?</code>
           </div>
         </div>
       </section>

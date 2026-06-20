@@ -1,19 +1,19 @@
 :root {
-  --sl-color-accent-low: #d8f3e4;
+  --sl-color-accent-low: #d9efe6;
   --sl-color-accent: #168456;
-  --sl-color-accent-high: #0c3f2d;
+  --sl-color-accent-high: #0e3f2e;
   --sl-color-white: #ffffff;
-  --sl-color-gray-1: #f5f7f8;
-  --sl-color-gray-2: #dfe5e8;
-  --sl-color-gray-3: #a8b3b9;
-  --sl-color-gray-4: #69757d;
-  --sl-color-gray-5: #39444b;
-  --sl-color-gray-6: #20282e;
-  --sl-color-black: #0b0f13;
+  --sl-color-gray-1: #f7f5ef;
+  --sl-color-gray-2: #e4e1d8;
+  --sl-color-gray-3: #b1b6b2;
+  --sl-color-gray-4: #6d7773;
+  --sl-color-gray-5: #384441;
+  --sl-color-gray-6: #1d2724;
+  --sl-color-black: #08110f;
 }
 
 html {
-  background: #0b0f13;
+  background: #08110f;
 }
 
 body {
@@ -26,24 +26,32 @@ body {
 }
 
 .landing {
+  --page: #f7f5ef;
+  --ink: #101b18;
+  --muted: #5d6a66;
+  --line: #dcd8ce;
+  --panel: #fffdf8;
+  --accent: #18a064;
+  --accent-dark: #0d4936;
   min-height: 100vh;
   margin: 0;
-  background:
-    linear-gradient(180deg, #f5f7f8 0, #eef3f0 620px, #ffffff 620px),
-    #ffffff;
-  color: #102027;
+  background: var(--page);
+  color: var(--ink);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
 }
 
 .landing .site-header {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
   max-width: 1180px;
   margin: 0 auto;
-  padding: 18px 24px;
+  padding: 22px 24px;
+  color: #f7f5ef;
 }
 
 .landing .brand,
@@ -56,33 +64,34 @@ body {
 .landing .brand {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   font-size: 1.05rem;
   font-weight: 820;
 }
 
 .landing .brand-mark {
   display: inline-grid;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   place-items: center;
-  border: 1px solid #bfd3c9;
+  border: 1px solid rgb(255 255 255 / 18%);
   border-radius: 8px;
-  background: #0e2c22;
-  color: #5ee2a0;
+  background: #12382b;
+  color: #69e0a0;
   font-weight: 900;
+  box-shadow: inset 0 0 0 1px rgb(105 224 160 / 16%);
 }
 
 .landing .header-actions {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 18px;
 }
 
 .landing .site-header nav {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
   justify-content: flex-end;
 }
 
@@ -90,24 +99,23 @@ body {
   min-height: 34px;
   padding: 7px 10px;
   border-radius: 7px;
-  color: #44525b;
-  font-size: 0.94rem;
-  font-weight: 660;
+  color: rgb(247 245 239 / 78%);
+  font-size: 0.93rem;
+  font-weight: 680;
 }
 
 .landing .site-header nav a:hover {
-  background: #e7eee9;
-  color: #0c6c49;
+  background: rgb(255 255 255 / 8%);
+  color: #ffffff;
 }
 
 .landing .language-switch {
   display: inline-flex;
   gap: 2px;
   padding: 3px;
-  border: 1px solid #cad8d0;
+  border: 1px solid rgb(255 255 255 / 18%);
   border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 8px 22px rgb(33 52 44 / 8%);
+  background: rgb(255 255 255 / 8%);
 }
 
 .landing .language-switch button {
@@ -116,57 +124,68 @@ body {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #50606a;
+  color: rgb(247 245 239 / 72%);
   cursor: pointer;
   font: inherit;
   font-size: 0.82rem;
-  font-weight: 760;
+  font-weight: 780;
 }
 
 .landing .language-switch button[aria-pressed='true'] {
-  background: #123429;
-  color: #ffffff;
+  background: #f7f5ef;
+  color: #0c2a21;
+}
+
+.landing main {
+  margin-top: -78px;
 }
 
 .landing .hero {
   display: grid;
-  grid-template-columns: minmax(0, 0.94fr) minmax(360px, 0.86fr);
-  gap: 54px;
+  grid-template-columns: minmax(0, 0.92fr) minmax(360px, 0.78fr);
+  gap: 64px;
   align-items: center;
-  max-width: 1180px;
-  min-height: 620px;
-  margin: 0 auto;
-  padding: 54px 24px 70px;
+  min-height: 720px;
+  padding: 132px max(24px, calc((100vw - 1180px) / 2 + 24px)) 92px;
+  background:
+    radial-gradient(circle at 74% 30%, rgb(34 159 99 / 18%), transparent 34%),
+    linear-gradient(135deg, #08110f 0%, #0e211b 52%, #15251f 100%);
+  color: #f7f5ef;
+}
+
+.landing .hero-copy {
+  min-width: 0;
 }
 
 .landing .eyebrow {
   display: inline-flex;
   width: max-content;
   max-width: 100%;
-  margin: 0 0 18px;
+  margin: 0 0 20px;
   padding: 7px 11px;
-  border: 1px solid #bad0c6;
+  border: 1px solid rgb(118 215 161 / 30%);
   border-radius: 999px;
-  background: #ffffff;
-  color: #0d6b49;
+  background: rgb(24 160 100 / 10%);
+  color: #95e2b6;
   font-size: 0.78rem;
   font-weight: 760;
 }
 
 .landing .hero h1 {
-  max-width: 690px;
+  max-width: 710px;
   margin: 0;
-  color: #0e1a20;
-  font-size: clamp(3.05rem, 6vw, 5.35rem);
-  line-height: 0.98;
+  color: #fffdf8;
+  font-size: clamp(3.15rem, 5.5vw, 5.15rem);
+  font-weight: 860;
+  line-height: 1.03;
   letter-spacing: 0;
 }
 
 .landing .hero-text {
   max-width: 650px;
   margin: 24px 0 0;
-  color: #475963;
-  font-size: 1.15rem;
+  color: rgb(247 245 239 / 78%);
+  font-size: 1.08rem;
   line-height: 1.75;
 }
 
@@ -184,58 +203,45 @@ body {
   min-height: 46px;
   padding: 0 18px;
   border-radius: 8px;
-  font-weight: 780;
+  font-weight: 790;
   text-decoration: none;
 }
 
 .landing .button.primary {
-  background: #147a52;
-  color: #ffffff;
-  box-shadow: 0 14px 28px rgb(20 122 82 / 20%);
+  background: #31c77a;
+  color: #07120e;
+  box-shadow: 0 18px 36px rgb(49 199 122 / 22%);
 }
 
 .landing .button.primary:hover {
-  background: #0f6745;
+  background: #5ada96;
 }
 
 .landing .button.secondary {
-  border: 1px solid #b8c8c0;
-  background: #ffffff;
-  color: #122229;
+  border: 1px solid rgb(255 255 255 / 22%);
+  color: #fffdf8;
 }
 
 .landing .button.secondary:hover {
-  border-color: #147a52;
-  color: #0f6745;
+  border-color: rgb(149 226 182 / 60%);
+  background: rgb(255 255 255 / 8%);
 }
 
-.landing .hero-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  max-width: 610px;
-  margin: 34px 0 0;
+.landing .hero-proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 28px;
 }
 
-.landing .hero-metrics div {
-  min-height: 84px;
-  padding: 15px;
-  border: 1px solid #cedbd4;
-  border-radius: 8px;
-  background: rgb(255 255 255 / 78%);
-}
-
-.landing .hero-metrics dt {
-  color: #0d3529;
-  font-size: 1.35rem;
-  font-weight: 880;
-}
-
-.landing .hero-metrics dd {
-  margin: 6px 0 0;
-  color: #66747b;
-  font-size: 0.85rem;
-  line-height: 1.35;
+.landing .hero-proof span {
+  padding: 7px 10px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 6%);
+  color: rgb(247 245 239 / 74%);
+  font-size: 0.84rem;
+  font-weight: 700;
 }
 
 .landing .runtime-console {
@@ -245,22 +251,22 @@ body {
 }
 
 .landing .command-panel,
+.landing .runtime-summary,
 .landing .capabilities article,
 .landing .runtime-steps li,
 .landing .use-case-grid article,
 .landing .doc-links a {
-  border: 1px solid #d7e0dc;
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--panel);
 }
 
-.landing .command-panel {
+.landing .command-panel,
+.landing .runtime-summary {
   overflow: hidden;
-  box-shadow: 0 22px 60px rgb(16 32 39 / 12%);
-}
-
-.landing .command-panel.primary-panel {
-  border-color: #b8d8ca;
+  border-color: rgb(255 255 255 / 16%);
+  background: #fffdf8;
+  box-shadow: 0 28px 70px rgb(0 0 0 / 24%);
 }
 
 .landing .panel-heading {
@@ -268,17 +274,17 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
-  border-bottom: 1px solid #dde7e2;
-  color: #153329;
+  padding: 13px 15px;
+  border-bottom: 1px solid #e6e1d8;
+  color: #15211d;
   font-size: 0.86rem;
-  font-weight: 800;
+  font-weight: 820;
 }
 
-.landing .panel-heading>span:last-child {
-  color: #66747b;
-  font-size: 0.74rem;
-  font-weight: 760;
+.landing .panel-heading > span:last-child {
+  color: #6a746f;
+  font-size: 0.72rem;
+  font-weight: 780;
   text-transform: uppercase;
 }
 
@@ -288,32 +294,47 @@ body {
   height: 7px;
   margin-right: 6px;
   border-radius: 999px;
-  background: #22a86b;
+  background: #18a064;
   content: "";
 }
 
 .landing .command-panel pre {
   margin: 0;
-  padding: 18px;
+  padding: 20px;
   overflow-x: auto;
-  background: #0d1216;
-  color: #e7f2ed;
+  background: #0b1110;
+  color: #edf8f2;
   font-size: 0.9rem;
   line-height: 1.7;
   white-space: pre;
 }
 
-.landing .command-panel code {
+.landing .command-panel code,
+.landing .runtime-summary code {
   font-family:
     "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 }
 
-.landing .command-panel p {
+.landing .command-panel p,
+.landing .runtime-summary p {
   margin: 0;
-  padding: 15px 16px 17px;
-  color: #53636b;
-  font-size: 0.92rem;
+  padding: 15px 17px 17px;
+  color: #596762;
+  font-size: 0.93rem;
   line-height: 1.55;
+}
+
+.landing .runtime-summary code {
+  display: block;
+  margin: 0 17px 17px;
+  padding: 13px 14px;
+  overflow-x: auto;
+  border: 1px solid #e0dbd1;
+  border-radius: 7px;
+  background: #f5f2ea;
+  color: #1b2b25;
+  font-size: 0.82rem;
+  white-space: pre;
 }
 
 .landing .surface-strip,
@@ -324,48 +345,52 @@ body {
 .landing .docs-grid {
   max-width: 1180px;
   margin: 0 auto;
-  padding: 42px 24px;
+  padding: 54px 24px;
 }
 
 .landing .surface-strip {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 8px;
-  padding-top: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 32px;
+  padding-bottom: 24px;
 }
 
 .landing .surface-strip span {
-  min-height: 54px;
-  display: grid;
-  place-items: center;
-  border: 1px solid #d7e0dc;
-  border-radius: 8px;
-  background: #f7faf8;
-  color: #34464f;
-  font-size: 0.9rem;
-  font-weight: 780;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 13px;
+  border: 1px solid #d8d3c8;
+  border-radius: 999px;
+  background: #fffdf8;
+  color: #34423d;
+  font-size: 0.88rem;
+  font-weight: 760;
 }
 
 .landing .capabilities {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+  padding-top: 24px;
 }
 
 .landing .capabilities article {
-  min-height: 224px;
+  min-height: 214px;
   padding: 22px;
+  box-shadow: 0 14px 34px rgb(26 37 32 / 5%);
 }
 
-.landing .capabilities article>p:first-child {
+.landing .capabilities article > p:first-child {
   width: max-content;
   max-width: 100%;
-  margin: 0 0 24px;
+  margin: 0 0 22px;
   padding: 6px 9px;
   border-radius: 999px;
-  background: #edf7f1;
-  color: #0f704b;
-  font-size: 0.78rem;
+  background: #edf5ee;
+  color: #15724e;
+  font-size: 0.76rem;
   font-weight: 800;
 }
 
@@ -374,18 +399,18 @@ body {
 .landing .workflow-section h2,
 .landing .docs-grid h2 {
   margin: 0;
-  color: #102027;
-  line-height: 1.12;
+  color: var(--ink);
+  line-height: 1.13;
   letter-spacing: 0;
 }
 
 .landing .capabilities h2 {
-  font-size: 1.18rem;
+  font-size: 1.14rem;
 }
 
-.landing .capabilities article>p:last-child {
+.landing .capabilities article > p:last-child {
   margin: 12px 0 0;
-  color: #53636b;
+  color: var(--muted);
   line-height: 1.58;
 }
 
@@ -401,14 +426,22 @@ body {
 .landing .architecture-section h2,
 .landing .workflow-section h2,
 .landing .docs-grid h2 {
-  font-size: 2.15rem;
+  font-size: 2.05rem;
 }
 
-.landing .architecture-section>div>p:last-child,
-.landing .docs-grid>div>p:last-child {
+.landing .architecture-section > div > p:last-child,
+.landing .docs-grid > div > p:last-child {
   max-width: 440px;
-  color: #53636b;
+  color: var(--muted);
   line-height: 1.68;
+}
+
+.landing .architecture-section .eyebrow,
+.landing .workflow-section .eyebrow,
+.landing .docs-grid .eyebrow {
+  border-color: #d7d0c3;
+  background: #fffdf8;
+  color: #176d4c;
 }
 
 .landing .runtime-steps {
@@ -427,27 +460,27 @@ body {
   padding: 18px;
 }
 
-.landing .runtime-steps li>span {
+.landing .runtime-steps li > span {
   display: grid;
   width: 40px;
   height: 40px;
   place-items: center;
   border-radius: 8px;
-  background: #102027;
-  color: #8be7b5;
+  background: #0f2d23;
+  color: #8ee4b1;
   font-size: 0.82rem;
   font-weight: 900;
 }
 
 .landing .runtime-steps h3 {
   margin: 0;
-  color: #102027;
+  color: var(--ink);
   font-size: 1rem;
 }
 
 .landing .runtime-steps p {
   margin: 8px 0 0;
-  color: #53636b;
+  color: var(--muted);
   line-height: 1.56;
 }
 
@@ -471,26 +504,26 @@ body {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
   gap: 12px;
-  min-height: 128px;
+  min-height: 126px;
   padding: 18px;
 }
 
 .landing .use-case-grid article span {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   margin-top: 7px;
   border-radius: 999px;
-  background: #d99a24;
+  background: #c6922f;
 }
 
 .landing .use-case-grid article:nth-child(2) span,
 .landing .use-case-grid article:nth-child(3) span {
-  background: #557da8;
+  background: #4c7897;
 }
 
 .landing .use-case-grid p {
   margin: 0;
-  color: #273840;
+  color: #2b3a35;
   line-height: 1.58;
 }
 
@@ -498,6 +531,11 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.landing .code-section .command-panel {
+  border-color: var(--line);
+  box-shadow: 0 16px 36px rgb(24 34 30 / 8%);
 }
 
 .landing .doc-links {
@@ -514,18 +552,30 @@ body {
 }
 
 .landing .doc-links a:hover {
-  border-color: #8fbda8;
-  box-shadow: 0 14px 30px rgb(30 72 55 / 10%);
+  border-color: #9ac1a9;
+  box-shadow: 0 14px 30px rgb(28 65 47 / 9%);
 }
 
 .landing .doc-links strong {
-  color: #102027;
+  color: var(--ink);
   font-size: 1rem;
 }
 
 .landing .doc-links span {
-  color: #53636b;
+  color: var(--muted);
   line-height: 1.52;
+}
+
+@media (max-width: 980px) {
+  .landing .hero {
+    grid-template-columns: 1fr;
+    gap: 40px;
+    min-height: auto;
+  }
+
+  .landing .capabilities {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 900px) {
@@ -540,28 +590,18 @@ body {
     gap: 10px;
   }
 
-  .landing .hero,
   .landing .architecture-section,
   .landing .workflow-section,
   .landing .code-section,
   .landing .docs-grid {
     grid-template-columns: 1fr;
   }
-
-  .landing .hero {
-    min-height: auto;
-    padding-top: 34px;
-  }
-
-  .landing .capabilities,
-  .landing .surface-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 620px) {
   .landing .site-header {
     flex-direction: column;
+    color: #f7f5ef;
   }
 
   .landing .header-actions,
@@ -578,13 +618,15 @@ body {
     width: max-content;
   }
 
+  .landing .hero {
+    padding-top: 136px;
+  }
+
   .landing .hero h1 {
     font-size: 2.85rem;
   }
 
-  .landing .hero-metrics,
   .landing .capabilities,
-  .landing .surface-strip,
   .landing .use-case-grid,
   .landing .doc-links {
     grid-template-columns: 1fr;
@@ -593,7 +635,7 @@ body {
   .landing .architecture-section h2,
   .landing .workflow-section h2,
   .landing .docs-grid h2 {
-    font-size: 1.75rem;
+    font-size: 1.72rem;
   }
 
   .landing .runtime-steps li {

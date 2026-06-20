@@ -9,6 +9,7 @@ description = "Terminal interface for telos-agent"
 readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
+license-files = []
 keywords = ["agent", "ai", "cli", "llm", "terminal"]
 classifiers = [
     "Development Status :: 3 - Alpha",

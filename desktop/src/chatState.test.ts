@@ -45,6 +45,28 @@ describe("reduceTelosEvent", () => {
     ]);
   });
 
+  it("keeps tool failure details from completion events", () => {
+    const started = reduceTelosEvent(initialChatState, {
+      kind: "tool_call",
+      toolCallId: "call-1",
+      toolName: "Bash",
+      detail: "npm run test",
+    });
+    const finished = reduceTelosEvent(started, {
+      kind: "tool_completed",
+      toolCallId: "call-1",
+      toolName: "Bash",
+      detail: "exit code 1\nTest suite failed",
+      isError: true,
+    });
+
+    expect(finished.tools[0]).toMatchObject({
+      detail: "exit code 1\nTest suite failed",
+      status: "failed",
+      isError: true,
+    });
+  });
+
   it("aggregates provider token usage for the active turn", () => {
     const started = reduceTelosEvent(initialChatState, {
       kind: "provider_usage",

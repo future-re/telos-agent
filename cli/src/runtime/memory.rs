@@ -56,19 +56,19 @@ pub async fn record_tool_error(
         let label = detail.filter(|d| !d.is_empty()).unwrap_or_else(|| tool_name.clone());
         let ts = unix_timestamp();
         let entry = MemoryEntry {
-            name: format!("fix-{}", stable_id(&tool_call_id)),
-            description: format!("Tool failure: {tool_name}"),
+            name: format!("tool-error-{}", stable_id(&tool_call_id)),
+            description: format!("Tool execution failed: {tool_name}"),
             category: MemoryCategory::Fact,
-            tags: vec!["error".into(), "auto-feedback".into(), tool_name.to_lowercase()],
+            tags: vec!["tool-error".into(), "auto-feedback".into(), tool_name.to_lowercase()],
             created: ts.clone(),
             updated: ts,
-            status: MemoryStatus::NeedsFix,
+            status: MemoryStatus::Working,
             times_used: 0,
             confidence: Some("high".into()),
             related: vec![],
             source_session: None,
             body: format!(
-                "Tool `{tool_name}` failed.\n\nDetail: `{label}`\n\nError payload:\n```json\n{}\n```\n\nFix this before retrying.",
+                "Tool `{tool_name}` execution failed.\n\nDetail: `{label}`\n\nError payload:\n```json\n{}\n```\n\nThis is execution context for future runs, not a bug-fix task.",
                 pretty_json(&content)
             ),
         };

@@ -58,9 +58,10 @@ pub fn map_turn_event(event: TurnEvent) -> DesktopEvent {
             message: Some(message),
             ..DesktopEvent::new("tool_progress")
         },
-        TurnEvent::ToolCompleted { tool_call_id, name, is_error } => DesktopEvent {
+        TurnEvent::ToolCompleted { tool_call_id, name, is_error, detail } => DesktopEvent {
             tool_call_id: Some(tool_call_id),
             tool_name: Some(name),
+            detail,
             is_error: Some(is_error),
             ..DesktopEvent::new("tool_completed")
         },

@@ -176,7 +176,7 @@ async fn record_memory_from_event(
         telos_agent::TurnEvent::ToolCall { tool_call_id, detail, .. } => {
             tool_details.insert(tool_call_id.clone(), detail.clone());
         }
-        telos_agent::TurnEvent::ToolCompleted { tool_call_id, name, is_error: false } => {
+        telos_agent::TurnEvent::ToolCompleted { tool_call_id, name, is_error: false, .. } => {
             telos_cli::memory_runtime::record_successful_tool(
                 memory_store,
                 name,
@@ -308,17 +308,13 @@ pub fn memory_overview(overrides: &DesktopSettingsOverrides) -> Result<MemoryOve
     })
     .collect();
 
-    let statuses = [
-        (MemoryStatus::Working, "可用"),
-        (MemoryStatus::NeedsFix, "待修复"),
-        (MemoryStatus::Deprecated, "已废弃"),
-    ]
-    .into_iter()
-    .map(|(status, label)| MemoryBucket {
-        label: label.into(),
-        count: entries.iter().filter(|entry| entry.status == status).count(),
-    })
-    .collect();
+    let statuses = ["可用", "执行记录", "需确认", "已废弃"]
+        .into_iter()
+        .map(|label| MemoryBucket {
+            label: label.into(),
+            count: entries.iter().filter(|entry| memory_preview_status(entry) == label).count(),
+        })
+        .collect();
 
     let recent = entries.iter().take(12).map(memory_preview).collect();
 
@@ -336,7 +332,7 @@ fn memory_preview(entry: &MemoryEntry) -> MemoryPreview {
         name: entry.name.clone(),
         description: entry.description.clone(),
         category: memory_category_label(&entry.category).into(),
-        status: memory_status_label(&entry.status).into(),
+        status: memory_preview_status(entry).into(),
         updated: entry.updated.clone(),
         times_used: entry.times_used,
         tags: entry.tags.clone(),
@@ -356,9 +352,23 @@ fn memory_category_label(category: &MemoryCategory) -> &'static str {
 fn memory_status_label(status: &MemoryStatus) -> &'static str {
     match status {
         MemoryStatus::Working => "可用",
-        MemoryStatus::NeedsFix => "待修复",
+        MemoryStatus::NeedsFix => "需确认",
         MemoryStatus::Deprecated => "已废弃",
     }
+}
+
+fn memory_preview_status(entry: &MemoryEntry) -> &'static str {
+    if is_auto_tool_error_memory(entry) {
+        return "执行记录";
+    }
+    memory_status_label(&entry.status)
+}
+
+fn is_auto_tool_error_memory(entry: &MemoryEntry) -> bool {
+    entry.tags.iter().any(|tag| tag == "tool-error")
+        || (entry.tags.iter().any(|tag| tag == "error")
+            && entry.tags.iter().any(|tag| tag == "auto-feedback"))
+        || entry.name.starts_with("fix-")
 }
 
 fn prepare_desktop_runtime(

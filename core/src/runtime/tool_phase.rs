@@ -44,9 +44,12 @@ impl AgentSession {
                         ToolExecutionEvent::ToolProgress { tool_call_id, name, message, data } => {
                             TurnEvent::ToolProgress { tool_call_id, name, message, data }
                         }
-                        ToolExecutionEvent::ToolCompleted { tool_call_id, name, is_error } => {
-                            TurnEvent::ToolCompleted { tool_call_id, name, is_error }
-                        }
+                        ToolExecutionEvent::ToolCompleted {
+                            tool_call_id,
+                            name,
+                            is_error,
+                            detail,
+                        } => TurnEvent::ToolCompleted { tool_call_id, name, is_error, detail },
                         ToolExecutionEvent::ApprovalRequested { tool_call_id, name, reason } => {
                             TurnEvent::ApprovalRequested { tool_call_id, name, reason }
                         }

@@ -193,6 +193,7 @@ fn spawn_live_tool(
                     tool_call_id: tool_call_id.clone(),
                     name: name.clone(),
                     is_error: true,
+                    detail: Some(message.clone()),
                 }),
             ));
             let _ = tx.send((
@@ -302,6 +303,7 @@ async fn run_live_tool_inner(
             tool_call_id: result.tool_call_id.clone(),
             name: result.name.clone(),
             is_error: result.is_error,
+            detail: result.is_error.then(|| tool_result_detail(&result.content)),
         }),
     ));
     let _ = tx.send((index, ToolExecutionStreamItem::Result(result)));
@@ -359,4 +361,17 @@ fn truncate_cmd(cmd: &str) -> String {
     } else {
         first_line.to_string()
     }
+}
+
+pub(crate) fn tool_result_detail(content: &serde_json::Value) -> String {
+    if let Some(message) = content.get("message").and_then(|value| value.as_str()) {
+        return message.to_string();
+    }
+    if let Some(error) = content.get("error").and_then(|value| value.as_str()) {
+        return error.to_string();
+    }
+    if let Some(output) = content.get("output").and_then(|value| value.as_str()) {
+        return output.to_string();
+    }
+    content.to_string()
 }

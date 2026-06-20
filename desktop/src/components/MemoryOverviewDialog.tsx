@@ -88,7 +88,7 @@ export function MemoryOverviewDialog({
                               {entry.description || "无描述"}
                             </p>
                           </div>
-                          <Badge variant={entry.status === "待修复" ? "destructive" : "secondary"}>
+                          <Badge variant={entry.status === "需确认" ? "destructive" : "secondary"}>
                             {entry.status}
                           </Badge>
                         </div>

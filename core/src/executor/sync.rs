@@ -117,6 +117,7 @@ pub(crate) async fn run_one_tool(
                     tool_call_id: tool_call_id.clone(),
                     name: name.clone(),
                     is_error: true,
+                    detail: Some("tool invocation panicked".to_string()),
                 },
             ];
             (
@@ -189,6 +190,7 @@ async fn run_one_tool_inner(
         tool_call_id: result.tool_call_id.clone(),
         name: result.name.clone(),
         is_error: result.is_error,
+        detail: result.is_error.then(|| super::stream::tool_result_detail(&result.content)),
     });
 
     (prepared.index, events, result)

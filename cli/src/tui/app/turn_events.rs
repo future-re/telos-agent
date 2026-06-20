@@ -36,7 +36,7 @@ impl App {
                     self.tool_activity.set_progress(id, message);
                 }
             }
-            TurnEvent::ToolCompleted { tool_call_id, name, is_error } => {
+            TurnEvent::ToolCompleted { tool_call_id, name, is_error, .. } => {
                 let detail = self.tool_activity.complete(&tool_call_id, name.clone(), !is_error);
                 if is_error {
                     self.turn_tool_failures = self.turn_tool_failures.saturating_add(1);

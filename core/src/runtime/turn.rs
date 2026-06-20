@@ -46,7 +46,7 @@ pub enum TurnEvent {
         data: Option<serde_json::Value>,
     },
     /// A tool call finished (successfully or with an error).
-    ToolCompleted { tool_call_id: String, name: String, is_error: bool },
+    ToolCompleted { tool_call_id: String, name: String, is_error: bool, detail: Option<String> },
     /// The aggregated tool-result message appended to the conversation.
     ToolResult(Message),
     /// A compaction pass is starting; `reason` identifies which threshold tripped.
@@ -150,8 +150,15 @@ impl TurnEvent {
                 tool_call_id.as_deref().unwrap_or("unknown"),
                 message
             ),
-            TurnEvent::ToolCompleted { tool_call_id, name, is_error } => {
-                format!("tool_completed:{}#{} error={}", name, tool_call_id, is_error)
+            TurnEvent::ToolCompleted { tool_call_id, name, is_error, detail } => {
+                if let Some(detail) = detail {
+                    format!(
+                        "tool_completed:{}#{} error={} {}",
+                        name, tool_call_id, is_error, detail
+                    )
+                } else {
+                    format!("tool_completed:{}#{} error={}", name, tool_call_id, is_error)
+                }
             }
             TurnEvent::CompactionStarted { reason } => {
                 format!("compaction_started:{reason}")

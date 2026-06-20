@@ -139,7 +139,7 @@ async fn run_with_provider<P: telos_agent::ModelProvider>(
                 tool_details.insert(tool_call_id, detail);
                 eprintln!("\n[tool: {name}]");
             }
-            Ok(telos_agent::TurnEvent::ToolCompleted { tool_call_id, name, is_error }) => {
+            Ok(telos_agent::TurnEvent::ToolCompleted { tool_call_id, name, is_error, .. }) => {
                 if is_error {
                     eprintln!("[tool {name} failed]");
                 } else {

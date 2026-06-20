@@ -2,6 +2,8 @@ import {
   Activity,
   Bot,
   Check,
+  ChevronDown,
+  ChevronRight,
   Circle,
   Folder,
   KeyRound,
@@ -203,35 +205,57 @@ function Metric({
 }
 
 function ToolItem({ tool }: { tool: ToolActivity }) {
+  const hasDetail = Boolean(tool.detail.trim());
+  const statusText = statusLabel(tool.status);
+  const summary = tool.detail || statusText;
+
   return (
-    <div
+    <details
       className={cn(
-        "flex min-h-14 min-w-0 items-center gap-2 overflow-hidden rounded-md border bg-background p-2",
+        "group min-w-0 overflow-hidden rounded-md border bg-background",
         tool.status === "failed" && "border-red-200 bg-red-50",
         tool.status === "completed" && "border-emerald-200 bg-emerald-50",
       )}
     >
-      <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background">
-        {tool.status === "failed" ? (
-          <XCircle className="size-4 text-red-600" aria-hidden="true" />
-        ) : tool.status === "completed" ? (
-          <Check className="size-4 text-emerald-700" aria-hidden="true" />
-        ) : (
-          <Play className="size-4 text-muted-foreground" aria-hidden="true" />
-        )}
-      </span>
-      <div className="min-w-0 flex-1 overflow-hidden">
-        <strong className="block min-w-0 truncate text-sm" title={tool.name}>
-          {tool.name}
-        </strong>
-        <span className="block min-w-0 truncate text-xs text-muted-foreground" title={tool.detail || statusLabel(tool.status)}>
-          {tool.detail || statusLabel(tool.status)}
+      <summary className="flex min-h-14 min-w-0 cursor-pointer list-none items-center gap-2 p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background">
+          {tool.status === "failed" ? (
+            <XCircle className="size-4 text-red-600" aria-hidden="true" />
+          ) : tool.status === "completed" ? (
+            <Check className="size-4 text-emerald-700" aria-hidden="true" />
+          ) : (
+            <Play className="size-4 text-muted-foreground" aria-hidden="true" />
+          )}
         </span>
-      </div>
-      <em className="ml-auto shrink-0 text-xs not-italic text-muted-foreground">
-        {statusLabel(tool.status)}
-      </em>
-    </div>
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <strong className="block min-w-0 truncate text-sm" title={tool.name}>
+            {tool.name}
+          </strong>
+          <span className="block min-w-0 truncate text-xs text-muted-foreground" title={summary}>
+            {summary}
+          </span>
+        </div>
+        <em className="ml-auto shrink-0 text-xs not-italic text-muted-foreground">
+          {statusText}
+        </em>
+        {hasDetail ? (
+          <>
+            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground group-open:hidden" aria-hidden="true" />
+            <ChevronDown className="hidden size-3.5 shrink-0 text-muted-foreground group-open:block" aria-hidden="true" />
+          </>
+        ) : null}
+      </summary>
+      {hasDetail && (
+        <div className="border-t bg-background/70 px-3 py-2">
+          <p className="mb-1 text-[11px] font-semibold uppercase text-muted-foreground">
+            执行详情
+          </p>
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted px-2 py-1.5 text-xs leading-5 text-foreground">
+            {tool.detail}
+          </pre>
+        </div>
+      )}
+    </details>
   );
 }
 
@@ -248,7 +272,7 @@ function statusLabel(status: string): string {
       return "完成";
     case "failed":
     case "tool failed":
-      return "失败";
+      return "执行失败";
     default:
       return status || "空闲";
   }

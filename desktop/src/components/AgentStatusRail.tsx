@@ -9,32 +9,19 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
-import { ReactNode, useEffect, useState } from "react";
-import { AgentProfile, defaultAgent } from "@/agentModel";
+import { ReactNode } from "react";
+import { AgentProfile } from "@/agentModel";
 import { ToolActivity } from "@/chatState";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { ConversationSession } from "@/conversationSession";
 import { cn } from "@/lib/utils";
 
 interface AgentStatusRailProps {
   agent: AgentProfile;
-  agents: AgentProfile[];
-  activeAgentId: string;
   activeSessionId: string;
   sessions: ConversationSession[];
-  onForkSubagent: (agent: Pick<AgentProfile, "name" | "role" | "instructions">) => void;
   onDeleteSession: (sessionId: string) => void;
   onNewSession: () => void;
-  onSelectAgent: (agentId: string) => void;
   onSelectSession: (sessionId: string) => void;
   running: boolean;
   status: string;
@@ -44,14 +31,10 @@ interface AgentStatusRailProps {
 
 export function AgentStatusRail({
   agent,
-  agents,
-  activeAgentId,
   activeSessionId,
   sessions,
-  onForkSubagent,
   onDeleteSession,
   onNewSession,
-  onSelectAgent,
   onSelectSession,
   running,
   status,
@@ -61,14 +44,7 @@ export function AgentStatusRail({
   const phase = resolvePhase(status, tools);
   const activeTool =
     tools.find((tool) => tool.status === "running") ?? tools[tools.length - 1];
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [draft, setDraft] = useState(agent);
-
-  useEffect(() => {
-    if (!dialogOpen) {
-      setDraft(createForkDraft(agent));
-    }
-  }, [agent, dialogOpen]);
+  const subagents = deriveRuntimeSubagents(tools);
 
   return (
     <aside className="hidden min-h-0 border-r bg-muted/40 p-3 min-[1180px]:block">
@@ -159,20 +135,7 @@ export function AgentStatusRail({
 
         <section className="border-b p-3">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold text-muted-foreground">Agent 身份</p>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-7"
-              aria-label="Fork subagent"
-              onClick={() => {
-                setDraft(createForkDraft(agent));
-                setDialogOpen(true);
-              }}
-            >
-              <GitFork className="size-3.5" aria-hidden="true" />
-            </Button>
+            <p className="text-xs font-semibold text-muted-foreground">Agent 运行</p>
           </div>
           <div className="mt-2 min-w-0">
             <p className="truncate text-sm font-semibold text-foreground" title={agent.name}>
@@ -181,47 +144,42 @@ export function AgentStatusRail({
             <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground" title={agent.role}>
               {agent.role}
             </p>
-            {agent.kind === "subagent" && (
-              <p className="mt-2 inline-flex rounded-full border bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                forked subagent
-              </p>
-            )}
           </div>
           <div className="mt-3 grid gap-1.5">
-            {agents.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className={cn(
-                  "flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition-colors hover:border-ring hover:bg-accent/60",
-                  item.id === activeAgentId
-                    ? "border-primary/35 bg-primary/10 text-foreground"
-                    : "bg-background text-muted-foreground",
-                )}
-                onClick={() => onSelectAgent(item.id)}
-              >
+            {subagents.length === 0 ? (
+              <div className="rounded-md border border-dashed bg-background px-2.5 py-2 text-xs leading-5 text-muted-foreground">
+                当前还没有运行时 subagent。模型调用 Subagent 工具或 fork 模式后会显示在这里。
+              </div>
+            ) : (
+              subagents.map((item) => (
+                <div
+                  key={item.id}
+                  className={cn(
+                    "flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-2 text-left text-xs",
+                    item.status === "running"
+                      ? "border-primary/35 bg-primary/10 text-foreground"
+                      : "bg-background text-muted-foreground",
+                  )}
+                >
                 <span
                   className={cn(
                     "flex size-6 shrink-0 items-center justify-center rounded-md border bg-background",
-                    item.kind === "subagent" && "text-primary",
+                    item.status === "running" && "text-primary",
                   )}
                 >
-                  {item.kind === "subagent" ? (
-                    <GitFork className="size-3.5" aria-hidden="true" />
-                  ) : (
-                    <Play className="size-3.5" aria-hidden="true" />
-                  )}
+                  <GitFork className="size-3.5" aria-hidden="true" />
                 </span>
                 <span className="min-w-0 flex-1">
                   <strong className="block truncate font-semibold" title={item.name}>
                     {item.name}
                   </strong>
-                  <span className="block truncate" title={item.role}>
-                    {item.kind === "subagent" ? "Subagent" : "Primary"} · {item.role}
+                  <span className="block truncate" title={item.detail}>
+                    {subagentStatusLabel(item.status)} · {item.detail || "runtime subagent"}
                   </span>
                 </span>
-              </button>
-            ))}
+                </div>
+              ))
+            )}
           </div>
         </section>
 
@@ -279,58 +237,6 @@ export function AgentStatusRail({
         </section>
       </div>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Fork Subagent</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-3">
-            <div className="rounded-md border bg-muted/35 px-3 py-2 text-xs leading-5 text-muted-foreground">
-              这里创建的是当前桌面对话的 Agent 身份。运行时已经注册 Subagent 工具，模型可在需要时调用系统级 subagent 或 fork 模式。
-            </div>
-            <label className="grid gap-1.5">
-              <span className="text-sm font-medium">Subagent 名称</span>
-              <Input
-                value={draft.name}
-                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                placeholder="例如：UI Polish Subagent"
-              />
-            </label>
-            <label className="grid gap-1.5">
-              <span className="text-sm font-medium">角色</span>
-              <Input
-                value={draft.role}
-                onChange={(event) => setDraft({ ...draft, role: event.target.value })}
-                placeholder="例如：负责 UI、代码修改和验证"
-              />
-            </label>
-            <label className="grid gap-1.5">
-              <span className="text-sm font-medium">行为说明</span>
-              <Textarea
-                value={draft.instructions}
-                onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
-                placeholder="定义这个 Agent 的偏好、边界和工作方式"
-                className="min-h-28"
-              />
-            </label>
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              onClick={() => {
-                onForkSubagent({
-                  name: draft.name.trim() || defaultAgent.name,
-                  role: draft.role.trim() || defaultAgent.role,
-                  instructions: draft.instructions.trim(),
-                });
-                setDialogOpen(false);
-              }}
-            >
-              Fork Subagent
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </aside>
   );
 }
@@ -377,22 +283,60 @@ function resolvePhase(status: string, tools: ToolActivity[]): { id: PhaseId; lab
   };
 }
 
-function createForkDraft(agent: AgentProfile): AgentProfile {
-  return {
-    ...agent,
-    id: "",
-    kind: "subagent",
-    parentId: agent.id,
-    name: `${agent.name} Subagent`,
-  };
-}
-
 function toolStatusLabel(status: ToolActivity["status"]): string {
   switch (status) {
     case "running":
       return "运行中";
     case "completed":
       return "完成";
+    case "failed":
+      return "失败";
+  }
+}
+
+interface RuntimeSubagent {
+  id: string;
+  name: string;
+  detail: string;
+  status: ToolActivity["status"];
+}
+
+function deriveRuntimeSubagents(tools: ToolActivity[]): RuntimeSubagent[] {
+  return tools
+    .filter((tool) => isSubagentTool(tool.name))
+    .map((tool, index) => ({
+      id: tool.id,
+      name: runtimeSubagentName(tool, index),
+      detail: tool.detail,
+      status: tool.status,
+    }));
+}
+
+function isSubagentTool(name: string): boolean {
+  const normalized = name.toLowerCase();
+  return normalized.includes("subagent") || normalized.includes("fork");
+}
+
+function runtimeSubagentName(tool: ToolActivity, index: number): string {
+  const detail = tool.detail.trim();
+  if (!detail) {
+    return tool.name || `Subagent ${index + 1}`;
+  }
+
+  const firstLine = detail.split(/\r?\n/, 1)[0]?.trim();
+  if (!firstLine) {
+    return tool.name || `Subagent ${index + 1}`;
+  }
+
+  return firstLine.length > 48 ? `${firstLine.slice(0, 45)}...` : firstLine;
+}
+
+function subagentStatusLabel(status: ToolActivity["status"]): string {
+  switch (status) {
+    case "running":
+      return "运行中";
+    case "completed":
+      return "已完成";
     case "failed":
       return "失败";
   }

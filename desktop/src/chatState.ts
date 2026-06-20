@@ -109,6 +109,7 @@ export function reduceTelosEvent(state: ChatState, event: TelosEvent): ChatState
             ? {
                 ...tool,
                 name: event.toolName ?? tool.name,
+                detail: event.detail ?? tool.detail,
                 status: event.isError ? "failed" : "completed",
                 isError: Boolean(event.isError),
               }

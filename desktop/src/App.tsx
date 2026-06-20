@@ -15,7 +15,7 @@ import {
   reduceTelosEvent,
   startUserTurn,
 } from "@/chatState";
-import { AgentProfile, defaultAgent, forkSubagent } from "@/agentModel";
+import { defaultAgent } from "@/agentModel";
 import { AgentStatusRail } from "@/components/AgentStatusRail";
 import { Composer } from "@/components/Composer";
 import { Conversation } from "@/components/Conversation";
@@ -112,8 +112,6 @@ export function App() {
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryOverview, setMemoryOverview] = useState<MemoryOverview | undefined>();
-  const [agents, setAgents] = useState<AgentProfile[]>([defaultAgent]);
-  const [activeAgentId, setActiveAgentId] = useState(defaultAgent.id);
   const [usageHistory, setUsageHistory] = useState<TokenUsageHistory>(() =>
     typeof window === "undefined" ? {} : loadTokenUsageHistory(),
   );
@@ -187,10 +185,6 @@ export function App() {
   const todayUsage = useMemo(
     () => usageHistory[dateKey()],
     [usageHistory],
-  );
-  const agent = useMemo(
-    () => agents.find((item) => item.id === activeAgentId) ?? defaultAgent,
-    [activeAgentId, agents],
   );
   const display = buildRunDisplay({
     provider: effectiveSettings.provider,
@@ -275,7 +269,7 @@ export function App() {
     try {
       await invoke<PromptResult>("send_prompt", {
         request: {
-          prompt: withAgentContext(text, agent),
+          prompt: text,
           settings: normalizeOverrides(overrides, settings),
         },
       });
@@ -300,17 +294,6 @@ export function App() {
       },
       runningSessionIdRef.current,
     );
-  }
-
-  function createSubagent(draft: Pick<AgentProfile, "name" | "role" | "instructions">) {
-    const subagent = forkSubagent(agent, {
-      id: `subagent-${Date.now()}`,
-      name: draft.name,
-      role: draft.role,
-      instructions: draft.instructions,
-    });
-    setAgents((current) => [...current, subagent]);
-    setActiveAgentId(subagent.id);
   }
 
   async function resetSession() {
@@ -387,7 +370,7 @@ export function App() {
           ],
           statuses: [
             { label: "可用", count: 0 },
-            { label: "待修复", count: 0 },
+            { label: "需确认", count: 0 },
             { label: "已废弃", count: 0 },
           ],
           recent: [],
@@ -443,15 +426,11 @@ export function App() {
           />
           <div className="grid min-h-0 min-w-0 grid-cols-1 min-[1180px]:grid-cols-[340px_minmax(0,1fr)]">
             <AgentStatusRail
-              agent={agent}
-              agents={agents}
-              activeAgentId={activeAgentId}
+              agent={defaultAgent}
               activeSessionId={activeSessionId}
               sessions={sessions}
-              onForkSubagent={createSubagent}
               onDeleteSession={deleteConversation}
               onNewSession={createNewConversation}
-              onSelectAgent={setActiveAgentId}
               onSelectSession={setActiveSessionId}
               running={state.running}
               status={state.status}
@@ -522,23 +501,6 @@ function definedOverrides(overrides: DesktopSettingsOverrides) {
   return Object.fromEntries(
     Object.entries(overrides).filter(([, value]) => value !== undefined && value !== ""),
   ) as Partial<ResolvedDesktopSettings>;
-}
-
-function withAgentContext(prompt: string, agent: AgentProfile): string {
-  const instructions = agent.instructions.trim();
-  if (!instructions && agent.name === defaultAgent.name && agent.role === defaultAgent.role) {
-    return prompt;
-  }
-
-  return [
-    `当前 Agent：${agent.name}`,
-    `角色：${agent.role}`,
-    instructions ? `行为说明：${instructions}` : undefined,
-    "",
-    prompt,
-  ]
-    .filter(Boolean)
-    .join("\n");
 }
 
 function isTauriRuntime(): boolean {

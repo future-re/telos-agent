@@ -9,13 +9,6 @@ export interface AgentProfile {
   instructions: string;
 }
 
-export interface ForkSubagentInput {
-  id: string;
-  name: string;
-  role?: string;
-  instructions?: string;
-}
-
 export const defaultAgent: AgentProfile = {
   id: "primary",
   kind: "primary",
@@ -23,14 +16,3 @@ export const defaultAgent: AgentProfile = {
   role: "负责理解任务、调用工具并维护当前工作区上下文",
   instructions: "",
 };
-
-export function forkSubagent(parent: AgentProfile, input: ForkSubagentInput): AgentProfile {
-  return {
-    id: input.id,
-    kind: "subagent",
-    parentId: parent.id,
-    name: input.name.trim() || `${parent.name} Subagent`,
-    role: input.role?.trim() || parent.role,
-    instructions: input.instructions?.trim() || parent.instructions,
-  };
-}

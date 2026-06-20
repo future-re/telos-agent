@@ -14,6 +14,19 @@ Codex-style full-screen terminal interface for [telos-agent](https://github.com/
 - **Memory and CodeIndex integration** — project memory is registered by default; code search uses a local `.telos/index/code_index.json`
 - **Session persistence** — auto-saved to `.telos/sessions/`
 
+## Installation
+
+```bash
+# From PyPI
+pip install telos-cli
+
+# Or from crates.io
+cargo install telos-cli
+
+# Verify the command is available
+telos --help
+```
+
 ## Usage
 
 API key 通过环境变量传入（推荐），cli 也支持交互式输入和 `--api-key` 标志。

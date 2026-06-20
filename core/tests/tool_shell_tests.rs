@@ -66,6 +66,7 @@ async fn cancelling_during_bash_tool_kills_running_command() {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         let still_running = std::process::Command::new("kill")
             .args(["-0", &pid.to_string()])
+            .stderr(std::process::Stdio::null())
             .status()
             .map(|status| status.success())
             .unwrap_or(false);
@@ -136,6 +137,7 @@ async fn cancelling_during_bash_tool_kills_child_processes() {
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     let still_running = std::process::Command::new("kill")
         .args(["-0", &child_pid.to_string()])
+        .stderr(std::process::Stdio::null())
         .status()
         .map(|status| status.success())
         .unwrap_or(false);

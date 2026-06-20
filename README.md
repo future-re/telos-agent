@@ -11,8 +11,14 @@ Repository: <https://github.com/future-re/telos-agent>
 ### CLI
 
 ```bash
-# 从 crates.io 安装
+# 从 PyPI 安装（推荐给 Python 用户）
+pip install telos-cli
+
+# 或从 crates.io 安装
 cargo install telos-cli
+
+# 查看命令帮助
+telos --help
 
 # 设置环境变量（推荐）
 export DEEPSEEK_API_KEY=sk-...

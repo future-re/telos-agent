@@ -1,0 +1,31 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "telos-cli"
+dynamic = ["version"]
+description = "Terminal interface for telos-agent"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+keywords = ["agent", "ai", "cli", "llm", "terminal"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Rust",
+    "Topic :: Software Development",
+    "Topic :: Terminals",
+]
+
+[project.urls]
+Repository = "https://github.com/future-re/telos-agent"
+Changelog = "https://github.com/future-re/telos-agent/blob/main/CHANGELOG.md"
+
+[tool.maturin]
+manifest-path = "cli/Cargo.toml"
+bindings = "bin"
+strip = true
+sdist-include = ["Cargo.lock", "Cargo.toml", "core/**/*", "cli/**/*", "LICENSE", "README.md"]

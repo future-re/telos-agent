@@ -59,7 +59,9 @@ fn task_status_rank(status: &telos_agent::TaskStatus) -> u8 {
         telos_agent::TaskStatus::Pending => 0,
         telos_agent::TaskStatus::InProgress => 1,
         telos_agent::TaskStatus::Completed => 2,
-        telos_agent::TaskStatus::Deleted => 3,
+        telos_agent::TaskStatus::Failed => 3,
+        telos_agent::TaskStatus::Cancelled => 4,
+        telos_agent::TaskStatus::Deleted => 5,
     }
 }
 
@@ -68,6 +70,8 @@ fn task_status_label(status: &telos_agent::TaskStatus) -> &'static str {
         telos_agent::TaskStatus::Pending => "pending",
         telos_agent::TaskStatus::InProgress => "in_progress",
         telos_agent::TaskStatus::Completed => "completed",
+        telos_agent::TaskStatus::Failed => "failed",
+        telos_agent::TaskStatus::Cancelled => "cancelled",
         telos_agent::TaskStatus::Deleted => "deleted",
     }
 }
@@ -77,6 +81,8 @@ fn task_status_marker(status: &telos_agent::TaskStatus) -> &'static str {
         telos_agent::TaskStatus::Pending => "◦",
         telos_agent::TaskStatus::InProgress => "•",
         telos_agent::TaskStatus::Completed => "✓",
+        telos_agent::TaskStatus::Failed => "!",
+        telos_agent::TaskStatus::Cancelled => "-",
         telos_agent::TaskStatus::Deleted => "×",
     }
 }
@@ -102,6 +108,11 @@ mod tests {
             blocked_by: vec![],
             blocks: vec![],
             output: None,
+            kind: None,
+            agent_id: None,
+            agent_type: None,
+            worktree_path: None,
+            error: None,
         };
         std::fs::write(
             missing.join("task_valid.json"),
@@ -131,6 +142,11 @@ mod tests {
                 blocked_by: vec![],
                 blocks: vec![],
                 output: None,
+                kind: None,
+                agent_id: None,
+                agent_type: None,
+                worktree_path: None,
+                error: None,
             },
             telos_agent::Task {
                 id: "task_b".into(),
@@ -140,6 +156,11 @@ mod tests {
                 blocked_by: vec!["task_a".into()],
                 blocks: vec![],
                 output: None,
+                kind: None,
+                agent_id: None,
+                agent_type: None,
+                worktree_path: None,
+                error: None,
             },
             telos_agent::Task {
                 id: "task_c".into(),
@@ -149,6 +170,11 @@ mod tests {
                 blocked_by: vec![],
                 blocks: vec![],
                 output: None,
+                kind: None,
+                agent_id: None,
+                agent_type: None,
+                worktree_path: None,
+                error: None,
             },
         ];
 

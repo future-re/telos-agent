@@ -52,6 +52,7 @@ pub struct ResolvedDesktopSettings {
     pub instructions_file: Option<String>,
 }
 
+#[allow(dead_code)] // Used by Tauri commands on desktop targets; Linux test builds compile this module alone.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryOverview {
@@ -62,6 +63,7 @@ pub struct MemoryOverview {
     pub recent: Vec<MemoryPreview>,
 }
 
+#[allow(dead_code)] // Used through MemoryOverview serialization for the desktop frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryBucket {
@@ -69,6 +71,7 @@ pub struct MemoryBucket {
     pub count: usize,
 }
 
+#[allow(dead_code)] // Used through MemoryOverview serialization for the desktop frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryPreview {
@@ -264,6 +267,7 @@ pub fn resolve_desktop_settings(
     })
 }
 
+#[allow(dead_code)] // Called by Tauri command wrappers on supported desktop targets.
 pub fn save_deepseek_api_key(api_key: &str) -> Result<ResolvedDesktopSettings, String> {
     let trimmed = api_key.trim();
     if trimmed.is_empty() {
@@ -293,6 +297,7 @@ pub fn save_deepseek_api_key(api_key: &str) -> Result<ResolvedDesktopSettings, S
     resolve_desktop_settings(&DesktopSettingsOverrides::default())
 }
 
+#[allow(dead_code)] // Called by Tauri command wrappers on supported desktop targets.
 pub fn memory_overview(overrides: &DesktopSettingsOverrides) -> Result<MemoryOverview, String> {
     let resolved = resolve_desktop_settings(overrides)?;
     let store = telos_agent::MemoryStore::new(resolved.memory_root.clone());
@@ -336,6 +341,7 @@ pub fn memory_overview(overrides: &DesktopSettingsOverrides) -> Result<MemoryOve
     })
 }
 
+#[allow(dead_code)] // Helper for memory_overview on supported desktop targets.
 fn memory_preview(entry: &MemoryEntry) -> MemoryPreview {
     MemoryPreview {
         name: entry.name.clone(),
@@ -348,6 +354,7 @@ fn memory_preview(entry: &MemoryEntry) -> MemoryPreview {
     }
 }
 
+#[allow(dead_code)] // Helper for memory_overview on supported desktop targets.
 fn memory_category_label(category: &MemoryCategory) -> &'static str {
     match category {
         MemoryCategory::Script => "脚本",
@@ -358,6 +365,7 @@ fn memory_category_label(category: &MemoryCategory) -> &'static str {
     }
 }
 
+#[allow(dead_code)] // Helper for memory_overview on supported desktop targets.
 fn memory_status_label(status: &MemoryStatus) -> &'static str {
     match status {
         MemoryStatus::Working => "可用",
@@ -366,6 +374,7 @@ fn memory_status_label(status: &MemoryStatus) -> &'static str {
     }
 }
 
+#[allow(dead_code)] // Helper for memory_overview on supported desktop targets.
 fn memory_preview_status(entry: &MemoryEntry) -> &'static str {
     if is_auto_tool_error_memory(entry) {
         return "执行记录";
@@ -373,6 +382,7 @@ fn memory_preview_status(entry: &MemoryEntry) -> &'static str {
     memory_status_label(&entry.status)
 }
 
+#[allow(dead_code)] // Helper for memory_overview on supported desktop targets.
 fn is_auto_tool_error_memory(entry: &MemoryEntry) -> bool {
     entry.tags.iter().any(|tag| tag == "tool-error")
         || (entry.tags.iter().any(|tag| tag == "error")
@@ -401,6 +411,7 @@ fn prepare_desktop_runtime(
     telos_agent::register_core_tools(&mut tools);
     let task_manager =
         Arc::new(telos_agent::TaskManager::new(project_root_or_cwd.join(".telos").join("tasks")));
+    agent_config.task_manager = Some(task_manager.clone());
     telos_agent::register_task_tools(&mut tools, task_manager);
 
     telos_agent::register_memory_tools(&mut tools, memory_store.clone());

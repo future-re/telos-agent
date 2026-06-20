@@ -1,9 +1,76 @@
 mod common;
 
+use async_trait::async_trait;
 use serde_json::json;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
+use common::HangingStreamProvider;
+use telos_agent::tool::FileReadState;
 use telos_agent::*;
+
+fn tool_context(cwd: std::path::PathBuf) -> ToolContext {
+    ToolContext {
+        session_id: "test-session".into(),
+        turn_id: 1,
+        tool_call_id: Some("call-1".into()),
+        cwd,
+        env: HashMap::new(),
+        messages: Arc::new(Vec::new()),
+        progress: None,
+        read_file_state: FileReadState::default(),
+        timeout: None,
+        max_file_read_bytes: 50 * 1024 * 1024,
+    }
+}
+
+struct CwdProbeTool {
+    seen: Arc<Mutex<Option<PathBuf>>>,
+}
+
+#[async_trait]
+impl Tool for CwdProbeTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "cwd_probe".into(),
+            description: "Record the tool cwd for tests.".into(),
+            input_schema: json!({"type": "object", "properties": {}}),
+        }
+    }
+
+    async fn invoke(
+        &self,
+        _arguments: serde_json::Value,
+        context: ToolContext,
+    ) -> Result<ToolOutput, AgentError> {
+        *self.seen.lock().await = Some(context.cwd.clone());
+        Ok(ToolOutput::text(context.cwd.display().to_string()))
+    }
+}
+
+fn init_git_repo(path: &Path) {
+    let run = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(path)
+            .output()
+            .unwrap_or_else(|err| panic!("failed to run git {args:?}: {err}"));
+        assert!(
+            output.status.success(),
+            "git {args:?} failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    run(&["init"]);
+    run(&["config", "user.email", "test@example.com"]);
+    run(&["config", "user.name", "Test User"]);
+    std::fs::write(path.join("README.md"), "test repo\n").unwrap();
+    run(&["add", "README.md"]);
+    run(&["commit", "-m", "init"]);
+}
 
 #[test]
 fn subagent_tool_runs_in_process_agent() {
@@ -128,6 +195,212 @@ fn subagent_fork_mode_runs_multiple_lenses() {
             "expected performance result, got: {text}"
         );
     });
+}
+
+#[tokio::test]
+async fn subagent_background_mode_records_task_output() {
+    let task_dir = tempfile::tempdir().unwrap();
+    let task_manager = Arc::new(TaskManager::new(task_dir.path().to_path_buf()));
+    let inner_provider = Arc::new(MockProvider::new(vec![CompletionResponse {
+        message: Message::assistant("background inner answer"),
+        stop_reason: StopReason::EndTurn,
+        usage: None,
+    }]));
+    let tool = SubagentTool::new(
+        inner_provider,
+        ToolRegistry::new(),
+        AgentConfig { task_manager: Some(task_manager.clone()), ..AgentConfig::default() },
+    );
+
+    let output = tool
+        .invoke(
+            json!({
+                "description": "Background solve",
+                "prompt": "solve inside",
+                "run_in_background": true
+            }),
+            tool_context(std::env::current_dir().unwrap()),
+        )
+        .await
+        .unwrap()
+        .content;
+
+    assert_eq!(output["status"], "async_launched");
+    assert_eq!(output["agent_type"], "general-purpose");
+    let task_id = output["task_id"].as_str().unwrap();
+
+    let mut completed = None;
+    for _ in 0..50 {
+        if let Some(task) = task_manager.get(task_id)
+            && task.status == TaskStatus::Completed
+        {
+            completed = Some(task);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    let task = completed.expect("background task should complete");
+    assert_eq!(task.output.as_deref(), Some("background inner answer"));
+    assert_eq!(task.kind.as_deref(), Some("subagent"));
+    assert_eq!(task.agent_id.as_deref(), Some(task_id));
+    assert_eq!(task.agent_type.as_deref(), Some("general-purpose"));
+}
+
+#[tokio::test]
+async fn subagent_background_worktree_records_task_path() {
+    let repo = tempfile::tempdir().unwrap();
+    init_git_repo(repo.path());
+    let task_dir = tempfile::tempdir().unwrap();
+    let task_manager = Arc::new(TaskManager::new(task_dir.path().to_path_buf()));
+    let provider = Arc::new(MockProvider::new(vec![CompletionResponse {
+        message: Message::assistant("background worktree answer"),
+        stop_reason: StopReason::EndTurn,
+        usage: None,
+    }]));
+    let tool = SubagentTool::new(
+        provider,
+        ToolRegistry::new(),
+        AgentConfig { task_manager: Some(task_manager.clone()), ..AgentConfig::default() },
+    );
+
+    let output = tool
+        .invoke(
+            json!({
+                "description": "Background worktree",
+                "prompt": "solve in isolation",
+                "run_in_background": true,
+                "isolation": "worktree"
+            }),
+            tool_context(repo.path().to_path_buf()),
+        )
+        .await
+        .unwrap()
+        .content;
+
+    let task_id = output["task_id"].as_str().unwrap();
+    let worktree_path =
+        output["worktree_path"].as_str().expect("launch result should include worktree path");
+    assert!(Path::new(worktree_path).exists());
+
+    let mut completed = None;
+    for _ in 0..50 {
+        if let Some(task) = task_manager.get(task_id)
+            && task.status == TaskStatus::Completed
+        {
+            completed = Some(task);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    let task = completed.expect("background worktree task should complete");
+    assert_eq!(task.output.as_deref(), Some("background worktree answer"));
+    assert_eq!(task.worktree_path.as_deref(), Some(worktree_path));
+}
+
+#[tokio::test]
+async fn subagent_background_task_can_be_stopped() {
+    let task_dir = tempfile::tempdir().unwrap();
+    let task_manager = Arc::new(TaskManager::new(task_dir.path().to_path_buf()));
+    let polled = Arc::new(tokio::sync::Notify::new());
+    let provider = Arc::new(HangingStreamProvider { polled: polled.clone() });
+    let tool = SubagentTool::new(
+        provider,
+        ToolRegistry::new(),
+        AgentConfig { task_manager: Some(task_manager.clone()), ..AgentConfig::default() },
+    );
+
+    let output = tool
+        .invoke(
+            json!({
+                "description": "Long worker",
+                "prompt": "wait inside",
+                "run_in_background": true
+            }),
+            tool_context(std::env::current_dir().unwrap()),
+        )
+        .await
+        .unwrap()
+        .content;
+    let task_id = output["task_id"].as_str().unwrap().to_string();
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), polled.notified())
+        .await
+        .expect("background provider should start");
+
+    let stop = TaskStopTool::new(task_manager.clone())
+        .invoke(json!({"task_id": task_id}), tool_context(std::env::current_dir().unwrap()))
+        .await
+        .unwrap()
+        .content;
+    assert_eq!(stop["status"], "cancelled");
+
+    let mut cancelled = None;
+    for _ in 0..50 {
+        if let Some(task) = task_manager.get(output["task_id"].as_str().unwrap())
+            && task.status == TaskStatus::Cancelled
+        {
+            cancelled = Some(task);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    let task = cancelled.expect("background task should be cancelled");
+    assert_eq!(task.kind.as_deref(), Some("subagent"));
+    assert_eq!(task.agent_type.as_deref(), Some("general-purpose"));
+}
+
+#[tokio::test]
+async fn subagent_worktree_isolation_runs_child_tools_in_worktree() {
+    let repo = tempfile::tempdir().unwrap();
+    init_git_repo(repo.path());
+    let seen_cwd = Arc::new(Mutex::new(None));
+    let mut child_tools = ToolRegistry::new();
+    child_tools.register(CwdProbeTool { seen: seen_cwd.clone() });
+    let provider = Arc::new(MockProvider::new(vec![
+        CompletionResponse {
+            message: Message {
+                role: Role::Assistant,
+                blocks: vec![ContentBlock::ToolCall(ToolCall {
+                    id: "probe-1".into(),
+                    name: "cwd_probe".into(),
+                    arguments: json!({}),
+                })],
+            },
+            stop_reason: StopReason::ToolUse,
+            usage: None,
+        },
+        CompletionResponse {
+            message: Message::assistant("worktree done"),
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+        },
+    ]));
+    let tool = SubagentTool::new(provider, child_tools, AgentConfig::default());
+
+    let output = tool
+        .invoke(
+            json!({
+                "description": "Worktree probe",
+                "prompt": "record cwd",
+                "isolation": "worktree"
+            }),
+            tool_context(repo.path().to_path_buf()),
+        )
+        .await
+        .unwrap()
+        .content;
+
+    let worktree_path = output["worktree_path"].as_str().expect("worktree path should be returned");
+    let seen = seen_cwd.lock().await.clone().expect("cwd probe should run");
+    assert_eq!(seen, PathBuf::from(worktree_path));
+    assert_ne!(seen, repo.path());
+    assert!(seen.ends_with(
+        Path::new(".worktrees").join("subagents").join(output["agent_id"].as_str().unwrap())
+    ));
+    assert_eq!(output["final_text"], "worktree done");
 }
 
 #[tokio::test]

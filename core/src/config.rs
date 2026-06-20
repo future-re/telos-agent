@@ -200,6 +200,9 @@ pub struct AgentConfig {
     /// Optional plugin registry. When set, enabled plugins' components are
     /// applied to tool/hook/skill registries at session startup.
     pub plugin_registry: Option<Arc<crate::plugin::PluginRegistry>>,
+    /// Optional task manager used by long-running tools such as background
+    /// subagents to publish lifecycle state and output.
+    pub task_manager: Option<Arc<crate::tasks::TaskManager>>,
 }
 
 impl std::fmt::Debug for AgentConfig {
@@ -230,6 +233,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("max_file_read_bytes", &self.max_file_read_bytes)
             .field("skill_registry", &self.skill_registry.as_ref().map(|_| "<set>"))
             .field("plugin_registry", &self.plugin_registry.as_ref().map(|_| "<set>"))
+            .field("task_manager", &self.task_manager.as_ref().map(|_| "<set>"))
             .finish()
     }
 }
@@ -263,6 +267,7 @@ impl Default for AgentConfig {
             max_file_read_bytes: 50 * 1024 * 1024,
             skill_registry: None,
             plugin_registry: None,
+            task_manager: None,
         }
     }
 }

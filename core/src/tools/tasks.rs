@@ -44,6 +44,11 @@ impl Tool for TaskCreateTool {
             blocked_by,
             blocks: vec![],
             output: None,
+            kind: None,
+            agent_id: None,
+            agent_type: None,
+            worktree_path: None,
+            error: None,
         };
         self.manager.create(task);
         Ok(ToolOutput::json(json!({"task_id": id, "status": "created"})))
@@ -54,6 +59,17 @@ fn uuid_v4() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     format!("task_{:x}", now.as_nanos())
+}
+
+fn status_str(status: &TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Pending => "pending",
+        TaskStatus::InProgress => "in_progress",
+        TaskStatus::Completed => "completed",
+        TaskStatus::Failed => "failed",
+        TaskStatus::Cancelled => "cancelled",
+        TaskStatus::Deleted => "deleted",
+    }
 }
 
 // ── TaskGet ─────────────────────────────────────────────
@@ -82,6 +98,93 @@ impl Tool for TaskGetTool {
         match self.manager.get(id) {
             Some(task) => Ok(ToolOutput::json(serde_json::to_value(task).unwrap_or_default())),
             None => Ok(ToolOutput::json(json!({"error": "task not found"}))),
+        }
+    }
+}
+
+// ── TaskOutput ──────────────────────────────────────────
+pub struct TaskOutputTool {
+    manager: Arc<TaskManager>,
+}
+impl TaskOutputTool {
+    pub fn new(m: Arc<TaskManager>) -> Self {
+        Self { manager: m }
+    }
+}
+#[async_trait]
+impl Tool for TaskOutputTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "task_output".into(),
+            description: "Read the current status and output for a background task.".into(),
+            input_schema: json!({"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"]}),
+        }
+    }
+    fn is_concurrency_safe(&self, _: &Value) -> bool {
+        true
+    }
+    async fn invoke(&self, args: Value, _: ToolContext) -> Result<ToolOutput, AgentError> {
+        let id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+        let Some(task) = self.manager.get(id) else {
+            return Ok(ToolOutput::json(json!({"task_id": id, "error": "task not found"})));
+        };
+        Ok(ToolOutput::json(json!({
+            "task_id": task.id,
+            "subject": task.subject,
+            "description": task.description,
+            "status": status_str(&task.status),
+            "output": task.output,
+            "kind": task.kind,
+            "agent_id": task.agent_id,
+            "agent_type": task.agent_type,
+            "worktree_path": task.worktree_path,
+            "error": task.error,
+        })))
+    }
+}
+
+// ── TaskStop ────────────────────────────────────────────
+pub struct TaskStopTool {
+    manager: Arc<TaskManager>,
+}
+impl TaskStopTool {
+    pub fn new(m: Arc<TaskManager>) -> Self {
+        Self { manager: m }
+    }
+}
+#[async_trait]
+impl Tool for TaskStopTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "task_stop".into(),
+            description: "Request cancellation for a running background task.".into(),
+            input_schema: json!({"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"]}),
+        }
+    }
+    async fn invoke(&self, args: Value, _: ToolContext) -> Result<ToolOutput, AgentError> {
+        let id = args.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+        let Some(task) = self.manager.get(id) else {
+            return Ok(ToolOutput::json(json!({"task_id": id, "error": "task not found"})));
+        };
+        match task.status {
+            TaskStatus::Completed
+            | TaskStatus::Failed
+            | TaskStatus::Cancelled
+            | TaskStatus::Deleted => Ok(ToolOutput::json(json!({
+                "task_id": id,
+                "status": status_str(&task.status),
+                "stopped": false
+            }))),
+            TaskStatus::Pending | TaskStatus::InProgress => {
+                let cancellation_requested = self.manager.request_cancel(id);
+                self.manager.cancel(id, "stopped by user".into());
+                Ok(ToolOutput::json(json!({
+                    "task_id": id,
+                    "status": "cancelled",
+                    "stopped": true,
+                    "cancellation_requested": cancellation_requested
+                })))
+            }
         }
     }
 }
@@ -141,6 +244,8 @@ impl Tool for TaskUpdateTool {
             "pending" => TaskStatus::Pending,
             "in_progress" => TaskStatus::InProgress,
             "completed" => TaskStatus::Completed,
+            "failed" => TaskStatus::Failed,
+            "cancelled" => TaskStatus::Cancelled,
             "deleted" => TaskStatus::Deleted,
             _ => return Err(AgentError::Validation("invalid status".into())),
         };

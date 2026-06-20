@@ -1,0 +1,121 @@
+---
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const href = (path: string) => `${base}${path.startsWith('/') ? path : `/${path}`}`;
+
+const capabilities = [
+  {
+    title: 'Core Runtime',
+    text: 'Run the full agent turn loop with streaming events, compaction, cancellation checkpoints, and provider routing.',
+  },
+  {
+    title: 'Tools and Approvals',
+    text: 'Register shell, file, web, memory, task, and custom tools behind policy and human approval gates.',
+  },
+  {
+    title: 'MCP and Plugins',
+    text: 'Bridge MCP servers and package tools, prompt sections, skills, subagents, and marketplace metadata.',
+  },
+  {
+    title: 'CLI/TUI and Desktop',
+    text: 'Ship telos as an installable CLI today and reuse the same runtime shape for the desktop client.',
+  },
+];
+
+const docs = [
+  ['Quick Start', '/docs/quick-start/'],
+  ['Library API Guide', '/docs/library-api/'],
+  ['CLI Guide', '/docs/cli-guide/'],
+  ['Configuration', '/docs/configuration/'],
+  ['Plugins and MCP', '/docs/plugins-mcp/'],
+  ['Rust API Reference', '/api/rust/telos_agent/'],
+];
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="telos is a Rust agent runtime for tool execution, CLI workflows, MCP, plugins, and product clients."
+    />
+    <title>telos - Rust agent runtime</title>
+    <link rel="icon" href={href('/favicon.svg')} />
+  </head>
+  <body class="landing">
+    <header class="site-header">
+      <a class="brand" href={href('/')}>telos</a>
+      <nav aria-label="Primary">
+        <a href={href('/docs/introduction/')}>Docs</a>
+        <a href={href('/api/rust/telos_agent/')}>API</a>
+        <a href={href('/docs/cli-guide/')}>CLI</a>
+        <a href="https://github.com/future-re/telos-agent">GitHub</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Rust agent runtime for tool execution</p>
+          <h1>Build agent clients that can think, call tools, and recover.</h1>
+          <p class="hero-text">
+            telos packages the complete turn loop: model providers, tool registry,
+            approvals, MCP bridge, memory, plugins, subagents, and an installable CLI/TUI.
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href={href('/docs/quick-start/')}>Quick Start</a>
+            <a class="button secondary" href={href('/api/rust/telos_agent/')}>Rust API Docs</a>
+          </div>
+        </div>
+
+        <div class="terminal-stack" aria-label="Install and API examples">
+          <div class="terminal-panel">
+            <div class="panel-title">Install</div>
+            <pre><code>cargo install telos-cli
+cargo add telos_agent</code></pre>
+          </div>
+          <div class="terminal-panel">
+            <div class="panel-title">Core loop</div>
+            <pre><code>let mut session = AgentSession::new(config)?;
+tools.register(my_tool);
+session.run_turn(&provider, &tools, prompt).await?;</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="capabilities" aria-label="Capabilities">
+        {capabilities.map((item) => (
+          <article>
+            <h2>{item.title}</h2>
+            <p>{item.text}</p>
+          </article>
+        ))}
+      </section>
+
+      <section class="flow-section">
+        <div>
+          <p class="eyebrow">Runtime flow</p>
+          <h2>User input to tool result, in one controlled loop.</h2>
+        </div>
+        <ol class="flow">
+          <li>User input</li>
+          <li>Provider call</li>
+          <li>Tool execution</li>
+          <li>Tool result</li>
+          <li>Assistant response</li>
+        </ol>
+      </section>
+
+      <section class="docs-grid">
+        <div>
+          <p class="eyebrow">Documentation</p>
+          <h2>Start with the product surface, then drop into rustdoc when you need item-level detail.</h2>
+        </div>
+        <div class="doc-links">
+          {docs.map(([label, path]) => <a href={href(path)}>{label}</a>)}
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

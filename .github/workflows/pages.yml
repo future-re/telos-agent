@@ -53,6 +53,10 @@ jobs:
         working-directory: site
         run: npm run check
 
+      - name: Check homepage i18n
+        working-directory: site
+        run: npm run check:i18n
+
       - name: Build site
         working-directory: site
         run: npm run build

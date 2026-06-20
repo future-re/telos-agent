@@ -7,7 +7,8 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "check": "astro check"
+    "check": "astro check",
+    "check:i18n": "node scripts/check-homepage-i18n.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "0.29.0",

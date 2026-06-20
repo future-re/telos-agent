@@ -17,26 +17,26 @@ export default defineConfig({
         {
           label: 'Start',
           items: [
-            { label: 'Introduction', slug: 'introduction' },
-            { label: 'Quick Start', slug: 'quick-start' },
-            { label: 'Core Concepts', slug: 'core-concepts' },
+            { label: 'Introduction', slug: 'docs/introduction' },
+            { label: 'Quick Start', slug: 'docs/quick-start' },
+            { label: 'Core Concepts', slug: 'docs/core-concepts' },
           ],
         },
         {
           label: 'Use telos',
           items: [
-            { label: 'Library API Guide', slug: 'library-api' },
-            { label: 'CLI Guide', slug: 'cli-guide' },
-            { label: 'Desktop Client', slug: 'desktop-client' },
-            { label: 'Configuration', slug: 'configuration' },
+            { label: 'Library API Guide', slug: 'docs/library-api' },
+            { label: 'CLI Guide', slug: 'docs/cli-guide' },
+            { label: 'Desktop Client', slug: 'docs/desktop-client' },
+            { label: 'Configuration', slug: 'docs/configuration' },
           ],
         },
         {
           label: 'Extend',
           items: [
-            { label: 'Plugins and MCP', slug: 'plugins-mcp' },
-            { label: 'Deployment', slug: 'deployment' },
-            { label: 'Rust API Reference', slug: 'rust-api-reference' },
+            { label: 'Plugins and MCP', slug: 'docs/plugins-mcp' },
+            { label: 'Deployment', slug: 'docs/deployment' },
+            { label: 'Rust API Reference', slug: 'docs/rust-api-reference' },
           ],
         },
       ],

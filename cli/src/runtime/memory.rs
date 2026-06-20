@@ -125,6 +125,54 @@ pub async fn record_successful_tool(
     }
 }
 
+pub async fn record_subagent_learning(store: &Arc<Mutex<MemoryStore>>, result: &ToolResult) {
+    if result.is_error || !is_subagent_result(result) {
+        return;
+    }
+    let Some(final_text) = result.content.get("final_text").and_then(|value| value.as_str()) else {
+        return;
+    };
+    let Some(learning) = extract_reusable_learning(final_text) else {
+        return;
+    };
+    let store = store.clone();
+    let tool_call_id = result.tool_call_id.clone();
+    let agent_type = result
+        .content
+        .get("agent_type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("subagent")
+        .to_string();
+    let description = result
+        .content
+        .get("description")
+        .and_then(|value| value.as_str())
+        .unwrap_or("delegated task")
+        .to_string();
+    if let Err(e) = tokio::task::spawn_blocking(move || {
+        let ts = unix_timestamp();
+        let entry = MemoryEntry {
+            name: format!("subagent-learning-{}", stable_id(&format!("{tool_call_id}:{learning}"))),
+            description: format!("Subagent learning from {agent_type}: {description}"),
+            category: MemoryCategory::Workflow,
+            tags: vec!["auto-learned".into(), "subagent".into(), agent_type.to_lowercase()],
+            created: ts.clone(),
+            updated: ts,
+            status: MemoryStatus::Working,
+            times_used: 0,
+            confidence: Some("medium".into()),
+            related: vec![],
+            source_session: None,
+            body: learning,
+        };
+        upsert_memory(&store, entry);
+    })
+    .await
+    {
+        tracing::warn!("record_subagent_learning spawn_blocking failed: {e}");
+    }
+}
+
 pub async fn record_user_preference(store: &Arc<Mutex<MemoryStore>>, prompt: &str) {
     let trimmed = prompt.trim();
     if trimmed.is_empty() || !looks_like_preference(trimmed) {
@@ -181,6 +229,35 @@ fn pretty_json(value: &serde_json::Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
 }
 
+fn is_subagent_result(result: &ToolResult) -> bool {
+    result.name == "subagent"
+        || result.content.get("kind").and_then(|value| value.as_str()) == Some("subagent")
+        || result.content.get("agent_id").is_some()
+}
+
+fn extract_reusable_learning(text: &str) -> Option<String> {
+    let lines = text.lines().collect::<Vec<_>>();
+    let start = lines.iter().position(|line| {
+        let normalized =
+            line.trim().trim_matches('#').trim().trim_end_matches(':').to_ascii_lowercase();
+        normalized == "reusable learning"
+    })?;
+    let mut collected = Vec::new();
+    for line in lines.iter().skip(start + 1) {
+        let trimmed = line.trim();
+        let is_next_heading = trimmed.starts_with('#')
+            || (trimmed.ends_with(':')
+                && !trimmed.starts_with('-')
+                && !trimmed.eq_ignore_ascii_case("reusable learning:"));
+        if is_next_heading && !collected.is_empty() {
+            break;
+        }
+        collected.push(*line);
+    }
+    let learning = collected.join("\n").trim().to_string();
+    if learning.is_empty() { None } else { Some(learning) }
+}
+
 fn stable_id(input: &str) -> String {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in input.as_bytes() {
@@ -227,5 +304,53 @@ mod tests {
         assert!(store.read("auto-00").is_none());
         assert!(store.read("auto-20").is_some());
         assert!(root.join("_archived").join("auto-00.md").exists());
+    }
+
+    #[tokio::test]
+    async fn record_subagent_learning_writes_reusable_learning_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Mutex::new(MemoryStore::new(dir.path().to_path_buf())));
+        let result = ToolResult {
+            tool_call_id: "call-1".into(),
+            name: "subagent".into(),
+            is_error: false,
+            content: serde_json::json!({
+                "agent_id": "agent_explore_1",
+                "agent_type": "Explore",
+                "description": "Explore parser",
+                "final_text": "Outcome: done\n\nReusable learning:\n- Parser tests live in core/tests/parser_tests.rs.\n- Use cargo test -p telos_agent parser."
+            }),
+        };
+
+        record_subagent_learning(&store, &result).await;
+
+        let store = store.lock().unwrap();
+        let memories = store.list();
+        assert_eq!(memories.len(), 1);
+        let memory = store.read(&memories[0]).expect("memory should be readable");
+        assert_eq!(memory.category, MemoryCategory::Workflow);
+        assert!(memory.tags.contains(&"subagent".into()));
+        assert!(memory.body.contains("Parser tests live"));
+        assert!(!memory.body.contains("Outcome: done"));
+    }
+
+    #[tokio::test]
+    async fn record_subagent_learning_ignores_plain_subagent_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Mutex::new(MemoryStore::new(dir.path().to_path_buf())));
+        let result = ToolResult {
+            tool_call_id: "call-1".into(),
+            name: "subagent".into(),
+            is_error: false,
+            content: serde_json::json!({
+                "agent_id": "agent_explore_1",
+                "agent_type": "Explore",
+                "final_text": "Outcome: done"
+            }),
+        };
+
+        record_subagent_learning(&store, &result).await;
+
+        assert!(store.lock().unwrap().list().is_empty());
     }
 }

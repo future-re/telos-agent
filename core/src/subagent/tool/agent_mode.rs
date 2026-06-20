@@ -107,7 +107,7 @@ impl SubagentTool {
                     &agent,
                     &agent_id_for_task,
                     prompt,
-                    system_prompt,
+                    build_subagent_system_prompt(&agent, &system_prompt),
                     max_iterations,
                     &mut child_context,
                 )
@@ -147,7 +147,7 @@ impl SubagentTool {
             agent,
             &agent_id,
             effective_prompt,
-            system_prompt,
+            build_subagent_system_prompt(agent, &system_prompt),
             max_iterations,
             &mut context,
         )
@@ -226,7 +226,53 @@ pub(super) fn filter_tools_for_agent(
     tools: &ToolRegistry,
     agent: &AgentDefinition,
 ) -> ToolRegistry {
-    tools.filtered(&agent.allowed_tools, &agent.disallowed_tools)
+    let mut allowed = agent.allowed_tools.clone();
+    if !agent.skills.is_empty() {
+        add_implicit_allowed_tool(&mut allowed, "Skill");
+    }
+    for tool in ["MemoryRead", "MemoryGrep", "MemoryWrite"] {
+        add_implicit_allowed_tool(&mut allowed, tool);
+    }
+    tools.filtered(&allowed, &agent.disallowed_tools)
+}
+
+fn add_implicit_allowed_tool(allowed: &mut Vec<String>, tool: &str) {
+    if allowed.is_empty() || allowed.iter().any(|item| item == "*" || item == tool) {
+        return;
+    }
+    allowed.push(tool.to_string());
+}
+
+fn build_subagent_system_prompt(agent: &AgentDefinition, base_system_prompt: &str) -> String {
+    let mut sections = vec![base_system_prompt.trim().to_string()];
+
+    if !agent.skills.is_empty() {
+        sections.push(format!(
+            "# Subagent Skills\nDeclared skills: {}.\nBefore doing substantive work, call the Skill tool once for each declared skill that applies to this task. If a declared skill is unavailable, continue with the best local approach and mention the missing skill in your final result.",
+            agent.skills.join(", ")
+        ));
+    }
+
+    sections.push(
+        [
+            "# Subagent Learning",
+            "Use available memory tools to read relevant memory before relying on assumptions when the delegated task references prior project behavior, user preferences, recurring commands, or known workflows.",
+            "When the task reveals a durable preference, reusable command, workflow, project fact, or non-obvious implementation pattern, include a `Reusable learning` section in the final answer with concise memory-worthy notes.",
+            "Do not write noisy memory for one-off observations. Prefer exact file paths, commands, failure modes, and verification evidence.",
+        ]
+        .join("\n"),
+    );
+
+    sections.push(
+        [
+            "# Subagent Output Contract",
+            "Return only the delegated result. Include: outcome, key files or commands, verification performed, blockers or uncertainty, and any `Reusable learning` notes.",
+            "Keep results compact so the parent agent can merge your findings without losing context.",
+        ]
+        .join("\n"),
+    );
+
+    sections.join("\n\n")
 }
 
 fn new_agent_id(agent_type: &str) -> String {

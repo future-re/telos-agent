@@ -199,6 +199,7 @@ async fn record_memory_from_event(
         }
         telos_agent::TurnEvent::ToolResult(message) => {
             for result in message.tool_results_iter() {
+                telos_cli::memory_runtime::record_subagent_learning(memory_store, result).await;
                 if result.is_error {
                     telos_cli::memory_runtime::record_tool_error(
                         memory_store,

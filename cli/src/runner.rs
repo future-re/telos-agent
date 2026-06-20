@@ -184,6 +184,7 @@ async fn run_with_provider<P: telos_agent::ModelProvider>(
             }
             Ok(telos_agent::TurnEvent::ToolResult(message)) => {
                 for result in message.tool_results_iter() {
+                    crate::memory_runtime::record_subagent_learning(&memory_store, result).await;
                     if result.is_error {
                         crate::memory_runtime::record_tool_error(
                             &memory_store,

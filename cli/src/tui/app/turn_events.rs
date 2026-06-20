@@ -54,6 +54,7 @@ impl App {
             }
             TurnEvent::ToolResult(message) => {
                 for result in message.tool_results_iter() {
+                    crate::memory_runtime::record_subagent_learning(&self.memory, result).await;
                     self.tool_activity.add_result_content(
                         &result.tool_call_id,
                         &result.content,

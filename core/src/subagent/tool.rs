@@ -106,9 +106,11 @@ impl Tool for SubagentTool {
             "Use the Subagent tool to delegate self-contained tasks, run parallel explore lenses, or protect the main context window. \
 Provide a clear 3-5 word description and a self-contained prompt with scope, relevant files, constraints, and expected output. \
 Use subagent_type to choose a specialized agent when appropriate: general-purpose, Explore, Plan, or Verification. \
+Prefer subagents whose declared skills match the work; the child agent will load those skills with the Skill tool. \
 For independent research or verification, launch multiple subagent calls in the same assistant message so they can run in parallel. \
 Use run_in_background for long-running work, then inspect results with task_output or stop it with task_stop. \
 Use isolation: worktree for write-heavy work that should not touch the parent checkout. \
+Ask subagents to return reusable learning when the result contains durable memory-worthy facts, commands, workflows, or preferences. \
 Do not duplicate work already being performed in the parent session.",
         )
     }
@@ -345,6 +347,20 @@ mod tests {
         assert!(prompt.contains("isolation: worktree"));
     }
 
+    #[test]
+    fn subagent_prompt_text_describes_skill_and_learning_controls() {
+        let tool = SubagentTool::new(
+            Arc::new(MockProvider::new(vec![])),
+            ToolRegistry::new(),
+            AgentConfig::default(),
+        );
+        let prompt = tool.prompt_text().unwrap();
+        assert!(prompt.contains("skills"));
+        assert!(prompt.contains("Skill"));
+        assert!(prompt.contains("learning"));
+        assert!(prompt.contains("memory"));
+    }
+
     #[tokio::test]
     async fn subagent_type_selects_agent_prompt_and_result_metadata() {
         let provider = Arc::new(MockProvider::new(vec![crate::provider::CompletionResponse {
@@ -421,6 +437,75 @@ mod tests {
             .text_content();
         assert!(user_text.starts_with("Read CONTRIBUTING.md first."));
         assert!(user_text.contains("Inspect parser"));
+    }
+
+    #[tokio::test]
+    async fn subagent_declared_skills_are_injected_into_system_prompt() {
+        let provider = Arc::new(MockProvider::new(vec![crate::provider::CompletionResponse {
+            message: crate::Message::assistant("done"),
+            stop_reason: crate::provider::StopReason::EndTurn,
+            usage: None,
+        }]));
+        let mut registry = SubagentRegistry::new();
+        let mut agent = AgentDefinition::new(
+            "debugger",
+            "Debugging agent",
+            "You debug the delegated issue.",
+            AgentSource::BuiltIn,
+        );
+        agent.skills = vec!["debug".into(), "verify".into()];
+        registry.register(agent);
+        let tool = SubagentTool::with_registry(
+            provider.clone(),
+            ToolRegistry::new(),
+            AgentConfig::default(),
+            registry,
+        );
+
+        tool.invoke(
+            json!({
+                "description": "Debug issue",
+                "prompt": "Find the bug",
+                "subagent_type": "debugger"
+            }),
+            ToolContext::dummy(),
+        )
+        .await
+        .unwrap();
+
+        let requests = provider.requests.lock().await;
+        let system_prompt = requests[0].system_prompt.as_deref().unwrap_or_default();
+        assert!(system_prompt.contains("# Subagent Skills"), "{system_prompt}");
+        assert!(system_prompt.contains("Skill tool"), "{system_prompt}");
+        assert!(system_prompt.contains("debug"), "{system_prompt}");
+        assert!(system_prompt.contains("verify"), "{system_prompt}");
+    }
+
+    #[tokio::test]
+    async fn subagent_system_prompt_contains_learning_contract() {
+        let provider = Arc::new(MockProvider::new(vec![crate::provider::CompletionResponse {
+            message: crate::Message::assistant("done"),
+            stop_reason: crate::provider::StopReason::EndTurn,
+            usage: None,
+        }]));
+        let tool = SubagentTool::new(provider.clone(), ToolRegistry::new(), AgentConfig::default());
+
+        tool.invoke(
+            json!({
+                "description": "Explore code",
+                "prompt": "Find the runtime loop",
+                "subagent_type": "Explore"
+            }),
+            ToolContext::dummy(),
+        )
+        .await
+        .unwrap();
+
+        let requests = provider.requests.lock().await;
+        let system_prompt = requests[0].system_prompt.as_deref().unwrap_or_default();
+        assert!(system_prompt.contains("# Subagent Learning"), "{system_prompt}");
+        assert!(system_prompt.contains("memory"), "{system_prompt}");
+        assert!(system_prompt.contains("Reusable learning"), "{system_prompt}");
     }
 
     #[tokio::test]
@@ -508,5 +593,27 @@ mod tests {
 
         assert!(filtered.get("Read").is_ok());
         assert!(filtered.get("Write").is_err());
+    }
+
+    #[test]
+    fn declared_skills_keep_skill_tool_available_with_allowlist() {
+        let mut tools = ToolRegistry::new();
+        tools.register(NamedTool("Read"));
+        tools.register(NamedTool("Skill"));
+        tools.register(NamedTool("MemoryRead"));
+        tools.register(NamedTool("MemoryWrite"));
+        tools.register(NamedTool("MemoryGrep"));
+
+        let mut agent = AgentDefinition::new("skilled", "skilled", "prompt", AgentSource::BuiltIn);
+        agent.allowed_tools = vec!["Read".into()];
+        agent.skills = vec!["debug".into()];
+
+        let filtered = agent_mode::filter_tools_for_agent(&tools, &agent);
+
+        assert!(filtered.get("Read").is_ok());
+        assert!(filtered.get("Skill").is_ok());
+        assert!(filtered.get("MemoryRead").is_ok());
+        assert!(filtered.get("MemoryWrite").is_ok());
+        assert!(filtered.get("MemoryGrep").is_ok());
     }
 }

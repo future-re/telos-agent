@@ -25,6 +25,7 @@ pub fn builtin_agents() -> Vec<AgentDefinition> {
     ];
     explore.disallowed_tools = vec!["Write".into(), "Edit".into(), "subagent".into()];
     explore.max_iterations = Some(8);
+    explore.skills = vec!["explore".into()];
 
     let mut plan = AgentDefinition::new(
         "Plan",
@@ -35,6 +36,7 @@ pub fn builtin_agents() -> Vec<AgentDefinition> {
     plan.allowed_tools = explore.allowed_tools.clone();
     plan.disallowed_tools = explore.disallowed_tools.clone();
     plan.max_iterations = Some(8);
+    plan.skills = vec!["brainstorm".into(), "explore".into()];
 
     let mut verification = AgentDefinition::new(
         "Verification",
@@ -51,6 +53,7 @@ pub fn builtin_agents() -> Vec<AgentDefinition> {
         "WebSearch".into(),
     ];
     verification.max_iterations = Some(10);
+    verification.skills = vec!["verify".into()];
 
     vec![general, explore, plan, verification]
 }

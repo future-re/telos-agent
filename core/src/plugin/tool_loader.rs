@@ -234,6 +234,70 @@ mod tests {
     use serde_json::json;
     use tempfile::TempDir;
 
+    #[cfg(windows)]
+    fn powershell_test_executable() -> String {
+        for candidate in ["pwsh", "powershell"] {
+            if std::process::Command::new(candidate)
+                .args(["-NoProfile", "-NonInteractive", "-Command", "$PSVersionTable.PSVersion"])
+                .output()
+                .is_ok()
+            {
+                return candidate.into();
+            }
+        }
+        "powershell".into()
+    }
+
+    fn json_echo_command() -> (String, Vec<String>) {
+        #[cfg(windows)]
+        {
+            (
+                powershell_test_executable(),
+                vec![
+                    "-NoProfile".into(),
+                    "-NonInteractive".into(),
+                    "-Command".into(),
+                    "[Console]::Out.Write([Console]::In.ReadToEnd())".into(),
+                ],
+            )
+        }
+        #[cfg(not(windows))]
+        {
+            ("cat".into(), vec![])
+        }
+    }
+
+    fn env_probe_command() -> (String, Vec<String>) {
+        #[cfg(windows)]
+        {
+            (
+                powershell_test_executable(),
+                vec![
+                    "-NoProfile".into(),
+                    "-NonInteractive".into(),
+                    "-Command".into(),
+                    concat!(
+                        "$null = [Console]::In.ReadToEnd(); ",
+                        "$secret = if ($null -eq $env:TELOS_PLUGIN_SECRET) { '' } else { $env:TELOS_PLUGIN_SECRET }; ",
+                        "$configured = if ($null -eq $env:PLUGIN_VISIBLE) { '' } else { $env:PLUGIN_VISIBLE }; ",
+                        "[Console]::Out.Write((@{secret=$secret; configured=$configured} | ConvertTo-Json -Compress))"
+                    )
+                    .into(),
+                ],
+            )
+        }
+        #[cfg(not(windows))]
+        {
+            (
+                "/bin/sh".into(),
+                vec![
+                    "-c".into(),
+                    "cat >/dev/null; printf '{\"secret\":\"%s\",\"configured\":\"%s\"}' \"$TELOS_PLUGIN_SECRET\" \"$PLUGIN_VISIBLE\"".into(),
+                ],
+            )
+        }
+    }
+
     #[test]
     fn parse_tool_spec_minimal() {
         let json = json!({
@@ -298,11 +362,12 @@ mod tests {
             description: "Echo test".into(),
             input_schema: json!({"type": "object"}),
         };
+        let (command, args) = json_echo_command();
 
         let tool = CommandTool::new(
             definition,
-            "cat".into(),
-            vec![],
+            command,
+            args,
             HashMap::new(),
             std::time::Duration::from_secs(5),
             true,
@@ -346,14 +411,12 @@ mod tests {
             description: "Env test".into(),
             input_schema: json!({"type": "object"}),
         };
+        let (command, args) = env_probe_command();
 
         let tool = CommandTool::new(
             definition,
-            "/bin/sh".into(),
-            vec![
-                "-c".into(),
-                "cat >/dev/null; printf '{\"secret\":\"%s\",\"configured\":\"%s\"}' \"$TELOS_PLUGIN_SECRET\" \"$PLUGIN_VISIBLE\"".into(),
-            ],
+            command,
+            args,
             HashMap::from([("PLUGIN_VISIBLE".into(), "yes".into())]),
             std::time::Duration::from_secs(5),
             true,

@@ -78,6 +78,11 @@ function App() {
   }, []);
 
   const canSend = useMemo(() => prompt.trim().length > 0 && !state.running, [prompt, state.running]);
+  const providerLabel = settings.provider === "deepseek" ? "DeepSeek" : "Mock";
+  const modelLabel = settings.model?.trim() || "auto";
+  const cwdLabel = settings.cwd?.trim() || "App launch directory";
+  const approvalLabel = settings.autoApprove ? "Auto-approved" : "Manual approval";
+  const runMetadata = `${providerLabel} · ${modelLabel} · ${state.status}`;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -108,15 +113,19 @@ function App() {
     <main className="app-shell">
       <section className="workspace">
         <header className="topbar">
-          <div>
+          <div className="topbar-title">
             <h1>telos</h1>
-            <span>{state.status}</span>
+            <span>{runMetadata}</span>
           </div>
           <div className="topbar-actions">
-            <button type="button" onClick={() => setSettingsOpen((open) => !open)}>
-              Settings
+            <button
+              type="button"
+              className="secondary-action"
+              onClick={() => setSettingsOpen((open) => !open)}
+            >
+              {settingsOpen ? "Hide Panel" : "Show Panel"}
             </button>
-            <button type="button" onClick={resetSession}>
+            <button type="button" className="secondary-action" onClick={resetSession}>
               New Chat
             </button>
           </div>
@@ -125,8 +134,18 @@ function App() {
         <section className="conversation" aria-live="polite">
           {state.messages.length === 0 ? (
             <div className="empty-state">
-              <h2>Start a conversation</h2>
-              <p>Ask telos to answer questions, inspect files, or run approved tools.</p>
+              <p className="eyebrow">Agent workspace</p>
+              <h2>Start a focused session</h2>
+              <p>
+                Ask telos to inspect files, answer project questions, or run approved
+                tools. Keep provider, workspace, approvals, and live tool activity in the
+                run panel.
+              </p>
+              <div className="empty-prompts" aria-label="Example prompts">
+                <span>Review this repo</span>
+                <span>Explain the current change</span>
+                <span>Run the relevant tests</span>
+              </div>
             </div>
           ) : (
             state.messages.map((message) => (
@@ -137,17 +156,6 @@ function App() {
             ))
           )}
         </section>
-
-        {state.tools.length > 0 && (
-          <aside className="tool-strip">
-            {state.tools.map((tool) => (
-              <div className={`tool-item ${tool.status}`} key={tool.id}>
-                <strong>{tool.name}</strong>
-                <span>{tool.detail || tool.status}</span>
-              </div>
-            ))}
-          </aside>
-        )}
 
         <form className="composer" onSubmit={submit}>
           <textarea
@@ -163,70 +171,124 @@ function App() {
       </section>
 
       {settingsOpen && (
-        <aside className="settings-panel">
-          <h2>Settings</h2>
-          <label>
-            Provider
-            <select
-              value={settings.provider}
-              onChange={(event) =>
-                setSettings((current) => ({
-                  ...current,
-                  provider: event.target.value as ProviderKind,
-                }))
-              }
-            >
-              <option value="mock">Mock</option>
-              <option value="deepseek">DeepSeek</option>
-            </select>
-          </label>
-          <label>
-            API key
-            <input
-              type="password"
-              value={settings.apiKey ?? ""}
-              onChange={(event) =>
-                setSettings((current) => ({ ...current, apiKey: event.target.value }))
-              }
-              placeholder="Required for DeepSeek"
-            />
-          </label>
-          <label>
-            Model
-            <select
-              value={settings.model ?? "auto"}
-              onChange={(event) =>
-                setSettings((current) => ({ ...current, model: event.target.value }))
-              }
-            >
-              <option value="auto">Auto</option>
-              <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
-              <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
-            </select>
-          </label>
-          <label>
-            Working directory
-            <input
-              value={settings.cwd ?? ""}
-              onChange={(event) =>
-                setSettings((current) => ({ ...current, cwd: event.target.value }))
-              }
-              placeholder="Default: app launch directory"
-            />
-          </label>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={settings.autoApprove}
-              onChange={(event) =>
-                setSettings((current) => ({
-                  ...current,
-                  autoApprove: event.target.checked,
-                }))
-              }
-            />
-            Auto-approve tools
-          </label>
+        <aside className="run-panel" aria-label="Run panel">
+          <div className="run-panel-header">
+            <div>
+              <h2>Run panel</h2>
+              <p>Settings and live activity</p>
+            </div>
+            <span className={`status-pill ${state.running ? "running" : ""}`}>
+              {state.running ? "Running" : "Idle"}
+            </span>
+          </div>
+
+          <section className="summary-grid" aria-label="Run summary">
+            <div className="summary-tile">
+              <span>Provider</span>
+              <strong>{providerLabel}</strong>
+            </div>
+            <div className="summary-tile">
+              <span>Approvals</span>
+              <strong>{approvalLabel}</strong>
+            </div>
+            <div className="summary-tile wide">
+              <span>Working directory</span>
+              <strong title={cwdLabel}>{cwdLabel}</strong>
+            </div>
+          </section>
+
+          <section className="panel-section">
+            <div className="section-heading">
+              <h3>Settings</h3>
+              <span>{modelLabel}</span>
+            </div>
+            <label>
+              Provider
+              <select
+                value={settings.provider}
+                onChange={(event) =>
+                  setSettings((current) => ({
+                    ...current,
+                    provider: event.target.value as ProviderKind,
+                  }))
+                }
+              >
+                <option value="mock">Mock</option>
+                <option value="deepseek">DeepSeek</option>
+              </select>
+            </label>
+            <label>
+              API key
+              <input
+                type="password"
+                value={settings.apiKey ?? ""}
+                onChange={(event) =>
+                  setSettings((current) => ({ ...current, apiKey: event.target.value }))
+                }
+                placeholder="Required for DeepSeek"
+              />
+            </label>
+            <label>
+              Model
+              <select
+                value={settings.model ?? "auto"}
+                onChange={(event) =>
+                  setSettings((current) => ({ ...current, model: event.target.value }))
+                }
+              >
+                <option value="auto">Auto</option>
+                <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+                <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
+              </select>
+            </label>
+            <label>
+              Working directory
+              <input
+                value={settings.cwd ?? ""}
+                onChange={(event) =>
+                  setSettings((current) => ({ ...current, cwd: event.target.value }))
+                }
+                placeholder="Default: app launch directory"
+              />
+            </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={settings.autoApprove}
+                onChange={(event) =>
+                  setSettings((current) => ({
+                    ...current,
+                    autoApprove: event.target.checked,
+                  }))
+                }
+              />
+              Auto-approve tools
+            </label>
+          </section>
+
+          <section className="panel-section tool-activity">
+            <div className="section-heading">
+              <h3>Tool activity</h3>
+              <span>{state.tools.length} recent</span>
+            </div>
+            {state.tools.length === 0 ? (
+              <div className="empty-tools">
+                Tool calls will appear here while telos works.
+              </div>
+            ) : (
+              <div className="tool-list">
+                {state.tools.map((tool) => (
+                  <div className={`tool-item ${tool.status}`} key={tool.id}>
+                    <div>
+                      <strong>{tool.name}</strong>
+                      <span>{tool.detail || tool.status}</span>
+                    </div>
+                    <em>{tool.status}</em>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </aside>
       )}
     </main>

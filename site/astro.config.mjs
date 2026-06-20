@@ -8,7 +8,7 @@ export default defineConfig({
     starlight({
       title: 'telos',
       description: 'Rust agent runtime for tool execution, CLI workflows, MCP, plugins, and product clients.',
-      favicon: '/telos-agent/favicon.svg',
+      favicon: '/favicon.svg',
       customCss: ['./src/styles/global.css'],
       social: {
         github: 'https://github.com/future-re/telos-agent',

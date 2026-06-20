@@ -8,7 +8,7 @@ use crate::tui::approval::PendingApproval;
 use crate::tui::overlay::truncate_for_popup;
 use crate::tui::theme::Theme;
 
-pub const INLINE_APPROVAL_HEIGHT: u16 = 4;
+pub const INLINE_APPROVAL_HEIGHT: u16 = 6;
 
 pub fn approval_lines(pending: &PendingApproval, width: usize) -> Vec<String> {
     let request = &pending.request;
@@ -123,5 +123,12 @@ mod tests {
 
         assert!(text.contains("needs review"));
         assert!(text.contains("src/main.rs"));
+    }
+
+    #[test]
+    fn panel_height_fits_content_and_borders() {
+        let lines = approval_lines(&pending("Bash", json!({ "command": "pwd && ls -la" })), 80);
+
+        assert!(usize::from(INLINE_APPROVAL_HEIGHT) >= lines.len() + 2);
     }
 }

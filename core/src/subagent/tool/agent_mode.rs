@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 use crate::config::CancellationState;
 use crate::error::AgentError;
 use crate::runtime::{AgentSession, TurnEvent};
-use crate::subagent::AgentDefinition;
 use crate::subagent::tool::SubagentTool;
+use crate::subagent::{AgentDefinition, create_subagent_worktree};
 use crate::tasks::{Task, TaskStatus};
 use crate::tool::{ToolContext, ToolOutput, ToolProgress, ToolRegistry};
 
@@ -48,12 +48,22 @@ impl SubagentTool {
             .and_then(|value| value.as_u64())
             .or(agent.max_iterations.map(|value| value as u64))
             .map(|value| value.max(1) as usize);
+        let worktree_path = if matches!(
+            arguments.get("isolation").and_then(|value| value.as_str()),
+            Some("worktree")
+        ) {
+            Some(create_subagent_worktree(&context.cwd, &agent_id)?.path)
+        } else {
+            None
+        };
 
         if arguments.get("run_in_background").and_then(|value| value.as_bool()).unwrap_or(false) {
             let task_manager = self.config.task_manager.clone().ok_or_else(|| {
                 AgentError::Validation("run_in_background requires AgentConfig.task_manager".into())
             })?;
             let agent_type_name = agent.name.clone();
+            let worktree_path_string =
+                worktree_path.as_ref().map(|path| path.display().to_string());
             let cancellation = CancellationState::new();
             let task = Task {
                 id: agent_id.clone(),
@@ -66,7 +76,7 @@ impl SubagentTool {
                 kind: Some("subagent".into()),
                 agent_id: Some(agent_id.clone()),
                 agent_type: Some(agent_type_name.clone()),
-                worktree_path: None,
+                worktree_path: worktree_path_string.clone(),
                 error: None,
             };
             task_manager.create(task);
@@ -75,6 +85,9 @@ impl SubagentTool {
             let provider = self.provider.clone();
             let tools = self.tools.clone();
             let mut child_context = context.clone();
+            if let Some(worktree_path) = worktree_path.clone() {
+                child_context.cwd = worktree_path;
+            }
             let agent = agent.clone();
             let mut config = self.config.clone();
             let task_manager_for_task = task_manager.clone();
@@ -114,10 +127,15 @@ impl SubagentTool {
                 "agent_type": agent_type_name,
                 "description": description,
                 "status": "async_launched",
+                "worktree_path": worktree_path_string,
             })));
         }
 
         let mut context = context;
+        let worktree_path_string = worktree_path.as_ref().map(|path| path.display().to_string());
+        if let Some(worktree_path) = worktree_path {
+            context.cwd = worktree_path;
+        }
         let result = run_child_agent(
             self.provider.clone(),
             self.tools.clone(),
@@ -139,6 +157,7 @@ impl SubagentTool {
             "session_id": result.session_id,
             "final_text": result.final_text,
             "event_count": result.event_count,
+            "worktree_path": worktree_path_string,
         })))
     }
 }

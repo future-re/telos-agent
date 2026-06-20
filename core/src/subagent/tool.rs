@@ -123,12 +123,6 @@ Do not duplicate work already being performed in the parent session.",
             ));
         }
 
-        if matches!(arguments.get("isolation").and_then(|value| value.as_str()), Some("worktree")) {
-            return Err(AgentError::Validation(
-                "worktree isolation is not supported by the in-process SubagentTool yet".into(),
-            ));
-        }
-
         if let Some(agent_type) = arguments.get("subagent_type").and_then(|v| v.as_str())
             && self.registry.get(agent_type).is_none()
         {
@@ -145,6 +139,17 @@ Do not duplicate work already being performed in the parent session.",
         }
 
         let mode = arguments.get("mode").and_then(|v| v.as_str()).unwrap_or("agent");
+
+        if mode == "fork"
+            && matches!(
+                arguments.get("isolation").and_then(|value| value.as_str()),
+                Some("worktree")
+            )
+        {
+            return Err(AgentError::Validation(
+                "worktree isolation is only supported in agent mode".into(),
+            ));
+        }
 
         if mode == "fork" {
             let forks = arguments

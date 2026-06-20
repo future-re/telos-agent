@@ -5,6 +5,7 @@ pub mod definition;
 pub mod fork;
 pub mod registry;
 mod tool;
+pub mod worktree;
 
 use std::sync::Arc;
 
@@ -17,6 +18,7 @@ pub use definition::{AgentDefinition, AgentIsolation, AgentSource};
 pub use fork::{ForkExecution, ForkLens, ForkResult, ForkShared, Synapse};
 pub use registry::SubagentRegistry;
 pub use tool::SubagentTool;
+pub use worktree::{WorktreeInfo, create_subagent_worktree};
 
 /// Register the in-process subagent tool with built-in and plugin-provided agent definitions.
 pub fn register_subagent_tool(

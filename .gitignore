@@ -2,6 +2,9 @@
 /desktop/node_modules/
 /desktop/dist/
 /desktop/.vite/
+/site/node_modules/
+/site/dist/
+/site/.astro/
 .vscode
 .env
 cobertura.xml

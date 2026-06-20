@@ -1,0 +1,21 @@
+:root {
+  --sl-color-accent-low: #163822;
+  --sl-color-accent: #2fbf71;
+  --sl-color-accent-high: #d6f7e1;
+  --sl-color-white: #f8f3e8;
+  --sl-color-gray-1: #ece4d5;
+  --sl-color-gray-2: #cfc6b8;
+  --sl-color-gray-3: #9d9589;
+  --sl-color-gray-4: #605c55;
+  --sl-color-gray-5: #383a39;
+  --sl-color-gray-6: #242725;
+  --sl-color-black: #101214;
+}
+
+html {
+  background: #101214;
+}
+
+body {
+  letter-spacing: 0;
+}

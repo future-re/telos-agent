@@ -21,12 +21,13 @@ impl App {
                     return Ok(());
                 }
                 if is_ctrl_char(key, 'c') {
-                    self.cancellation.cancel();
-                    self.turn_active = false;
-                    self.turn_started = None;
-                    self.mode = Mode::Normal;
-                    self.input.clear();
-                    self.status_text = self.base_status.clone();
+                    if self.turn_active {
+                        self.cancellation.cancel();
+                        self.chat.finish_streaming_cells();
+                        self.mode = Mode::Normal;
+                        self.input.clear();
+                        self.status_text = "cancelling…".to_string();
+                    }
                     return Ok(());
                 }
                 if is_ctrl_char(key, 'l') {
@@ -212,25 +213,21 @@ impl App {
                     match event {
                         Event::Turn(turn_event) => self.handle_turn_event(turn_event).await,
                         Event::TurnComplete => {
-                            self.push_turn_summary();
-                            self.chat.push_cell(Box::new(SeparatorCell));
-                            self.mode = Mode::Normal;
-                            self.turn_active = false;
-                            self.turn_started = None;
-                            self.reset_turn_usage();
-                            self.turn_tool_calls = 0;
-                            self.turn_tool_failures = 0;
-                            self.status_text = self.base_status.clone();
+                            if self.has_visible_turn_activity() {
+                                self.finalize_turn_ui();
+                            }
+                            self.reset_turn_state();
                         }
                         Event::SessionError { message } => {
-                            self.chat.push_cell(Box::new(ErrorCell { message }));
-                            self.mode = Mode::Normal;
-                            self.turn_active = false;
-                            self.turn_started = None;
-                            self.reset_turn_usage();
-                            self.turn_tool_calls = 0;
-                            self.turn_tool_failures = 0;
-                            self.status_text = self.base_status.clone();
+                            self.chat.finish_streaming_cells();
+                            if message != "cancelled" {
+                                self.chat.push_cell(Box::new(ErrorCell { message }));
+                            }
+                            if self.has_visible_turn_activity() {
+                                self.push_turn_summary();
+                                self.chat.push_cell(Box::new(SeparatorCell));
+                            }
+                            self.reset_turn_state();
                         }
                         Event::SessionNotice { message } => {
                             self.status_text = format!("telos · {message}");

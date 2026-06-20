@@ -25,7 +25,7 @@ use crate::tui::approval::PendingApproval;
 use crate::tui::approval_inline;
 use crate::tui::chat_widget::ChatWidget;
 use crate::tui::event::{AppEvent, Event};
-use crate::tui::history_cell::{TurnSummaryCell, UserCell};
+use crate::tui::history_cell::{SeparatorCell, TurnSummaryCell, UserCell};
 use crate::tui::input_panel::InputPanel;
 use crate::tui::overlay::Overlay;
 use crate::tui::status_bar;
@@ -326,6 +326,31 @@ impl App {
         self.chat.push_cell(Box::new(TurnSummaryCell { content: summary }));
     }
 
+    fn has_visible_turn_activity(&self) -> bool {
+        self.turn_active
+            || self.turn_started.is_some()
+            || self.turn_tool_calls > 0
+            || self.turn_input_tokens > 0
+            || self.turn_output_tokens > 0
+            || self.chat.has_active_assistant()
+    }
+
+    fn finalize_turn_ui(&mut self) {
+        self.chat.finish_streaming_cells();
+        self.push_turn_summary();
+        self.chat.push_cell(Box::new(SeparatorCell));
+    }
+
+    fn reset_turn_state(&mut self) {
+        self.mode = Mode::Normal;
+        self.turn_active = false;
+        self.turn_started = None;
+        self.reset_turn_usage();
+        self.turn_tool_calls = 0;
+        self.turn_tool_failures = 0;
+        self.status_text = self.base_status.clone();
+    }
+
     fn format_turn_summary(&self) -> Option<String> {
         let has_activity = self.turn_started.is_some()
             || self.turn_tool_calls > 0
@@ -373,6 +398,11 @@ impl App {
 
     /// Send a user prompt to the background agent task.
     pub async fn send_prompt(&mut self, prompt: String) {
+        if self.turn_active && self.cancellation.is_cancelled() {
+            self.input.restore_text(prompt);
+            self.status_text = "cancelling…".to_string();
+            return;
+        }
         crate::memory_runtime::record_user_preference(&self.memory, &prompt).await;
         self.chat.push_cell(Box::new(UserCell { content: prompt.clone() }));
         let _ = self.turn_tx.send(BackgroundCommand::Prompt(prompt));
@@ -565,7 +595,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ctrl_c_cancels_active_turn_and_clears_composer() {
+    async fn ctrl_c_marks_active_turn_as_cancelling_and_clears_composer() {
         let cancelled = Arc::new(AtomicBool::new(false));
         let cancellation = telos_agent::CancellationState::from_flag(Arc::clone(&cancelled));
         let config =
@@ -596,10 +626,61 @@ mod tests {
             .unwrap();
 
         assert!(cancelled.load(Ordering::Relaxed));
-        assert!(!app.turn_active);
+        assert!(app.turn_active);
         assert_eq!(app.mode, Mode::Normal);
-        assert_eq!(app.status_text, "telos");
+        assert_eq!(app.status_text, "cancelling…");
         assert_eq!(app.input.text(), "");
+        assert!(!app.chat.has_active_assistant());
+    }
+
+    #[tokio::test]
+    async fn submit_while_cancellation_is_pending_restores_draft() {
+        let cancelled = Arc::new(AtomicBool::new(true));
+        let cancellation = telos_agent::CancellationState::from_flag(Arc::clone(&cancelled));
+        let config =
+            telos_agent::AgentConfig { cancellation, ..telos_agent::AgentConfig::default() };
+        let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
+        let tools = telos_agent::ToolRegistry::new();
+        let temp = tempfile::tempdir().unwrap();
+        let memory = Arc::new(Mutex::new(MemoryStore::new(temp.path().join("memory"))));
+
+        let mut app = App::new(
+            config,
+            provider,
+            tools,
+            "telos".into(),
+            Some(temp.path()),
+            temp.path(),
+            false,
+            memory,
+            ModelSwitchConfig::default(),
+        )
+        .unwrap();
+        app.turn_active = true;
+        app.mode = Mode::Normal;
+
+        app.send_prompt("gold price last 3 days".into()).await;
+
+        assert_eq!(app.chat.len(), 0);
+        assert_eq!(app.input.text(), "gold price last 3 days");
+        assert_eq!(app.status_text, "cancelling…");
+    }
+
+    #[tokio::test]
+    async fn assistant_delta_after_cancel_uses_new_cell() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.turn_active = true;
+        app.mode = Mode::Streaming;
+        app.handle_turn_event(TurnEvent::AssistantDelta { text: "partial".into() }).await;
+        assert_eq!(app.chat.len(), 1);
+
+        app.handle_event(Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)))
+            .await
+            .unwrap();
+        app.handle_turn_event(TurnEvent::AssistantDelta { text: "fresh".into() }).await;
+
+        assert_eq!(app.chat.len(), 2);
     }
 
     #[tokio::test]

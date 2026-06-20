@@ -174,6 +174,47 @@ fn permission_engine_allows_shell_by_command_prefix() {
 }
 
 #[test]
+fn permission_engine_allows_powershell_by_command_prefix() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let mut engine = PermissionEngine::new();
+        engine.add_rule(PermissionRule::allow_tool("PowerShell").command_prefix("Get-Process"));
+
+        let provider = MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: telos_agent::Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "PowerShell".into(),
+                        arguments: json!({ "command": "Get-Process -Name pwsh" }),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("done"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+            },
+        ]);
+        let mut tools = ToolRegistry::new();
+        register_core_tools(&mut tools);
+        let mut session = AgentSession::new(AgentConfig {
+            permission_engine: Some(engine),
+            ..AgentConfig::default()
+        })
+        .unwrap();
+
+        let result = session.run_turn(&provider, &tools, "powershell").await.unwrap();
+        let tool_result =
+            result.events.iter().find(|event| matches!(event, TurnEvent::ToolResult(_))).unwrap();
+        assert!(!tool_result.text().contains("permission_required"), "{}", tool_result.text());
+    });
+}
+
+#[test]
 fn shell_requires_approval_by_default() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {

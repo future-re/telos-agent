@@ -235,6 +235,7 @@ pub use tools::{
     BrowserManager, BrowserNavigateTool, BrowserScreenshotTool, BrowserScrollTool,
     BrowserSelectTool, BrowserStartTool, BrowserStateTool, BrowserTypeTool, CodeContextTool,
     CodeIndexRefreshTool, CodeSearchTool, FileEditTool, FileReadTool, FileWriteTool, GlobTool,
-    GrepTool, ShellTool, SkillTool, TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool,
-    WebFetchTool, WebSearchTool, register_core_tools, register_memory_tools, register_task_tools,
+    GrepTool, PowerShellTool, ShellTool, SkillTool, TaskCreateTool, TaskGetTool, TaskListTool,
+    TaskUpdateTool, WebFetchTool, WebSearchTool, register_core_tools, register_memory_tools,
+    register_task_tools,
 };

@@ -55,6 +55,7 @@ pub use web_search::WebSearchTool;
 pub fn register_core_tools(registry: &mut ToolRegistry) {
     let browser_manager = BrowserManager::new();
     registry.register(ShellTool);
+    registry.register(PowerShellTool);
     registry.register(FileReadTool);
     registry.register(FileWriteTool);
     registry.register(FileEditTool);

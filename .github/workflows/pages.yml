@@ -2,9 +2,7 @@ name: Pages
 
 on:
   push:
-    tags: ["*"]
-  release:
-    types: [published]
+    branches: ["main"]
 
 permissions:
   contents: read

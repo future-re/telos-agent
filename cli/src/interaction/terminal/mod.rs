@@ -9,6 +9,15 @@
 
 use std::sync::OnceLock;
 
+mod format;
+mod process;
+
+use format::{
+    format_terminal_version, none_if_whitespace, sanitize_header_value,
+    terminal_name_from_term_program,
+};
+use process::{TmuxClientInfo, tmux_client_info, zellij_version_from_command};
+
 /// Structured terminal identification data.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalInfo {
@@ -72,22 +81,6 @@ pub enum Multiplexer {
         /// Zellij version string when ZELLIJ_VERSION is available.
         version: Option<String>,
     },
-}
-
-/// tmux client terminal identification captured via `tmux display-message`.
-///
-/// `termtype` corresponds to `#{client_termtype}` and typically reflects the
-/// underlying terminal program (for example, `ghostty` or `wezterm`) with an
-/// optional version suffix. `termname` comes from `#{client_termname}` and
-/// preserves the TERM capability string exposed by the client (for example,
-/// `xterm-256color`).
-///
-/// This information is only available when running under tmux and lets us
-/// attribute the session to the underlying terminal rather than to tmux itself.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct TmuxClientInfo {
-    termtype: Option<String>,
-    termname: Option<String>,
 }
 
 impl TerminalInfo {
@@ -413,97 +406,6 @@ fn split_term_program_and_version(value: &str) -> (String, Option<String>) {
     let program = parts.next().unwrap_or_default().to_string();
     let version = parts.next().map(ToString::to_string);
     (program, version)
-}
-
-fn tmux_client_info() -> TmuxClientInfo {
-    let termtype = tmux_display_message("#{client_termtype}");
-    let termname = tmux_display_message("#{client_termname}");
-
-    TmuxClientInfo { termtype, termname }
-}
-
-fn tmux_display_message(format: &str) -> Option<String> {
-    let output =
-        std::process::Command::new("tmux").args(["display-message", "-p", format]).output().ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let value = String::from_utf8(output.stdout).ok()?;
-    none_if_whitespace(value.trim().to_string())
-}
-
-fn zellij_version_from_command() -> Option<String> {
-    // Best-effort fallback: missing or broken zellij binaries should not affect
-    // terminal detection.
-    let output = std::process::Command::new("zellij").arg("--version").output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    let stdout = String::from_utf8(output.stdout).ok()?;
-    parse_zellij_version(stdout.trim())
-}
-
-fn parse_zellij_version(value: &str) -> Option<String> {
-    let value = none_if_whitespace(value.to_string())?;
-    let mut parts = value.split_whitespace();
-    match (parts.next(), parts.next()) {
-        (Some(command), Some(version)) if command.eq_ignore_ascii_case("zellij") => {
-            Some(version.to_string())
-        }
-        _ => Some(value),
-    }
-}
-
-/// Sanitizes a terminal token for use in User-Agent headers.
-///
-/// Invalid header characters are replaced with underscores.
-fn sanitize_header_value(value: String) -> String {
-    value.replace(|c| !is_valid_header_value_char(c), "_")
-}
-
-/// Returns whether a character is allowed in User-Agent header values.
-fn is_valid_header_value_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '/'
-}
-
-fn terminal_name_from_term_program(value: &str) -> Option<TerminalName> {
-    let normalized: String = value
-        .trim()
-        .chars()
-        .filter(|c| !matches!(c, ' ' | '-' | '_' | '.'))
-        .map(|c| c.to_ascii_lowercase())
-        .collect();
-
-    match normalized.as_str() {
-        "appleterminal" => Some(TerminalName::AppleTerminal),
-        "ghostty" => Some(TerminalName::Ghostty),
-        "iterm" | "iterm2" | "itermapp" => Some(TerminalName::Iterm2),
-        "warp" | "warpterminal" => Some(TerminalName::WarpTerminal),
-        "vscode" => Some(TerminalName::VsCode),
-        "wezterm" => Some(TerminalName::WezTerm),
-        "kitty" => Some(TerminalName::Kitty),
-        "alacritty" => Some(TerminalName::Alacritty),
-        "konsole" => Some(TerminalName::Konsole),
-        "gnometerminal" => Some(TerminalName::GnomeTerminal),
-        "vte" => Some(TerminalName::Vte),
-        "windowsterminal" => Some(TerminalName::WindowsTerminal),
-        "dumb" => Some(TerminalName::Dumb),
-        _ => None,
-    }
-}
-
-fn format_terminal_version(name: &str, version: &Option<String>) -> String {
-    match version.as_ref().filter(|value| !value.is_empty()) {
-        Some(version) => format!("{name}/{version}"),
-        None => name.to_string(),
-    }
-}
-
-fn none_if_whitespace(value: String) -> Option<String> {
-    (!value.trim().is_empty()).then_some(value)
 }
 
 #[cfg(test)]

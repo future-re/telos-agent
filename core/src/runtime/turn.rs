@@ -20,7 +20,14 @@ pub enum TurnEvent {
     /// About to issue a completion request to the provider.
     ProviderRequest { iteration: usize, message_count: usize, tool_count: usize },
     /// Provider reported token usage for the just-finished iteration.
-    ProviderUsage { input_tokens: usize, output_tokens: usize },
+    ProviderUsage {
+        input_tokens: usize,
+        output_tokens: usize,
+        total_tokens: Option<usize>,
+        prompt_cache_hit_tokens: Option<usize>,
+        prompt_cache_miss_tokens: Option<usize>,
+        reasoning_tokens: Option<usize>,
+    },
     /// Incremental text fragment streamed from the assistant.
     AssistantDelta { text: String },
     /// Incremental reasoning fragment streamed from a thinking-capable model.
@@ -104,8 +111,29 @@ impl TurnEvent {
                 "provider_request:{} messages={} tools={}",
                 iteration, message_count, tool_count
             ),
-            TurnEvent::ProviderUsage { input_tokens, output_tokens } => {
-                format!("provider_usage:input={input_tokens} output={output_tokens}")
+            TurnEvent::ProviderUsage {
+                input_tokens,
+                output_tokens,
+                total_tokens,
+                prompt_cache_hit_tokens,
+                prompt_cache_miss_tokens,
+                reasoning_tokens,
+            } => {
+                let mut parts =
+                    vec![format!("input={input_tokens}"), format!("output={output_tokens}")];
+                if let Some(tokens) = total_tokens {
+                    parts.push(format!("total={tokens}"));
+                }
+                if let Some(tokens) = prompt_cache_hit_tokens {
+                    parts.push(format!("cache_hit={tokens}"));
+                }
+                if let Some(tokens) = prompt_cache_miss_tokens {
+                    parts.push(format!("cache_miss={tokens}"));
+                }
+                if let Some(tokens) = reasoning_tokens {
+                    parts.push(format!("reasoning={tokens}"));
+                }
+                format!("provider_usage:{}", parts.join(" "))
             }
             TurnEvent::AssistantDelta { text } => format!("assistant_delta:{text}"),
             TurnEvent::ThinkingDelta { text } => format!("thinking_delta:{text}"),

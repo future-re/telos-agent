@@ -5,152 +5,15 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Paragraph, Wrap};
 
 use crate::tui::theme::Theme;
-use crate::tui::tool_rendering::{
-    ToolState, extract_result_lines, is_shell_tool_name, push_result_preview, tool_title,
-    transcript_line, truncate_chars,
-};
+use crate::tui::tool_rendering::{ToolState, extract_result_lines, truncate_chars};
+
+mod item;
+use item::ToolActivityItem;
 
 const MAX_ITEMS: usize = 24;
 const MAX_VISIBLE_LINES: usize = 10;
 const MAX_EXPANDED_PROGRESS_LINES: usize = 2;
 const MAX_COMPACT_RESULT_LINES: usize = 2;
-
-#[derive(Debug, Clone)]
-struct ToolActivityItem {
-    id: String,
-    name: String,
-    detail: String,
-    state: ToolState,
-    progress_messages: Vec<String>,
-    approval_messages: Vec<String>,
-    result_lines: Vec<String>,
-    expanded: bool,
-    selected: bool,
-}
-
-impl ToolActivityItem {
-    fn new(id: String, name: String, detail: String) -> Self {
-        Self {
-            id,
-            name,
-            detail,
-            state: ToolState::Pending,
-            progress_messages: Vec::new(),
-            approval_messages: Vec::new(),
-            result_lines: Vec::new(),
-            expanded: false,
-            selected: false,
-        }
-    }
-
-    fn is_shell(&self) -> bool {
-        is_shell_tool_name(&self.name)
-    }
-
-    fn can_expand(&self) -> bool {
-        !self.approval_messages.is_empty()
-            || !self.progress_messages.is_empty()
-            || !self.result_lines.is_empty()
-    }
-
-    fn set_running(&mut self) {
-        self.state = ToolState::Running { elapsed: std::time::Duration::ZERO };
-    }
-
-    fn set_completed(&mut self, ok: bool) {
-        self.state = ToolState::Completed { ok };
-    }
-
-    fn summary_name(&self) -> &str {
-        self.name.trim()
-    }
-
-    fn title(&self, width: usize) -> String {
-        tool_title(&self.name, &self.detail, &self.state, width.saturating_sub(14).max(16), false)
-    }
-
-    fn lines(&self, width: usize, theme: &Theme, max_visible_lines: usize) -> Vec<Line<'static>> {
-        let (marker, mut style) = match self.state {
-            ToolState::Pending | ToolState::Running { .. } => {
-                ("•", Style::default().fg(theme.tool_pending_fg))
-            }
-            ToolState::Completed { ok: true } if self.is_shell() => {
-                ("•", Style::default().fg(theme.assistant_fg).add_modifier(Modifier::BOLD))
-            }
-            ToolState::Completed { ok: true } => {
-                ("•", Style::default().fg(theme.thinking_fg).add_modifier(Modifier::DIM))
-            }
-            ToolState::Completed { ok: false } => ("✗", theme.tool_error_style()),
-        };
-        if self.selected {
-            style = style.fg(theme.user_fg).add_modifier(Modifier::BOLD);
-        }
-
-        let mut lines = vec![Line::from(vec![
-            Span::styled(format!("{marker} "), style),
-            Span::styled(self.title(width), style),
-        ])];
-
-        if self.can_expand() {
-            if !self.expanded {
-                if self.is_shell() {
-                    push_result_preview(
-                        &mut lines,
-                        &self.result_lines,
-                        MAX_COMPACT_RESULT_LINES,
-                        width,
-                        theme,
-                        self.expanded,
-                        "  ",
-                    );
-                }
-                return lines;
-            }
-
-            if !self.is_shell() && !self.detail.trim().is_empty() {
-                lines.push(transcript_line(
-                    &format!("detail: {}", self.detail.trim()),
-                    width,
-                    theme,
-                ));
-            }
-
-            for msg in self
-                .approval_messages
-                .iter()
-                .take(remaining_line_budget(lines.len(), max_visible_lines))
-            {
-                lines.push(transcript_line(msg, width, theme));
-            }
-
-            for msg in self.progress_messages.iter().take(MAX_EXPANDED_PROGRESS_LINES) {
-                if remaining_line_budget(lines.len(), max_visible_lines) == 0 {
-                    break;
-                }
-                lines.push(transcript_line(msg, width, theme));
-            }
-
-            let preview_lines = expanded_result_line_budget(
-                lines.len(),
-                self.result_lines.len(),
-                max_visible_lines,
-            );
-            if remaining_line_budget(lines.len(), max_visible_lines) > 0 {
-                push_result_preview(
-                    &mut lines,
-                    &self.result_lines,
-                    preview_lines,
-                    width,
-                    theme,
-                    self.expanded,
-                    "  ",
-                );
-            }
-        }
-
-        lines
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct ToolActivityPanel {

@@ -1,15 +1,24 @@
 pub mod cli;
 pub mod config;
+#[path = "workspace/context.rs"]
 pub mod context;
+#[path = "runtime/diagnostics.rs"]
 pub mod diagnostics;
+#[path = "runtime/memory.rs"]
 pub mod memory_runtime;
+#[path = "workspace/project.rs"]
 pub mod project;
 pub mod runner;
+#[path = "interaction/terminal/mod.rs"]
 pub mod terminal;
 pub mod tui;
 
+#[path = "interaction/approval.rs"]
 pub mod approval;
+#[path = "interaction/onboarding.rs"]
 pub mod onboarding;
+mod runtime;
+#[path = "workspace/session.rs"]
 pub mod session;
 
 pub use project::find_project_root;
@@ -94,75 +103,7 @@ pub async fn run() -> Result<()> {
                         return Err(e);
                     }
                 };
-                let config =
-                    config::build_agent_config(&cli.shared, &merged, approval_handler.clone())?;
-                let provider = if let Some(ref onb) = onboarding {
-                    build_erased_from_onboarding(onb)?
-                } else {
-                    build_erased_provider(&cli.shared, &merged)?
-                };
-                let mut tools = telos_agent::ToolRegistry::new();
-                telos_agent::register_core_tools(&mut tools);
-
-                let current_dir = std::env::current_dir()?;
-                let cwd = cli.shared.cwd.as_deref().unwrap_or(&current_dir);
-                let project_root = project::find_project_root(cwd).ok();
-                runner::register_cli_task_tools(&mut tools, project_root.as_deref().unwrap_or(cwd));
-                let ctx = match &project_root {
-                    Some(root) => crate::context::load_project_context(root),
-                    None => crate::context::ProjectContext::empty(),
-                };
-
-                // Inject the loaded context into the agent's prompt assembly.
-                let memory_store =
-                    crate::memory_runtime::open_memory_store(project_root.as_deref())?;
-                let mut assembly = crate::context::build_prompt_assembly(&ctx);
-                crate::memory_runtime::register_memory_runtime(
-                    &mut tools,
-                    &mut assembly,
-                    memory_store.clone(),
-                );
-                let mut tui_config = config;
-                let _diagnostics_runtime = crate::diagnostics::configure_tool_diagnostics(
-                    &mut tui_config,
-                    &merged,
-                    project_root.as_deref(),
-                )?;
-                tui_config.prompt_assembly = Some(Arc::new(assembly));
-
-                let model_display =
-                    cli.shared.model.as_deref().or_else(|| merged.agent.as_ref()?.model.as_deref());
-                let status =
-                    crate::context::build_status_text(model_display, project_root.as_deref(), &ctx);
-
-                let result = tui::run(
-                    tui_config,
-                    provider,
-                    tools,
-                    status,
-                    project_root.as_deref(),
-                    project_root.as_deref().unwrap_or(cwd),
-                    merged.auto_mode.unwrap_or(false),
-                    memory_store,
-                    tui::app::ModelSwitchConfig {
-                        deepseek_api_key: deepseek_api_key_for_switch(
-                            &cli.shared,
-                            &merged,
-                            onboarding.as_ref(),
-                        ),
-                    },
-                    tui::app::TuiLayoutSettings::from_density(
-                        merged.tui.as_ref().and_then(|tui| tui.density).unwrap_or_default(),
-                    ),
-                )
-                .await;
-                if let Some(runtime) = &_diagnostics_runtime
-                    && let Err(err) =
-                        crate::diagnostics::process_diagnostics(runtime, &merged).await
-                {
-                    tracing::warn!("failed to process diagnostics: {err}");
-                }
-                return result;
+                return runner::run_chat(&cli.shared, &merged, onboarding, approval_handler).await;
             }
             let onboarding = match check_onboarding(&cli.shared, &merged) {
                 Ok(o) => o,

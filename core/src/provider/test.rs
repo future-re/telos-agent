@@ -7,7 +7,10 @@
 
 use crate::message::Message;
 use crate::provider::StopReason;
-use crate::provider::deepseek::{DeepSeekConfig, DeepSeekProvider};
+use crate::provider::deepseek::{
+    DeepSeekChatOptions, DeepSeekConfig, DeepSeekFimRequest, DeepSeekProvider,
+    DeepSeekResponseFormat,
+};
 use crate::provider::{CompletionRequest, ModelProvider, ProviderEvent};
 
 use futures_util::StreamExt;
@@ -21,7 +24,7 @@ fn load_env() {
 
 fn get_deepseek_config() -> Option<DeepSeekConfig> {
     load_env();
-    let api_key = std::env::var("DEEPSEEK_API_KEY").ok()?;
+    let api_key = deepseek_test_key()?;
     if api_key.is_empty() || api_key == "your_deepseek_api_key_here" {
         return None;
     }
@@ -30,6 +33,10 @@ fn get_deepseek_config() -> Option<DeepSeekConfig> {
         model: "deepseek-chat".into(),
         base_url: "https://api.deepseek.com".into(),
     })
+}
+
+fn deepseek_test_key() -> Option<String> {
+    std::env::var("DEEPSEEK_TEST_KEY").ok()
 }
 
 fn simple_request() -> CompletionRequest {
@@ -49,19 +56,13 @@ async fn deepseek_complete_smoke() {
     let config = match get_deepseek_config() {
         Some(c) => c,
         None => {
-            eprintln!("SKIP: DEEPSEEK_API_KEY not set or still placeholder");
+            eprintln!("SKIP: DEEPSEEK_TEST_KEY not set");
             return;
         }
     };
 
     let provider = DeepSeekProvider::new(config);
-    let response = match provider.complete(simple_request()).await {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("SKIP: DeepSeek complete request failed (network/env): {e}");
-            return;
-        }
-    };
+    let response = provider.complete(simple_request()).await.unwrap();
 
     assert!(!response.message.text_content().is_empty(), "DeepSeek should return non-empty text");
     assert_eq!(response.stop_reason, StopReason::EndTurn);
@@ -76,7 +77,7 @@ async fn deepseek_stream_smoke() {
     let config = match get_deepseek_config() {
         Some(c) => c,
         None => {
-            eprintln!("SKIP: DEEPSEEK_API_KEY not set or still placeholder");
+            eprintln!("SKIP: DEEPSEEK_TEST_KEY not set");
             return;
         }
     };
@@ -99,10 +100,7 @@ async fn deepseek_stream_smoke() {
                 usage = u;
             }
             Ok(_) => {}
-            Err(e) => {
-                eprintln!("SKIP: DeepSeek stream error (network/env): {e}");
-                return;
-            }
+            Err(e) => panic!("DeepSeek stream error: {e}"),
         }
     }
 
@@ -113,4 +111,131 @@ async fn deepseek_stream_smoke() {
         assert!(u.input_tokens > 0);
         assert!(u.output_tokens > 0);
     }
+}
+
+#[tokio::test]
+async fn deepseek_json_output_real_api() {
+    let config = match get_deepseek_config() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: DEEPSEEK_TEST_KEY not set");
+            return;
+        }
+    };
+
+    let provider = DeepSeekProvider::new(config);
+    let request = CompletionRequest {
+        system_prompt: Some(
+            "Return only a valid compact JSON object with an ok boolean field.".into(),
+        ),
+        system_prompt_blocks: None,
+        messages: vec![Message::user("Return ok true.")],
+        tools: vec![],
+        model_hint: None,
+    };
+    let response = provider
+        .complete_with_options(
+            request,
+            DeepSeekChatOptions {
+                response_format: Some(DeepSeekResponseFormat::JsonObject),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let value: serde_json::Value = serde_json::from_str(&response.message.text_content()).unwrap();
+    assert_eq!(value.get("ok").and_then(serde_json::Value::as_bool), Some(true));
+    assert!(response.usage.is_some(), "DeepSeek JSON output should report usage");
+}
+
+#[tokio::test]
+async fn deepseek_models_and_balance_real_api() {
+    let config = match get_deepseek_config() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: DEEPSEEK_TEST_KEY not set");
+            return;
+        }
+    };
+
+    let provider = DeepSeekProvider::new(config);
+    let models = provider.list_models().await.unwrap();
+    assert!(!models.data.is_empty(), "DeepSeek model list should not be empty");
+    assert!(
+        models.data.iter().any(|model| model.id.contains("deepseek")),
+        "DeepSeek model list should include a DeepSeek model"
+    );
+
+    let balance = provider.balance().await.unwrap();
+    assert!(
+        !balance.balance_infos.is_empty() || !balance.is_available,
+        "DeepSeek balance response should include balances unless unavailable"
+    );
+}
+
+#[tokio::test]
+async fn deepseek_fim_real_api() {
+    let config = match get_deepseek_config() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: DEEPSEEK_TEST_KEY not set");
+            return;
+        }
+    };
+
+    let provider = DeepSeekProvider::new(config);
+    let response = provider
+        .fim_complete(DeepSeekFimRequest {
+            prompt: "fn answer() -> i32 {".into(),
+            suffix: Some("}".into()),
+            max_tokens: Some(24),
+            temperature: Some(0.0),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert!(!response.choices.is_empty(), "DeepSeek FIM should return choices");
+    assert!(!response.choices[0].text.trim().is_empty(), "DeepSeek FIM should return text");
+    assert!(response.usage.is_some(), "DeepSeek FIM should report usage");
+}
+
+#[tokio::test]
+async fn deepseek_prefix_real_api() {
+    let config = match get_deepseek_config() {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIP: DEEPSEEK_TEST_KEY not set");
+            return;
+        }
+    };
+
+    let provider = DeepSeekProvider::new(config);
+    let request = CompletionRequest {
+        system_prompt: Some(
+            "Continue the assistant prefix with exactly the integer literal 42. Do not add punctuation."
+                .into(),
+        ),
+        system_prompt_blocks: None,
+        messages: vec![Message::user("Complete this Rust return value.")],
+        tools: vec![],
+        model_hint: None,
+    };
+
+    let response = provider
+        .complete_with_options(
+            request,
+            DeepSeekChatOptions {
+                prefix: Some("return ".into()),
+                stop: Some(vec![";".into(), "\n".into()]),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.message.text_content().trim(), "42");
+    let usage = response.usage.expect("DeepSeek prefix completion should report usage");
+    assert!(usage.output_tokens > 0, "DeepSeek prefix completion should emit tokens");
 }

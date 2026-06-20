@@ -1358,7 +1358,7 @@ fn token_budget_triggers_auto_compaction() {
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
-                usage: Some(telos_agent::TokenUsage { input_tokens: 10, output_tokens: 2 }),
+                usage: Some(telos_agent::TokenUsage::new(10, 2)),
             },
         ]);
         let tools = ToolRegistry::new();
@@ -1375,7 +1375,7 @@ fn token_budget_triggers_auto_compaction() {
             matches!(event, TurnEvent::CompactionStarted { reason } if reason == "token_budget")
         }));
         assert!(result.events.iter().any(|event| {
-            matches!(event, TurnEvent::ProviderUsage { input_tokens: 10, output_tokens: 2 })
+            matches!(event, TurnEvent::ProviderUsage { input_tokens: 10, output_tokens: 2, .. })
         }));
     });
 }

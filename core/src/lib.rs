@@ -86,9 +86,11 @@ pub use mock::MockProvider;
 pub use permissions::{PermissionEngine, PermissionRule, RuleDecision};
 // Provider — the trait downstream LLM backends implement, plus built-in impls.
 pub use provider::{
-    CompletionRequest, CompletionResponse, DeepSeekConfig, DeepSeekProvider, ErasedProvider,
-    ModelHint, ModelProvider, ProviderEvent, RoutedModelConfig, RoutedProvider, StopReason,
-    TokenUsage,
+    CompletionRequest, CompletionResponse, DeepSeekBalance, DeepSeekBalanceInfo,
+    DeepSeekChatOptions, DeepSeekConfig, DeepSeekFimChoice, DeepSeekFimRequest,
+    DeepSeekFimResponse, DeepSeekModel, DeepSeekModelList, DeepSeekProvider,
+    DeepSeekResponseFormat, ErasedProvider, ModelHint, ModelProvider, ProviderEvent,
+    RoutedModelConfig, RoutedProvider, StopReason, TokenUsage,
 };
 // Runtime — the agent session and the streaming turn loop.
 pub use runtime::{AgentSession, TurnEvent, TurnResult};

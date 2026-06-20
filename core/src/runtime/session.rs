@@ -650,13 +650,25 @@ impl AgentSession {
                     yield event;
                 }
 
-                if let Some(TokenUsage { input_tokens, output_tokens }) = usage {
+                if let Some(TokenUsage { input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, reasoning_tokens }) = usage {
                     self.metrics.add_input_tokens(input_tokens);
                     self.metrics.add_output_tokens(output_tokens);
-                    debug!(input_tokens, output_tokens, "provider usage");
+                    debug!(
+                        input_tokens,
+                        output_tokens,
+                        total_tokens,
+                        prompt_cache_hit_tokens,
+                        prompt_cache_miss_tokens,
+                        reasoning_tokens,
+                        "provider usage"
+                    );
                     yield TurnEvent::ProviderUsage {
                         input_tokens,
                         output_tokens,
+                        total_tokens,
+                        prompt_cache_hit_tokens,
+                        prompt_cache_miss_tokens,
+                        reasoning_tokens,
                     };
                 }
 
@@ -873,7 +885,7 @@ mod tests {
         let provider = MockProvider::new(vec![CompletionResponse {
             message: Message::assistant("hello"),
             stop_reason: StopReason::EndTurn,
-            usage: Some(TokenUsage { input_tokens: 10, output_tokens: 5 }),
+            usage: Some(TokenUsage::new(10, 5)),
         }]);
         let tools = ToolRegistry::new();
         session.run_turn(&provider, &tools, "hi").await.unwrap();

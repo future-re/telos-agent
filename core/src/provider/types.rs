@@ -53,12 +53,28 @@ pub enum StopReason {
 pub struct TokenUsage {
     pub input_tokens: usize,
     pub output_tokens: usize,
+    pub total_tokens: Option<usize>,
+    pub prompt_cache_hit_tokens: Option<usize>,
+    pub prompt_cache_miss_tokens: Option<usize>,
+    pub reasoning_tokens: Option<usize>,
 }
 
 impl TokenUsage {
+    /// Build usage from the common input/output pair reported by all providers.
+    pub fn new(input_tokens: usize, output_tokens: usize) -> Self {
+        Self {
+            input_tokens,
+            output_tokens,
+            total_tokens: None,
+            prompt_cache_hit_tokens: None,
+            prompt_cache_miss_tokens: None,
+            reasoning_tokens: None,
+        }
+    }
+
     /// Sum of input and output tokens.
     pub fn total(&self) -> usize {
-        self.input_tokens + self.output_tokens
+        self.total_tokens.unwrap_or(self.input_tokens + self.output_tokens)
     }
 }
 

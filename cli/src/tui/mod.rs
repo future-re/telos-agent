@@ -1,17 +1,28 @@
 pub mod app;
+#[path = "overlays/approval.rs"]
 pub mod approval;
+#[path = "widgets/chat_widget.rs"]
 pub mod chat_widget;
+#[path = "overlays/command_popup.rs"]
 pub mod command_popup;
 pub mod event;
+#[path = "widgets/history_cell/mod.rs"]
 pub mod history_cell;
+#[path = "widgets/input_panel.rs"]
 pub mod input_panel;
 pub mod markdown;
+#[path = "overlays/overlay.rs"]
 pub mod overlay;
+#[path = "overlays/selection_popup.rs"]
 pub mod selection_popup;
+#[path = "widgets/status_bar.rs"]
 pub mod status_bar;
 pub mod theme;
+#[path = "widgets/tool_activity/mod.rs"]
 pub mod tool_activity;
+#[path = "widgets/tool_rendering.rs"]
 mod tool_rendering;
+#[path = "overlays/user_input_popup.rs"]
 pub mod user_input_popup;
 
 use crate::tui::app::{App, ModelSwitchConfig, TuiLayoutSettings};

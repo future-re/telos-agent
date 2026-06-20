@@ -9,8 +9,6 @@ use futures_core::stream::Stream;
 
 use crate::error::AgentError;
 
-mod openai_compat;
-
 #[cfg(test)]
 mod test;
 
@@ -19,7 +17,11 @@ pub mod routed;
 mod traits;
 pub(crate) mod types;
 
-pub use deepseek::{DeepSeekConfig, DeepSeekProvider};
+pub use deepseek::{
+    DeepSeekBalance, DeepSeekBalanceInfo, DeepSeekChatOptions, DeepSeekConfig, DeepSeekFimChoice,
+    DeepSeekFimRequest, DeepSeekFimResponse, DeepSeekModel, DeepSeekModelList, DeepSeekProvider,
+    DeepSeekResponseFormat,
+};
 pub use routed::{RoutedModelConfig, RoutedProvider};
 pub use traits::{ErasedProvider, ModelProvider};
 pub use types::{

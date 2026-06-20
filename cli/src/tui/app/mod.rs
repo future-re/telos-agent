@@ -565,6 +565,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ctrl_c_cancels_active_turn_and_clears_composer() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancellation = telos_agent::CancellationState::from_flag(Arc::clone(&cancelled));
+        let config =
+            telos_agent::AgentConfig { cancellation, ..telos_agent::AgentConfig::default() };
+        let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
+        let tools = telos_agent::ToolRegistry::new();
+        let temp = tempfile::tempdir().unwrap();
+        let memory = Arc::new(Mutex::new(MemoryStore::new(temp.path().join("memory"))));
+        let mut app = App::new(
+            config,
+            provider,
+            tools,
+            "telos".into(),
+            Some(temp.path()),
+            temp.path(),
+            false,
+            memory,
+            ModelSwitchConfig::default(),
+        )
+        .unwrap();
+        app.mode = Mode::Streaming;
+        app.turn_active = true;
+        app.status_text = "running tool".to_string();
+        app.input.restore_text("draft to clear".into());
+
+        app.handle_event(Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)))
+            .await
+            .unwrap();
+
+        assert!(cancelled.load(Ordering::Relaxed));
+        assert!(!app.turn_active);
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.status_text, "telos");
+        assert_eq!(app.input.text(), "");
+    }
+
+    #[tokio::test]
+    async fn paste_event_inserts_text_into_composer() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+
+        app.handle_event(Event::Paste("hello\nworld".into())).await.unwrap();
+
+        assert_eq!(app.input.text(), "hello\nworld");
+    }
+
+    #[tokio::test]
     async fn submit_during_active_turn_is_accepted_for_rethink() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = test_app(&temp);

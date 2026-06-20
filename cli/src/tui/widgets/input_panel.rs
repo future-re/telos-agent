@@ -8,6 +8,7 @@ use tui_textarea::TextArea;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::tui::command_popup::{CommandPopup, SlashCommand};
+use crate::tui::keymap::is_ctrl_modifier;
 use crate::tui::theme::Theme;
 
 const PROMPT_WIDTH: u16 = 2;
@@ -93,6 +94,21 @@ impl InputPanel {
         self.textarea.lines().join("\n")
     }
 
+    pub fn clear(&mut self) {
+        self.clear_text();
+        self.history_pos = None;
+        self.draft.clear();
+        self.mode = InputMode::Normal;
+        self.popup.hide();
+    }
+
+    pub fn insert_text(&mut self, text: &str) {
+        if self.history_pos.is_some() {
+            self.history_pos = None;
+        }
+        self.textarea.insert_str(text);
+    }
+
     /// Current input mode.
     pub fn input_mode(&self) -> InputMode {
         self.mode
@@ -124,7 +140,9 @@ impl InputPanel {
                 self.history_pos.is_some() || !self.is_empty() || !self.history.is_empty()
             }
             (KeyCode::Down, KeyModifiers::NONE) => self.history_pos.is_some() || !self.is_empty(),
-            (KeyCode::Up | KeyCode::Down, KeyModifiers::CONTROL) => !self.history.is_empty(),
+            (KeyCode::Up | KeyCode::Down, modifiers) if is_ctrl_modifier(modifiers) => {
+                !self.history.is_empty()
+            }
             _ => false,
         }
     }
@@ -139,11 +157,6 @@ impl InputPanel {
     }
 
     fn handle_normal_key(&mut self, key: KeyEvent) -> InputEvent {
-        if is_ctrl_char(key, 'a') {
-            self.textarea.select_all();
-            return InputEvent::None;
-        }
-
         match (key.code, key.modifiers) {
             // ── Submit ──────────────────────────────────────────────
             (KeyCode::Enter, KeyModifiers::NONE) => {
@@ -473,15 +486,6 @@ fn composer_text_width(outer_width: u16) -> usize {
     usize::from(outer_width.saturating_sub(2).saturating_sub(PROMPT_WIDTH)).max(1)
 }
 
-fn is_ctrl_modifier(modifiers: KeyModifiers) -> bool {
-    modifiers.contains(KeyModifiers::CONTROL) && !modifiers.contains(KeyModifiers::ALT)
-}
-
-fn is_ctrl_char(key: KeyEvent, target: char) -> bool {
-    matches!(key.code, KeyCode::Char(c) if c.to_ascii_lowercase() == target)
-        && is_ctrl_modifier(key.modifiers)
-}
-
 fn wrap_lines(lines: &[String], width: usize) -> Vec<String> {
     lines.iter().flat_map(|line| wrap_line(line, width)).collect()
 }
@@ -555,10 +559,6 @@ mod tests {
 
     fn ctrl_key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::CONTROL)
-    }
-
-    fn ctrl_shift_key(code: KeyCode) -> KeyEvent {
-        KeyEvent::new(code, KeyModifiers::CONTROL | KeyModifiers::SHIFT)
     }
 
     fn text(panel: &InputPanel) -> String {
@@ -750,25 +750,14 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_a_then_backspace_clears_composer() {
+    fn ctrl_a_uses_textarea_default_instead_of_selecting_all() {
         let mut panel = InputPanel::new();
         set_text(&mut panel, "delete all of this");
 
         panel.handle_key(ctrl_key(KeyCode::Char('a')));
         panel.handle_key(key(KeyCode::Backspace));
 
-        assert_eq!(text(&panel), "");
-    }
-
-    #[test]
-    fn ctrl_a_with_extra_shift_modifier_still_clears_composer() {
-        let mut panel = InputPanel::new();
-        set_text(&mut panel, "delete all of this");
-
-        panel.handle_key(ctrl_shift_key(KeyCode::Char('A')));
-        panel.handle_key(key(KeyCode::Backspace));
-
-        assert_eq!(text(&panel), "");
+        assert_eq!(text(&panel), "delete all of this");
     }
 
     #[test]

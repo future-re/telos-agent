@@ -12,6 +12,7 @@ pub mod event;
 pub mod history_cell;
 #[path = "widgets/input_panel.rs"]
 pub mod input_panel;
+pub mod keymap;
 pub mod markdown;
 #[path = "overlays/overlay.rs"]
 pub mod overlay;
@@ -48,6 +49,7 @@ impl Drop for TuiGuard {
         let _ = crossterm::terminal::disable_raw_mode();
         let _ = crossterm::execute!(
             std::io::stdout(),
+            crossterm::event::DisableBracketedPaste,
             crossterm::event::DisableMouseCapture,
             crossterm::terminal::LeaveAlternateScreen
         );
@@ -74,6 +76,7 @@ pub async fn run(
         crossterm::terminal::EnterAlternateScreen,
         crossterm::event::EnableMouseCapture
     )?;
+    let _ = crossterm::execute!(stdout, crossterm::event::EnableBracketedPaste);
     let _guard = TuiGuard;
 
     let backend = CrosstermBackend::new(stdout);
@@ -102,6 +105,7 @@ pub async fn run(
                 match maybe_event {
                     Some(Ok(CEvent::Key(key))) => Event::Key(key),
                     Some(Ok(CEvent::Mouse(mouse))) => Event::Mouse(mouse),
+                    Some(Ok(CEvent::Paste(text))) => Event::Paste(text),
                     Some(Ok(CEvent::Resize(cols, rows))) => Event::Resize { cols, rows },
                     _ => continue,
                 }

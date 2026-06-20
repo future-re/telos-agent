@@ -8,6 +8,8 @@ pub enum Event {
     Key(KeyEvent),
     /// A mouse event from crossterm.
     Mouse(MouseEvent),
+    /// Text pasted through bracketed paste mode.
+    Paste(String),
     /// Terminal was resized.
     Resize { cols: u16, rows: u16 },
     /// A turn event from the agent stream.

@@ -1,10 +1,11 @@
 use std::sync::atomic::Ordering;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyModifiers};
 
 use crate::tui::event::{AppEvent, Event};
 use crate::tui::history_cell::{ErrorCell, SeparatorCell};
 use crate::tui::input_panel::InputMode;
+use crate::tui::keymap::is_ctrl_char;
 use crate::tui::overlay::{ApprovalOverlay, OverlayAction};
 
 use super::{App, Mode};
@@ -23,6 +24,8 @@ impl App {
                     self.cancellation.cancel();
                     self.turn_active = false;
                     self.turn_started = None;
+                    self.mode = Mode::Normal;
+                    self.input.clear();
                     self.status_text = self.base_status.clone();
                     return Ok(());
                 }
@@ -257,6 +260,9 @@ impl App {
                 }
             }
             Event::Resize { .. } => {}
+            Event::Paste(text) => {
+                self.input.insert_text(&text);
+            }
             Event::Mouse(mouse) => {
                 use crossterm::event::{MouseButton, MouseEventKind};
 
@@ -275,13 +281,4 @@ impl App {
         }
         Ok(())
     }
-}
-
-fn is_ctrl_modifier(modifiers: KeyModifiers) -> bool {
-    modifiers.contains(KeyModifiers::CONTROL) && !modifiers.contains(KeyModifiers::ALT)
-}
-
-fn is_ctrl_char(key: KeyEvent, target: char) -> bool {
-    matches!(key.code, KeyCode::Char(c) if c.to_ascii_lowercase() == target)
-        && is_ctrl_modifier(key.modifiers)
 }

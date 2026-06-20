@@ -81,7 +81,7 @@ impl RoutedModelConfig {
 }
 
 /// A [`ModelProvider`] that routes requests to different models based on
-/// [`ModelHint`](crate::provider::ModelHint).
+/// [`ModelHint`].
 ///
 /// Providers are pre-created at construction time — one per unique model name
 /// in the config. Provider selection is a simple HashMap lookup with no

@@ -24,7 +24,7 @@ pub enum ToolExecutionEvent {
     ApprovalResolved { tool_call_id: String, name: String, decision: String },
 }
 
-/// Buffered output of [`execute_tool_calls`] — events in chronological order,
+/// Buffered output of [`execute_tool_calls`](crate::execute_tool_calls) — events in chronological order,
 /// results in the original call order.
 #[derive(Debug, Clone)]
 pub struct ToolExecutionOutput {
@@ -51,7 +51,7 @@ pub(crate) struct Batch {
     pub(crate) calls: Vec<PreparedCall>,
 }
 
-/// Items yielded by [`execute_tool_calls_stream`] — lifecycle events as they
+/// Items yielded by the streaming executor — lifecycle events as they
 /// happen, and final results once each call completes.
 #[derive(Debug, Clone)]
 pub enum ToolExecutionStreamItem {

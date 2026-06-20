@@ -1,6 +1,6 @@
 use crate::error::AgentError;
 
-/// Configuration for [`DeepSeekProvider`].
+/// Configuration for [`DeepSeekProvider`](crate::DeepSeekProvider).
 #[derive(Clone)]
 pub struct DeepSeekConfig {
     pub api_key: String,

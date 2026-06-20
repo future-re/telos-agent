@@ -63,7 +63,7 @@ pub enum AgentError {
     /// Provider retries exhausted — every attempt failed.
     #[error("provider retries exhausted after {attempts} attempts: {last_error}")]
     ProviderRetriesExhausted { attempts: usize, last_error: String },
-    /// The turn was cancelled via [`CancellationToken`].
+    /// The turn was cancelled via [`CancellationState`](crate::CancellationState).
     #[error("cancelled")]
     Cancelled,
 }

@@ -1,6 +1,6 @@
 # telos-cli
 
-Codex-style full-screen terminal interface for [telos-agent](..).
+Codex-style full-screen terminal interface for [telos-agent](https://github.com/future-re/telos-agent).
 
 ## Features
 

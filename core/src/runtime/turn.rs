@@ -70,7 +70,7 @@ pub enum TurnEvent {
     TurnFinished { stop_reason: StopReason, final_text: String },
 }
 
-/// Collected result of a turn, returned by [`AgentSession::run_turn`].
+/// Collected result of a turn, returned by [`AgentSession::run_turn`](crate::AgentSession::run_turn).
 #[derive(Debug, Clone, Serialize)]
 pub struct TurnResult {
     /// Every event emitted during the turn, in order.

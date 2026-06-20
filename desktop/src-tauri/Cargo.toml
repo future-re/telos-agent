@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 description = "Desktop client for telos-agent"
+repository = "https://github.com/future-re/telos-agent"
 
 [lib]
 name = "telos_desktop"

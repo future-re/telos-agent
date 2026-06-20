@@ -142,7 +142,7 @@ impl PermissionEngine {
     ///
     /// For rules with a [`command_prefix`](PermissionRule::command_prefix), the
     /// prefix is matched against the *normalized* command prefix produced by
-    /// [`bash_security::extract_command_prefix`]. This is stricter than raw
+    /// [`extract_command_prefix`]. This is stricter than raw
     /// string matching: it strips trailing arguments and redirects, but also
     /// refuses to match when the command contains injection-like constructs.
     ///

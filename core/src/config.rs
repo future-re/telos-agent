@@ -116,7 +116,7 @@ pub struct AgentConfig {
     /// instead of constructing the prompt from `base_system_prompt` alone.
     pub prompt_assembly: Option<std::sync::Arc<crate::prompt::PromptAssembly>>,
     /// Maximum number of model ⇄ tool round-trips per turn before the loop aborts
-    /// with [`AgentError::MaxIterations`](crate::AgentError::MaxIterations).
+    /// with [`AgentError::MaxIterations`].
     pub max_iterations: usize,
     /// Working directory used as the root for filesystem tools and shell commands.
     pub cwd: PathBuf,

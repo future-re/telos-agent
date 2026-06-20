@@ -4,7 +4,7 @@ use serde_json::Value;
 use crate::provider::TokenUsage;
 
 /// Extra DeepSeek chat-completions options that are not part of the generic
-/// [`ModelProvider`] trait.
+/// [`ModelProvider`](crate::ModelProvider) trait.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeepSeekChatOptions {
     pub response_format: Option<DeepSeekResponseFormat>,

@@ -4,11 +4,16 @@
 
 > Loop: intent → execute → think → complete
 
+Repository: <https://github.com/future-re/telos-agent>
+
 ## 快速开始
 
 ### CLI
 
 ```bash
+# 从 crates.io 安装
+cargo install telos-cli
+
 # 设置环境变量（推荐）
 export DEEPSEEK_API_KEY=sk-...
 
@@ -34,6 +39,10 @@ telos completion bash > /usr/share/bash-completion/completions/telos
 当前 CLI 支持 `deepseek` 和 `mock` provider。API key 按以下优先级解析：`--api-key` 标志 → `DEEPSEEK_API_KEY` 环境变量 → 配置文件 `[env]` → 交互式输入。详细用法见 [cli/README.md](cli/README.md)。
 
 ### 库
+
+```bash
+cargo add telos_agent
+```
 
 ```rust
 use telos_agent::{

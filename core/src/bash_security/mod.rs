@@ -5,13 +5,13 @@
 //! about statically is classified as needing explicit human approval.
 //!
 //! Submodules:
-//! - [`parser`] — tree-sitter-bash wrapper and AST helpers
-//! - [`quote_context`] — quote-aware text views
-//! - [`redirect`] — redirect extraction and static target validation
-//! - [`prefix`] — command prefix extraction for permission rules
-//! - [`substitution`] — recursive command substitution analysis
-//! - [`zsh`] — zsh and advanced shell expansion checks
-//! - [`analyzer`] — main security analyzer combining all of the above
+//! - [`parser`](crate::bash_security::parser) — tree-sitter-bash wrapper and AST helpers
+//! - [`quote_context`](crate::bash_security::quote_context) — quote-aware text views
+//! - [`redirect`](crate::bash_security::redirect) — redirect extraction and static target validation
+//! - [`prefix`](crate::bash_security::prefix) — command prefix extraction for permission rules
+//! - command substitution analysis — recursive handling for nested shell substitutions
+//! - [`zsh`](crate::bash_security::zsh) — zsh and advanced shell expansion checks
+//! - [`analyzer`](crate::bash_security::analyzer) — main security analyzer combining all of the above
 
 pub mod analyzer;
 pub mod parser;

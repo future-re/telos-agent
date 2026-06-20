@@ -1,6 +1,6 @@
 //! Built-in tools: shell, file read/write/edit, glob, grep.
 //!
-//! Each tool gates write access through [`PermissionDecision::Ask`] so the
+//! Each tool gates write access through [`PermissionDecision::Ask`](crate::PermissionDecision::Ask) so the
 //! host (typically a human approval prompt) keeps the final say. Read-only
 //! tools are marked concurrency-safe so they can run in parallel batches.
 

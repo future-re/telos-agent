@@ -297,7 +297,7 @@ impl AgentSession {
     }
 
     /// Run one turn to completion and return the collected events plus the
-    /// final message. Persists the session to [`Storage`] (if configured)
+    /// final message. Persists the session to [`Storage`](crate::Storage) (if configured)
     /// before returning.
     pub async fn run_turn<P: ModelProvider>(
         &mut self,

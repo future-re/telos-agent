@@ -1,47 +1,153 @@
-//! Tiny Agent Core — a lightweight, provider-agnostic agent runtime.
+#![warn(rustdoc::broken_intra_doc_links)]
+#![doc(html_root_url = "https://docs.rs/telos_agent/0.1.0")]
+
+//! Core Rust runtime for **telos**.
 //!
-//! The crate provides:
-//! - [`AgentSession`] — the main turn loop (model → tools → model)
-//! - [`Tool`] trait and [`ToolRegistry`] — pluggable tool system
-//! - [`ModelProvider`] trait — pluggable LLM backends (DeepSeek)
-//! - [`Hook`] system — intercept assistant messages (post-sampling, stop)
-//! - Context compaction — token-budget-aware summarization
-//! - Permission engine — rule-based tool allow/deny
-//! - JSONL session storage — save/resume agent state
+//! `telos_agent` is a provider-agnostic agent runtime for applications that
+//! need the loop:
 //!
-//! # Quick start
+//! ```text
+//! user intent -> model sampling -> tool execution -> result injection -> final answer
+//! ```
+//!
+//! The crate is intended to be embedded by CLIs, desktop apps, servers, and
+//! workflow tools. The terminal client (`telos-cli`) and desktop prototype are
+//! hosts built on top of this library.
+//!
+//! # Primary API
+//!
+//! Most consumers only need these types:
+//!
+//! - [`AgentSession`] — owns conversation state and drives turns.
+//! - [`AgentConfig`] — configures cwd, env, storage, approvals, compaction,
+//!   token budgets, hooks, and cancellation.
+//! - [`ModelProvider`] — trait implemented by LLM backends.
+//! - [`DeepSeekProvider`], [`RoutedProvider`], and [`MockProvider`] — built-in
+//!   provider implementations.
+//! - [`Tool`] and [`ToolRegistry`] — define and register callable tools.
+//! - [`TurnEvent`] — streaming UI/API event surface for assistant deltas,
+//!   thinking deltas, tool lifecycle, retries, usage, approvals, and turn
+//!   completion.
+//! - [`Storage`], [`JsonlStorage`], and [`NoopStorage`] — session persistence.
+//!
+//! # Quick Start
 //!
 //! Build an [`AgentConfig`], create a [`ToolRegistry`], pick a
 //! [`ModelProvider`], then drive a turn via [`AgentSession::run_turn`] for a
 //! blocking call or [`AgentSession::run_turn_stream`] for a UI-friendly event
 //! stream.
+//!
+//! ```rust
+//! use telos_agent::{
+//!     AgentConfig, AgentError, AgentSession, CompletionResponse, Message,
+//!     MockProvider, StopReason, ToolRegistry,
+//! };
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), AgentError> {
+//!     let provider = MockProvider::new(vec![CompletionResponse {
+//!         message: Message::assistant("done"),
+//!         stop_reason: StopReason::EndTurn,
+//!         usage: None,
+//!     }]);
+//!
+//!     let tools = ToolRegistry::new();
+//!     let mut session = AgentSession::new(AgentConfig {
+//!         base_system_prompt: Some("You are concise.".into()),
+//!         ..Default::default()
+//!     })?;
+//!
+//!     let result = session.run_turn(&provider, &tools, "hello").await?;
+//!     assert_eq!(result.final_message.text_content(), "done");
+//!     Ok(())
+//! }
+//! ```
+//!
+//! # Streaming Turns
+//!
+//! Hosts that render live UI should use [`AgentSession::run_turn_stream`]. It
+//! yields [`TurnEvent`] values in order, so the host can update assistant text,
+//! thinking text, tool activity, approval prompts, token usage, and completion
+//! state without parsing model messages directly.
+//!
+//! # Extension Points
+//!
+//! - Implement [`ModelProvider`] to add a new model backend.
+//! - Implement [`Tool`] to expose a new capability.
+//! - Implement [`ApprovalHandler`] for host-specific approval UI.
+//! - Implement [`Hook`] to react at runtime phases.
+//! - Implement [`Storage`] for a custom persistence backend.
+//! - Use [`McpManager`] and [`McpToolBridge`] to bridge MCP servers into the
+//!   tool registry.
+//!
+//! # Public Module Map
+//!
+//! The crate root re-exports the supported high-level API. Public modules are
+//! also available for advanced callers that need lower-level types.
+//!
+//! | Module | Purpose |
+//! |---|---|
+//! | [`runtime`] | [`AgentSession`], [`TurnEvent`], and turn orchestration. |
+//! | [`provider`] | Provider trait, DeepSeek provider, routed provider, request/response types. |
+//! | [`tool`] / [`tools`] | Tool trait, registry, executor-facing context, and built-in tools. |
+//! | [`approval`] / [`permissions`] | Human approval and rule-based tool gating. |
+//! | [`prompt`] / [`skills`] | Prompt assembly and markdown skill loading. |
+//! | [`memory`] / [`tasks`] | Persistent memory and task tracking. |
+//! | [`mcp`] / [`plugin`] / [`subagent`] | External tools, plugin loading, and nested agents. |
+//! | [`storage`] / [`compaction`] | Session persistence and context-window management. |
+//! | [`diagnostics`] / [`metrics`] | Sanitized tool failure records and session counters. |
 
-// Module declarations — public so downstream crates can name internal types directly.
+/// Human-in-the-loop approval decisions for tool calls.
 pub mod approval;
+/// Bash command safety analysis used by shell permissions.
 pub mod bash_security;
+/// Lightweight repository index used by code-search tools.
 pub mod code_index;
+/// Context-window and tool-result compaction strategies.
 pub mod compaction;
+/// Runtime configuration and cancellation state.
 pub mod config;
+/// Sanitized tool failure diagnostics.
 pub mod diagnostics;
+/// Error types shared across runtime, tools, and providers.
 pub mod error;
+/// Tool-call executor for direct and turn-loop use.
 pub mod executor;
+/// Runtime hook registry and hook phases.
 pub mod hooks;
+/// Model Context Protocol client and tool bridge.
 pub mod mcp;
+/// Persistent memory store and profile management.
 pub mod memory;
+/// Conversation message model.
 pub mod message;
+/// Runtime metrics accumulated by sessions.
 pub mod metrics;
+/// Mock model provider for tests and demos.
 pub mod mock;
+/// Rule-based permission engine.
 pub mod permissions;
+/// Plugin manifest, marketplace, registry, and tool loading.
 pub mod plugin;
+/// System-prompt section and assembly system.
 pub mod prompt;
+/// Model provider trait and built-in providers.
 pub mod provider;
+/// Agent session and turn-event runtime.
 pub mod runtime;
+/// Markdown skill loading and registry.
 pub mod skills;
+/// Session persistence backends.
 pub mod storage;
+/// Subagent definitions, registry, and fork execution.
 pub mod subagent;
+/// Persistent task tracking.
 pub mod tasks;
+/// Token-counting helpers.
 pub mod tokens;
+/// Tool trait, registry, validation, and execution context.
 pub mod tool;
+/// Built-in tools.
 pub mod tools;
 
 // Approval — asynchronous human-in-the-loop gating for tool calls.

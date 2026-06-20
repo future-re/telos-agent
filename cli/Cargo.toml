@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 description = "Terminal interface for telos-agent"
+repository = "https://github.com/future-re/telos-agent"
+readme = "README.md"
 
 [[bin]]
 name = "telos"
@@ -32,7 +34,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 toml = "0.8"
 tui-textarea = "0.7"
-telos_agent = { path = "../core" }
+telos_agent = { version = "0.1.0", path = "../core" }
 tracing = "0.1"
 
 [dev-dependencies]

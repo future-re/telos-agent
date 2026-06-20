@@ -1,6 +1,6 @@
 //! Asynchronous human-in-the-loop approval for tool calls.
 //!
-//! When a tool or the permission engine returns [`PermissionDecision::Ask`],
+//! When a tool or the permission engine returns [`PermissionDecision::Ask`](crate::PermissionDecision::Ask),
 //! the runtime can suspend the turn and ask an [`ApprovalHandler`] to decide
 //! whether to allow, deny, or modify the call.
 

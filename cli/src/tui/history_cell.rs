@@ -4,9 +4,15 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Paragraph, Wrap};
 use std::any::Any;
-use std::time::Duration;
 
 use crate::tui::theme::Theme;
+use crate::tui::tool_rendering::{
+    extract_result_lines, hidden_result_lines, is_shell_tool_name,
+    push_result_preview as push_tool_result_preview, tool_title,
+    transcript_line as tool_transcript_line,
+};
+
+pub use crate::tui::tool_rendering::ToolState;
 
 // ─── Trait ───────────────────────────────────────────────────────────────────
 
@@ -329,12 +335,6 @@ impl HistoryCell for ThinkingCell {
 // ─── ToolCallCell
 
 #[derive(Debug, Clone)]
-pub enum ToolState {
-    Pending,
-    Running { elapsed: Duration },
-    Completed { ok: bool },
-}
-
 pub struct ToolCallCell {
     pub name: String,
     pub detail: String,
@@ -352,7 +352,7 @@ pub struct ToolCallCell {
 
 impl ToolCallCell {
     pub fn new(tool_call_id: String, name: String, detail: String) -> Self {
-        let is_shell = matches!(name.to_lowercase().as_str(), "bash" | "shell");
+        let is_shell = is_shell_tool_name(&name);
         Self {
             name,
             detail,
@@ -367,8 +367,7 @@ impl ToolCallCell {
 
     /// Whether this cell represents a shell command execution.
     pub fn is_shell(&self) -> bool {
-        let lower = self.name.to_lowercase();
-        lower == "bash" || lower == "shell"
+        is_shell_tool_name(&self.name)
     }
 
     /// Toggle the expanded/collapsed state.
@@ -377,7 +376,7 @@ impl ToolCallCell {
     }
 
     pub fn set_running(&mut self) {
-        self.state = ToolState::Running { elapsed: Duration::ZERO };
+        self.state = ToolState::Running { elapsed: std::time::Duration::ZERO };
     }
 
     pub fn set_completed(&mut self, ok: bool) {
@@ -393,16 +392,7 @@ impl ToolCallCell {
     }
 
     fn title(&self) -> String {
-        let detail = truncate_chars(self.detail.trim(), 120);
-        if self.is_shell() {
-            return match self.state {
-                ToolState::Pending | ToolState::Running { .. } => format!("Running {detail}"),
-                ToolState::Completed { ok: true } => format!("Ran {detail}"),
-                ToolState::Completed { ok: false } => format!("Failed {detail}"),
-            };
-        }
-
-        if detail.is_empty() { self.name.clone() } else { format!("{}: {}", self.name, detail) }
+        tool_title(&self.name, &self.detail, &self.state, 120, true)
     }
 
     fn is_expanded(&self) -> bool {
@@ -464,11 +454,11 @@ impl HistoryCell for ToolCallCell {
 
         if self.is_expanded() {
             for msg in self.progress_messages.iter().take(8) {
-                lines.push(transcript_line(msg, theme));
+                lines.push(tool_transcript_line(msg, 185, theme));
             }
-            push_result_preview(&mut lines, &self.result_lines, 12, theme, true);
+            push_tool_result_preview(&mut lines, &self.result_lines, 12, 185, theme, true, "    ");
         } else {
-            push_result_preview(&mut lines, &self.result_lines, 2, theme, false);
+            push_tool_result_preview(&mut lines, &self.result_lines, 2, 185, theme, false, "    ");
         }
 
         frame.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }), area);
@@ -496,11 +486,11 @@ impl HistoryCell for ToolCallCell {
 
         if self.is_expanded() {
             for msg in self.progress_messages.iter().take(8) {
-                lines.push(transcript_line(msg, theme));
+                lines.push(tool_transcript_line(msg, 185, theme));
             }
-            push_result_preview(&mut lines, &self.result_lines, 12, theme, true);
+            push_tool_result_preview(&mut lines, &self.result_lines, 12, 185, theme, true, "    ");
         } else {
-            push_result_preview(&mut lines, &self.result_lines, 2, theme, false);
+            push_tool_result_preview(&mut lines, &self.result_lines, 2, 185, theme, false, "    ");
         }
 
         frame.render_widget(
@@ -516,77 +506,6 @@ impl HistoryCell for ToolCallCell {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-}
-
-fn push_result_preview(
-    lines: &mut Vec<Line<'static>>,
-    result_lines: &[String],
-    max_lines: usize,
-    theme: &Theme,
-    expanded: bool,
-) {
-    for line in result_lines.iter().take(max_lines) {
-        lines.push(transcript_line(line, theme));
-    }
-    let hidden = hidden_result_lines(result_lines.len(), max_lines);
-    if hidden > 0 {
-        let hint = if expanded {
-            format!("    … +{hidden} lines")
-        } else {
-            format!("    … +{hidden} lines (ctrl + t to view transcript)")
-        };
-        lines.push(Line::from(Span::styled(
-            hint,
-            Style::default().fg(theme.thinking_fg).add_modifier(Modifier::DIM),
-        )));
-    }
-}
-
-fn transcript_line(line: &str, theme: &Theme) -> Line<'static> {
-    Line::from(vec![
-        Span::styled("  └ ", Style::default().fg(theme.thinking_fg)),
-        Span::styled(truncate_chars(line, 180), Style::default().fg(theme.thinking_fg)),
-    ])
-}
-
-fn hidden_result_lines(total: usize, shown: usize) -> usize {
-    total.saturating_sub(shown)
-}
-
-pub(crate) fn extract_result_lines(content: &serde_json::Value, is_error: bool) -> Vec<String> {
-    let mut lines = Vec::new();
-    if let Some(stdout) = content.get("stdout").and_then(|value| value.as_str()) {
-        lines.extend(stdout.lines().map(str::to_string).filter(|line| !line.trim().is_empty()));
-    }
-    if let Some(stderr) = content.get("stderr").and_then(|value| value.as_str()) {
-        lines.extend(stderr.lines().map(str::to_string).filter(|line| !line.trim().is_empty()));
-    }
-    if lines.is_empty()
-        && let Some(text) = content.get("text").and_then(|value| value.as_str())
-    {
-        lines.extend(text.lines().map(str::to_string).filter(|line| !line.trim().is_empty()));
-    }
-    if lines.is_empty() && is_error {
-        if let Some(message) = content
-            .get("error")
-            .and_then(|error| error.get("message"))
-            .and_then(|value| value.as_str())
-        {
-            lines
-                .extend(message.lines().map(str::to_string).filter(|line| !line.trim().is_empty()));
-        } else {
-            lines.push(content.to_string());
-        }
-    }
-    lines
-}
-
-pub(crate) fn truncate_chars(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
-    }
-    let keep = max_chars.saturating_sub(1);
-    format!("{}…", text.chars().take(keep).collect::<String>())
 }
 
 // ─── TurnSummaryCell ─────────────────────────────────────────────────────────

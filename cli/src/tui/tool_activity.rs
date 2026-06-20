@@ -4,8 +4,11 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Paragraph, Wrap};
 
-use crate::tui::history_cell::{ToolState, extract_result_lines, truncate_chars};
 use crate::tui::theme::Theme;
+use crate::tui::tool_rendering::{
+    ToolState, extract_result_lines, is_shell_tool_name, push_result_preview, tool_title,
+    transcript_line, truncate_chars,
+};
 
 const MAX_ITEMS: usize = 24;
 const MAX_VISIBLE_LINES: usize = 10;
@@ -41,7 +44,7 @@ impl ToolActivityItem {
     }
 
     fn is_shell(&self) -> bool {
-        is_shell_name(&self.name)
+        is_shell_tool_name(&self.name)
     }
 
     fn can_expand(&self) -> bool {
@@ -63,16 +66,7 @@ impl ToolActivityItem {
     }
 
     fn title(&self, width: usize) -> String {
-        let detail = truncate_chars(self.detail.trim(), width.saturating_sub(14).max(16));
-        if self.is_shell() {
-            return match self.state {
-                ToolState::Pending | ToolState::Running { .. } => format!("Running {detail}"),
-                ToolState::Completed { ok: true } => format!("Ran {detail}"),
-                ToolState::Completed { ok: false } => format!("Failed {detail}"),
-            };
-        }
-
-        if detail.is_empty() { self.name.clone() } else { format!("{} {}", self.name, detail) }
+        tool_title(&self.name, &self.detail, &self.state, width.saturating_sub(14).max(16), false)
     }
 
     fn lines(&self, width: usize, theme: &Theme, max_visible_lines: usize) -> Vec<Line<'static>> {
@@ -107,6 +101,7 @@ impl ToolActivityItem {
                         width,
                         theme,
                         self.expanded,
+                        "  ",
                     );
                 }
                 return lines;
@@ -148,6 +143,7 @@ impl ToolActivityItem {
                     width,
                     theme,
                     self.expanded,
+                    "  ",
                 );
             }
         }
@@ -474,10 +470,6 @@ impl ToolActivityPanel {
     }
 }
 
-fn is_shell_name(name: &str) -> bool {
-    matches!(name.to_lowercase().as_str(), "bash" | "shell")
-}
-
 fn expanded_result_line_budget(
     current_lines: usize,
     result_line_count: usize,
@@ -489,41 +481,6 @@ fn expanded_result_line_budget(
 
 fn remaining_line_budget(current_lines: usize, max_visible_lines: usize) -> usize {
     max_visible_lines.saturating_sub(current_lines)
-}
-
-fn push_result_preview(
-    lines: &mut Vec<Line<'static>>,
-    result_lines: &[String],
-    max_lines: usize,
-    width: usize,
-    theme: &Theme,
-    expanded: bool,
-) {
-    for line in result_lines.iter().take(max_lines) {
-        lines.push(transcript_line(line, width, theme));
-    }
-    let hidden = result_lines.len().saturating_sub(max_lines);
-    if hidden > 0 {
-        let hint = if expanded {
-            format!("  … +{hidden} lines")
-        } else {
-            format!("  … +{hidden} lines (ctrl + t to view transcript)")
-        };
-        lines.push(Line::from(Span::styled(
-            hint,
-            Style::default().fg(theme.thinking_fg).add_modifier(Modifier::DIM),
-        )));
-    }
-}
-
-fn transcript_line(line: &str, width: usize, theme: &Theme) -> Line<'static> {
-    Line::from(vec![
-        Span::styled("  └ ", Style::default().fg(theme.thinking_fg)),
-        Span::styled(
-            truncate_chars(line, width.saturating_sub(5).max(16)),
-            Style::default().fg(theme.thinking_fg),
-        ),
-    ])
 }
 
 #[cfg(test)]

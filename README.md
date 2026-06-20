@@ -126,7 +126,7 @@ async fn main() -> Result<(), AgentError> {
 ### CLI / TUI
 - `telos` 无 prompt 时启动全屏 TUI，`telos "..."` 执行单次调用，`telos chat` 进入交互会话
 - TUI 使用后台 agent task 消费 `TurnEvent`，支持流式 markdown、工具状态、审批 overlay、自动审批、会话保存/恢复和模型切换
-- CLI 启动时加载项目上下文、memory runtime，并按配置可选注册 CodeQL 工具和 prompt section
+- CLI 启动时加载项目上下文、memory runtime，并注册轻量 CodeIndex 工具用于代码搜索和行号定位
 
 ## 架构
 

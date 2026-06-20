@@ -23,6 +23,7 @@ use url::Url;
 
 use crate::error::AgentError;
 use crate::tool::{PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput};
+use crate::tools::domain_filter::{domain_matches_any, parse_domain_list};
 
 use super::display_relative;
 
@@ -1212,31 +1213,10 @@ fn optional_i64(arguments: &Value, key: &str) -> Option<i64> {
 }
 
 fn optional_string_array(arguments: &Value, key: &str) -> Result<Option<Vec<String>>, AgentError> {
-    let Some(value) = arguments.get(key) else {
+    if arguments.get(key).is_none() {
         return Ok(None);
-    };
-    let Some(values) = value.as_array() else {
-        return Err(AgentError::Validation(format!("`{key}` must be an array of strings")));
-    };
-    let mut out = Vec::new();
-    for value in values {
-        let Some(item) = value.as_str() else {
-            return Err(AgentError::Validation(format!("`{key}` must be an array of strings")));
-        };
-        let item = item.trim().trim_start_matches('.').to_ascii_lowercase();
-        if !item.is_empty() {
-            out.push(item);
-        }
     }
-    Ok(Some(out))
-}
-
-fn domain_matches_any(host: &str, domains: &[String]) -> bool {
-    let host = host.trim_end_matches('.').to_ascii_lowercase();
-    domains.iter().any(|domain| {
-        let domain = domain.trim_start_matches('.').to_ascii_lowercase();
-        host == domain || host.ends_with(&format!(".{domain}"))
-    })
+    parse_domain_list(arguments, key).map(Some)
 }
 
 fn parse_runtime_json_value(result: Value) -> Result<Value, AgentError> {

@@ -11,6 +11,7 @@ pub mod selection_popup;
 pub mod status_bar;
 pub mod theme;
 pub mod tool_activity;
+mod tool_rendering;
 pub mod user_input_popup;
 
 use crate::tui::app::{App, ModelSwitchConfig, TuiLayoutSettings};

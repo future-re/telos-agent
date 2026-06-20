@@ -6,14 +6,14 @@
 
 use std::sync::{Arc, Mutex};
 
-use crate::codeql::CodeQLTool;
-use crate::codeql::CodeqlConfig;
 use crate::skills::SkillRegistry;
 use crate::tasks::TaskManager;
 use crate::tool::ToolRegistry;
 
 mod ask_user_question;
 mod browser;
+mod code_index;
+mod domain_filter;
 mod file_edit;
 mod file_read;
 mod file_write;
@@ -33,13 +33,15 @@ pub use browser::{
     BrowserNavigateTool, BrowserScreenshotTool, BrowserScrollTool, BrowserSelectTool,
     BrowserStartTool, BrowserStateTool, BrowserTypeTool,
 };
+pub use code_index::{CodeContextTool, CodeIndexRefreshTool, CodeSearchTool};
 pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
 pub use file_write::FileWriteTool;
 pub use glob::GlobTool;
 pub use grep::GrepTool;
 pub use memory::{
-    MemoryEditTool, MemoryGrepTool, MemoryReadTool, MemoryStatusTool, MemoryWriteTool,
+    MemoryEditTool, MemoryGrepTool, MemoryMaintenanceTool, MemoryReadTool, MemoryStatusTool,
+    MemoryWriteTool,
 };
 pub use shell::ShellTool;
 pub use skill::SkillTool;
@@ -56,6 +58,9 @@ pub fn register_core_tools(registry: &mut ToolRegistry) {
     registry.register(FileEditTool);
     registry.register(GlobTool);
     registry.register(GrepTool);
+    registry.register(CodeSearchTool);
+    registry.register(CodeContextTool);
+    registry.register(CodeIndexRefreshTool);
     registry.register(WebFetchTool::new());
     registry.register(WebSearchTool);
     registry.register(BrowserStartTool::new(browser_manager.clone()));
@@ -88,23 +93,13 @@ pub fn register_memory_tools(
     registry.register(MemoryWriteTool::new(store.clone()));
     registry.register(MemoryGrepTool::new(store.clone()));
     registry.register(MemoryEditTool::new(store.clone()));
-    registry.register(MemoryStatusTool::new(store));
+    registry.register(MemoryStatusTool::new(store.clone()));
+    registry.register(MemoryMaintenanceTool::new(store));
 }
 
 /// Register the Skill tool if a skill registry is available.
 pub fn register_skill_tool(registry: &mut ToolRegistry, skill_registry: Arc<SkillRegistry>) {
     registry.register(SkillTool::new(skill_registry));
-}
-
-/// Register the CodeQL tool if a CodeQL config is available.
-pub fn register_codeql_tools(
-    registry: &mut ToolRegistry,
-    store: Arc<Mutex<crate::memory::MemoryStore>>,
-    config: Option<CodeqlConfig>,
-) {
-    if let Some(cfg) = config {
-        registry.register(CodeQLTool::new(Arc::new(cfg), store));
-    }
 }
 
 // Re-export shared helpers that other crate modules use directly.

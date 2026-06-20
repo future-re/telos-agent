@@ -2092,6 +2092,85 @@ async fn memory_write_and_read_tools_roundtrip() {
 }
 
 #[tokio::test]
+async fn memory_maintenance_tool_dry_run_and_apply() {
+    use std::sync::{Arc, Mutex};
+    use telos_agent::memory::{MemoryCategory, MemoryEntry, MemoryStatus, MemoryStore};
+    use telos_agent::tool::ToolContext;
+    use telos_agent::{ToolRegistry, register_memory_tools};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut raw_store = MemoryStore::new(dir.path().to_path_buf());
+    let old_auto = MemoryEntry {
+        name: "old-auto".into(),
+        description: "Old auto command".into(),
+        category: MemoryCategory::Command,
+        tags: vec!["auto-learned".into(), "bash".into()],
+        created: "100".into(),
+        updated: "100".into(),
+        status: MemoryStatus::Working,
+        times_used: 0,
+        confidence: None,
+        related: vec![],
+        source_session: None,
+        body: "old".into(),
+    };
+    let mut new_auto = old_auto.clone();
+    new_auto.name = "new-auto".into();
+    new_auto.description = "New auto command".into();
+    new_auto.created = "200".into();
+    new_auto.updated = "200".into();
+    raw_store.write(old_auto).unwrap();
+    raw_store.write(new_auto).unwrap();
+
+    let store = Arc::new(Mutex::new(raw_store));
+    let mut registry = ToolRegistry::new();
+    register_memory_tools(&mut registry, store.clone());
+    let tool = registry.get("MemoryMaintenance").unwrap();
+    let ctx = ToolContext {
+        session_id: "test".into(),
+        turn_id: 1,
+        tool_call_id: None,
+        cwd: std::env::current_dir().unwrap(),
+        env: Default::default(),
+        messages: Arc::new(vec![]),
+        progress: None,
+        read_file_state: Arc::new(tokio::sync::Mutex::new(Default::default())),
+        timeout: None,
+        max_file_read_bytes: 50 * 1024 * 1024,
+    };
+
+    let dry_run = tool
+        .invoke(
+            serde_json::json!({"max_auto_learned_commands": 1, "archive_deprecated": false}),
+            ctx.clone(),
+        )
+        .await
+        .unwrap()
+        .content;
+    assert_eq!(dry_run["applied"], false);
+    assert_eq!(dry_run["archived_count"], 0);
+    assert_eq!(dry_run["actions"].as_array().unwrap()[0]["name"], "old-auto");
+    assert!(store.lock().unwrap().read("old-auto").is_some());
+
+    let applied = tool
+        .invoke(
+            serde_json::json!({
+                "apply": true,
+                "max_auto_learned_commands": 1,
+                "archive_deprecated": false
+            }),
+            ctx,
+        )
+        .await
+        .unwrap()
+        .content;
+    assert_eq!(applied["applied"], true);
+    assert_eq!(applied["archived_count"], 1);
+    assert!(store.lock().unwrap().read("old-auto").is_none());
+    assert!(dir.path().join("_archived").join("old-auto.md").exists());
+}
+
+#[tokio::test]
 async fn memory_section_renders_top_entries() {
     use std::sync::{Arc, Mutex};
     use telos_agent::memory::{MemoryCategory, MemoryEntry, MemoryStatus, MemoryStore};

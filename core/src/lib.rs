@@ -19,7 +19,7 @@
 // Module declarations — public so downstream crates can name internal types directly.
 pub mod approval;
 pub mod bash_security;
-pub mod codeql;
+pub mod code_index;
 pub mod compaction;
 pub mod config;
 pub mod diagnostics;
@@ -68,16 +68,15 @@ pub use message::{ContentBlock, Message, Role, TextBlock, ThinkingBlock, ToolCal
 // Memory — persistent cross-session agent memory.
 pub use memory::ProfileManager;
 pub use memory::{
-    MemoryCategory, MemoryEntry, MemoryFormat, MemoryQuery, MemorySort, MemoryStatus, MemoryStore,
-    UpsertOutcome, unix_timestamp,
+    MemoryCategory, MemoryEntry, MemoryFormat, MemoryMaintenanceAction,
+    MemoryMaintenanceActionKind, MemoryMaintenancePolicy, MemoryMaintenanceReport, MemoryQuery,
+    MemorySort, MemoryStatus, MemoryStore, UpsertOutcome, unix_timestamp,
 };
 pub use tools::{
     MemoryEditTool, MemoryGrepTool, MemoryReadTool, MemoryStatusTool, MemoryWriteTool,
 };
-// CodeQL — static analysis integration.
-pub use codeql::{
-    CodeQLTool, CodeqlConfig, CodeqlDatabase, CodeqlSection, SarifParser, SarifResult,
-};
+// Code index — lightweight repository search and path/line lookup.
+pub use code_index::{CodeContextLine, CodeIndex, CodeSearchMatch, IndexedFile};
 // Metrics — session-level counters accumulated by the runtime.
 pub use config::CancellationState;
 pub use metrics::SessionMetrics;
@@ -124,8 +123,8 @@ pub use tool::{
 pub use tools::{
     AskUserQuestionTool, BrowserBackTool, BrowserClickTool, BrowserCloseTool, BrowserFindUrlTool,
     BrowserManager, BrowserNavigateTool, BrowserScreenshotTool, BrowserScrollTool,
-    BrowserSelectTool, BrowserStartTool, BrowserStateTool, BrowserTypeTool, FileEditTool,
-    FileReadTool, FileWriteTool, GlobTool, GrepTool, ShellTool, SkillTool, TaskCreateTool,
-    TaskGetTool, TaskListTool, TaskUpdateTool, WebFetchTool, WebSearchTool, register_codeql_tools,
-    register_core_tools, register_memory_tools, register_task_tools,
+    BrowserSelectTool, BrowserStartTool, BrowserStateTool, BrowserTypeTool, CodeContextTool,
+    CodeIndexRefreshTool, CodeSearchTool, FileEditTool, FileReadTool, FileWriteTool, GlobTool,
+    GrepTool, ShellTool, SkillTool, TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool,
+    WebFetchTool, WebSearchTool, register_core_tools, register_memory_tools, register_task_tools,
 };

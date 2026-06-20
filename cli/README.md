@@ -11,7 +11,7 @@ Codex-style full-screen terminal interface for [telos-agent](..).
 - **Interactive approval** — approve/deny tool calls inline
 - **Auto mode** — toggle automatic approval from the TUI and persist it in config
 - **Dual-model routing** — use a thinking model for planning/recovery and a fast model for execution
-- **Memory and CodeQL integration** — project memory is registered by default; CodeQL can be enabled from config
+- **Memory and CodeIndex integration** — project memory is registered by default; code search uses a local `.telos/index/code_index.json`
 - **Session persistence** — auto-saved to `.telos/sessions/`
 
 ## Usage
@@ -124,18 +124,9 @@ fast = "deepseek-v4-flash"
 
 Without explicit model settings, DeepSeek defaults to `deepseek-v4-pro` for thinking and `deepseek-v4-flash` for fast execution.
 
-### CodeQL
+### CodeIndex
 
-CodeQL is runtime-gated and disabled unless configured. When enabled, the CLI registers the `CodeQL` tool, injects a CodeQL prompt section, and runs startup analysis in the background.
-
-```toml
-[codeql]
-enabled = true
-language = "rust"
-query_packs = ["security-and-quality"]
-max_results = 50
-timeout_secs = 120
-```
+The CLI registers `CodeSearch`, `CodeContext`, and `CodeIndexRefresh` by default. The index is stored under `.telos/index/code_index.json` and is created lazily on first search or explicitly refreshed with `CodeIndexRefresh`.
 
 ### Approval policies
 

@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use telos_agent::memory::unix_timestamp;
 use telos_agent::{
-    MemoryCategory, MemoryEntry, MemorySection, MemoryStatus, MemoryStore, ToolRegistry, ToolResult,
+    MemoryCategory, MemoryEntry, MemoryMaintenancePolicy, MemorySection, MemoryStatus, MemoryStore,
+    ToolRegistry, ToolResult,
 };
 
 pub fn memory_root(project_root: Option<&Path>) -> Result<PathBuf> {
@@ -16,7 +17,19 @@ pub fn memory_root(project_root: Option<&Path>) -> Result<PathBuf> {
 }
 
 pub fn open_memory_store(project_root: Option<&Path>) -> Result<Arc<Mutex<MemoryStore>>> {
-    Ok(Arc::new(Mutex::new(MemoryStore::new(memory_root(project_root)?))))
+    let mut store = MemoryStore::new(memory_root(project_root)?);
+    match store.apply_maintenance(&MemoryMaintenancePolicy::default()) {
+        Ok(report) if report.archived_count > 0 => {
+            tracing::info!(
+                archived_count = report.archived_count,
+                candidates = report.actions.len(),
+                "memory maintenance archived stale entries"
+            );
+        }
+        Ok(_) => {}
+        Err(err) => tracing::warn!("memory maintenance failed: {err}"),
+    }
+    Ok(Arc::new(Mutex::new(store)))
 }
 
 pub fn register_memory_runtime(
@@ -175,4 +188,44 @@ fn stable_id(input: &str) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("{hash:016x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn auto_command(name: &str, updated: &str) -> MemoryEntry {
+        MemoryEntry {
+            name: name.into(),
+            description: format!("Auto command {name}"),
+            category: MemoryCategory::Command,
+            tags: vec!["auto-learned".into(), "bash".into()],
+            created: updated.into(),
+            updated: updated.into(),
+            status: MemoryStatus::Working,
+            times_used: 0,
+            confidence: Some("medium".into()),
+            related: vec![],
+            source_session: None,
+            body: format!("body {name}"),
+        }
+    }
+
+    #[test]
+    fn open_memory_store_applies_default_maintenance() {
+        let project = tempfile::tempdir().unwrap();
+        let root = memory_root(Some(project.path())).unwrap();
+        let mut seed = MemoryStore::new(root.clone());
+        for n in 0..21 {
+            seed.write(auto_command(&format!("auto-{n:02}"), &format!("{n:03}"))).unwrap();
+        }
+
+        let store = open_memory_store(Some(project.path())).unwrap();
+        let store = store.lock().unwrap();
+
+        assert_eq!(store.list().len(), 20);
+        assert!(store.read("auto-00").is_none());
+        assert!(store.read("auto-20").is_some());
+        assert!(root.join("_archived").join("auto-00.md").exists());
+    }
 }

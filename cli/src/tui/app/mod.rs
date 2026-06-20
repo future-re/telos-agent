@@ -404,6 +404,7 @@ impl App {
             return;
         }
         crate::memory_runtime::record_user_preference(&self.memory, &prompt).await;
+        self.input.record_history(prompt.clone());
         self.chat.push_cell(Box::new(UserCell { content: prompt.clone() }));
         let _ = self.turn_tx.send(BackgroundCommand::Prompt(prompt));
         if self.turn_active {
@@ -592,6 +593,64 @@ mod tests {
         app.send_prompt("hello".into()).await;
 
         assert!(!cancelled.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn ctrl_up_recalls_prompt_sent_in_current_session() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+
+        app.send_prompt("first prompt".into()).await;
+        app.turn_active = false;
+        app.mode = Mode::Normal;
+
+        app.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL)))
+            .await
+            .unwrap();
+
+        assert_eq!(app.input.text(), "first prompt");
+    }
+
+    #[tokio::test]
+    async fn new_session_clears_input_history() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.input.record_history("old prompt".into());
+
+        app.new_session();
+        app.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL)))
+            .await
+            .unwrap();
+
+        assert_eq!(app.input.text(), "");
+    }
+
+    #[tokio::test]
+    async fn resume_session_rebuilds_input_history_from_user_messages() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.storage
+            .save_snapshot(
+                "saved-session",
+                &[
+                    Message::user("first prompt"),
+                    Message::assistant("first answer"),
+                    Message::user("latest prompt"),
+                ],
+            )
+            .await
+            .unwrap();
+
+        app.resume_session("saved-session").await;
+        app.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL)))
+            .await
+            .unwrap();
+        assert_eq!(app.input.text(), "latest prompt");
+
+        app.handle_event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL)))
+            .await
+            .unwrap();
+        assert_eq!(app.input.text(), "first prompt");
     }
 
     #[tokio::test]

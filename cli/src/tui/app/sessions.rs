@@ -26,6 +26,7 @@ impl App {
         }
         self.chat.clear();
         self.tool_activity.clear();
+        self.input.clear_history();
         self.reset_turn_usage();
         self.turn_started = None;
         self.cancellation.reset();
@@ -79,8 +80,15 @@ impl App {
         }
         match self.storage.load(session_id).await {
             Ok(messages) => {
+                let input_history = messages
+                    .iter()
+                    .filter(|message| message.role == Role::User)
+                    .map(telos_agent::Message::text_content)
+                    .filter(|text| !text.is_empty())
+                    .collect::<Vec<_>>();
                 self.chat.clear();
                 self.tool_activity.clear();
+                self.input.replace_history(input_history);
                 self.chat.push_cell(Box::new(AgentCell {
                     buffer: format!("Resumed session: {session_id}"),
                     is_streaming: false,

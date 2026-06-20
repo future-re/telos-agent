@@ -43,7 +43,7 @@ struct ComposerHints {
 impl ComposerHints {
     fn normal(width: u16) -> Self {
         let left = String::from(" Enter send  Alt+Enter newline ");
-        let right = String::from(" Ctrl+up/down history  Shift+Tab auto  Ctrl+D quit ");
+        let right = String::from(" Shift+Tab auto  Ctrl+D quit ");
 
         if usize::from(width) >= left.len() + right.len() + 2 {
             Self { left, right: Some(right) }
@@ -100,6 +100,30 @@ impl InputPanel {
         self.draft.clear();
         self.mode = InputMode::Normal;
         self.popup.hide();
+    }
+
+    pub fn clear_history(&mut self) {
+        self.history.clear();
+        self.history_pos = None;
+        self.draft.clear();
+    }
+
+    pub fn replace_history(&mut self, history: Vec<String>) {
+        self.history = history.into_iter().filter(|item| !item.trim().is_empty()).collect();
+        self.history_pos = None;
+        self.draft.clear();
+    }
+
+    pub fn record_history(&mut self, text: String) {
+        if text.trim().is_empty() {
+            return;
+        }
+        if self.history.last() == Some(&text) {
+            return;
+        }
+        self.history.push(text);
+        self.history_pos = None;
+        self.draft.clear();
     }
 
     pub fn insert_text(&mut self, text: &str) {
@@ -297,9 +321,7 @@ impl InputPanel {
     }
 
     fn submit_text(&mut self, text: String) -> InputEvent {
-        self.history.push(text.clone());
-        self.history_pos = None;
-        self.draft.clear();
+        self.record_history(text.clone());
         self.clear_text();
         InputEvent::Submit(text)
     }
@@ -583,10 +605,7 @@ mod tests {
         let hints = ComposerHints::normal(96);
 
         assert_eq!(hints.left, " Enter send  Alt+Enter newline ");
-        assert_eq!(
-            hints.right.as_deref(),
-            Some(" Ctrl+up/down history  Shift+Tab auto  Ctrl+D quit ")
-        );
+        assert_eq!(hints.right.as_deref(), Some(" Shift+Tab auto  Ctrl+D quit "));
     }
 
     #[test]

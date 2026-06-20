@@ -1,4 +1,7 @@
 /target
+/desktop/node_modules/
+/desktop/dist/
+/desktop/.vite/
 .vscode
 .env
 cobertura.xml

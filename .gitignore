@@ -12,3 +12,5 @@ cobertura.xml
 .claude/
 .telos/
 .superpowers/
+.venv-pypi-build/
+dist

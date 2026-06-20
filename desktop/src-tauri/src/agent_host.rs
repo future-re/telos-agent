@@ -411,6 +411,7 @@ fn prepare_desktop_runtime(
     telos_agent::register_core_tools(&mut tools);
     let task_manager =
         Arc::new(telos_agent::TaskManager::new(project_root_or_cwd.join(".telos").join("tasks")));
+    agent_config.task_manager = Some(task_manager.clone());
     telos_agent::register_task_tools(&mut tools, task_manager);
 
     telos_agent::register_memory_tools(&mut tools, memory_store.clone());

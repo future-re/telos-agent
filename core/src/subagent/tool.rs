@@ -115,9 +115,11 @@ Do not duplicate work already being performed in the parent session.",
             .and_then(|value| value.as_str())
             .ok_or_else(|| AgentError::Validation("missing string `prompt`".into()))?;
 
-        if arguments.get("run_in_background").and_then(|value| value.as_bool()).unwrap_or(false) {
+        if arguments.get("run_in_background").and_then(|value| value.as_bool()).unwrap_or(false)
+            && self.config.task_manager.is_none()
+        {
             return Err(AgentError::Validation(
-                "run_in_background is not supported by the in-process SubagentTool yet".into(),
+                "run_in_background requires AgentConfig.task_manager".into(),
             ));
         }
 

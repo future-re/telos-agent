@@ -22,6 +22,7 @@ fn canonical_case(lower: &str) -> String {
         "copy-item" => "Copy-Item".into(),
         "move-item" => "Move-Item".into(),
         "write-output" => "Write-Output".into(),
+        "select-string" => "Select-String".into(),
         _ => lower.to_string(),
     }
 }

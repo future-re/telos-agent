@@ -43,10 +43,13 @@ pub(crate) fn prepare_runtime(
         project_root.as_deref(),
     )?;
 
+    let task_manager = task_manager_for_root(&project_root_or_cwd);
+    agent_config.task_manager = Some(task_manager.clone());
+
     let mut tools = ToolRegistry::new();
     let default_shell = resolve_default_shell(file_config);
     telos_agent::register_core_tools_with_shell(&mut tools, default_shell);
-    register_cli_task_tools(&mut tools, &project_root_or_cwd);
+    register_cli_task_tools(&mut tools, task_manager);
 
     telos_agent::register_memory_tools(&mut tools, memory_store.clone());
     agent_config.prompt_assembly = Some(Arc::new(build_prompt_assembly(
@@ -97,14 +100,19 @@ fn build_prompt_assembly(
         agent_config.skill_registry.clone(),
         agent_config.path,
     );
-    context::append_prompt_context(&mut assembly, &context);
+    context::append_prompt_context(&mut assembly, context);
     assembly.add(telos_agent::MemorySection::new(memory_store));
     assembly
 }
 
-pub(crate) fn register_cli_task_tools(registry: &mut ToolRegistry, project_root_or_cwd: &Path) {
-    let task_dir = project_root_or_cwd.join(".telos").join("tasks");
-    let task_manager = Arc::new(telos_agent::TaskManager::new(task_dir));
+pub(crate) fn task_manager_for_root(project_root_or_cwd: &Path) -> Arc<telos_agent::TaskManager> {
+    Arc::new(telos_agent::TaskManager::new(project_root_or_cwd.join(".telos").join("tasks")))
+}
+
+pub(crate) fn register_cli_task_tools(
+    registry: &mut ToolRegistry,
+    task_manager: Arc<telos_agent::TaskManager>,
+) {
     telos_agent::register_task_tools(registry, task_manager);
 }
 
@@ -131,7 +139,7 @@ pub(crate) async fn process_diagnostics(
 mod tests {
     use super::{
         rebuild_prompt_assembly, register_cli_subagent_tool, register_cli_task_tools,
-        resolve_default_shell,
+        resolve_default_shell, task_manager_for_root,
     };
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -161,9 +169,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let mut registry = ToolRegistry::new();
 
-        register_cli_task_tools(&mut registry, temp.path());
+        register_cli_task_tools(&mut registry, task_manager_for_root(temp.path()));
 
-        for name in ["TaskCreate", "TaskGet", "TaskList", "TaskUpdate"] {
+        for name in ["TaskCreate", "TaskGet", "TaskList", "TaskUpdate", "task_output", "task_stop"]
+        {
             assert!(registry.get(name).is_ok(), "{name} should be registered");
         }
 
@@ -210,6 +219,7 @@ mod tests {
         let mut runtime = super::prepare_runtime(&options, &FileConfig::default(), None).unwrap();
         let provider = Arc::new(MockProvider::new(vec![]));
 
+        assert!(runtime.agent_config.task_manager.is_some());
         register_cli_subagent_tool(&mut runtime.tools, &runtime.agent_config, provider).unwrap();
         rebuild_prompt_assembly(&mut runtime);
 

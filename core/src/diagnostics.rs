@@ -207,7 +207,7 @@ pub fn sanitized_event_for_failure(
 
 fn argument_summary(tool_name: &str, arguments: &serde_json::Value) -> String {
     let name = tool_name.to_ascii_lowercase();
-    if (name == "bash" || name == "shell")
+    if (name == "bash" || name == "shell" || name == "powershell")
         && let Some(command) = arguments.get("command").and_then(|value| value.as_str())
     {
         return summarize_command(command);
@@ -371,5 +371,15 @@ mod tests {
             event.signature,
             "Bash:execution_error:exit=101:cargo test:Command failed with exit code Some(101)"
         );
+    }
+
+    #[test]
+    fn powershell_arguments_are_summarized_like_shell_commands() {
+        let summary = argument_summary(
+            "PowerShell",
+            &json!({ "command": "Get-ChildItem -Force C:\\Users\\alice" }),
+        );
+
+        assert_eq!(summary, "Get-ChildItem");
     }
 }

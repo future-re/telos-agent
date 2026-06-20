@@ -45,7 +45,7 @@ async fn cancelling_during_bash_tool_kills_running_command() {
         panic!("turn stream ended without surfacing cancellation");
     });
 
-    let _pid = tokio::time::timeout(std::time::Duration::from_millis(500), async {
+    let pid = tokio::time::timeout(std::time::Duration::from_millis(500), async {
         loop {
             if let Ok(pid) = tokio::fs::read_to_string(&pid_path).await {
                 break pid.trim().parse::<i32>().unwrap();
@@ -67,7 +67,7 @@ async fn cancelling_during_bash_tool_kills_running_command() {
     {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         let still_running = std::process::Command::new("kill")
-            .args(["-0", &_pid.to_string()])
+            .args(["-0", &pid.to_string()])
             .stderr(std::process::Stdio::null())
             .status()
             .map(|status| status.success())

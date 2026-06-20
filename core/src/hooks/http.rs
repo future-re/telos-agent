@@ -14,6 +14,7 @@ pub fn exec_http_hook(
     })?;
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
         .user_agent("telos-agent/0.1")
         .build()
         .map_err(|err| AgentError::ToolExecution {
@@ -33,13 +34,6 @@ pub fn exec_http_hook(
         tool: "HttpHook".into(),
         message: format!("HTTP request failed: {err}"),
     })?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(AgentError::ToolExecution {
-            tool: "HttpHook".into(),
-            message: format!("HTTP request returned status {status}"),
-        });
-    }
     response.text().map_err(|err| AgentError::ToolExecution {
         tool: "HttpHook".into(),
         message: format!("failed to read HTTP response body: {err}"),
@@ -82,5 +76,54 @@ mod tests {
             .to_string();
 
         assert!(err.contains("invalid HTTP method"), "{err}");
+    }
+
+    #[test]
+    fn exec_http_hook_returns_error_status_body_like_curl_s() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let server = runtime.block_on(async {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/missing"))
+                .respond_with(ResponseTemplate::new(404).set_body_string("not found body"))
+                .mount(&server)
+                .await;
+            server
+        });
+
+        let response =
+            exec_http_hook(&format!("{}/missing", server.uri()), "GET", &HashMap::new(), None)
+                .unwrap();
+
+        assert_eq!(response, "not found body");
+    }
+
+    #[test]
+    fn exec_http_hook_does_not_follow_redirects_like_curl_s() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let server = runtime.block_on(async {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/redirect"))
+                .respond_with(
+                    ResponseTemplate::new(302)
+                        .insert_header("location", "/target")
+                        .set_body_string("redirect body"),
+                )
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .and(path("/target"))
+                .respond_with(ResponseTemplate::new(200).set_body_string("followed body"))
+                .mount(&server)
+                .await;
+            server
+        });
+
+        let response =
+            exec_http_hook(&format!("{}/redirect", server.uri()), "GET", &HashMap::new(), None)
+                .unwrap();
+
+        assert_eq!(response, "redirect body");
     }
 }

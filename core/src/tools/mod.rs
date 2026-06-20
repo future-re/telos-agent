@@ -49,7 +49,9 @@ pub use memory::{
 pub use powershell::PowerShellTool;
 pub use shell::ShellTool;
 pub use skill::SkillTool;
-pub use tasks::{TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool};
+pub use tasks::{
+    TaskCreateTool, TaskGetTool, TaskListTool, TaskOutputTool, TaskStopTool, TaskUpdateTool,
+};
 pub use web_fetch::WebFetchTool;
 pub use web_search::WebSearchTool;
 
@@ -122,7 +124,9 @@ pub fn register_task_tools(registry: &mut ToolRegistry, task_manager: Arc<TaskMa
     registry.register(TaskCreateTool::new(task_manager.clone()));
     registry.register(TaskGetTool::new(task_manager.clone()));
     registry.register(TaskListTool::new(task_manager.clone()));
-    registry.register(TaskUpdateTool::new(task_manager));
+    registry.register(TaskUpdateTool::new(task_manager.clone()));
+    registry.register(TaskOutputTool::new(task_manager.clone()));
+    registry.register(TaskStopTool::new(task_manager));
 }
 
 /// Register memory tools with the supplied registry.

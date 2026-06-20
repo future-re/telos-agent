@@ -86,6 +86,11 @@ impl Synapse {
                         blocked_by: vec![],
                         blocks: vec![],
                         output: None,
+                        kind: None,
+                        agent_id: None,
+                        agent_type: None,
+                        worktree_path: None,
+                        error: None,
                     };
                     tm.create(task);
                     id

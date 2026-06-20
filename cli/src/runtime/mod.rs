@@ -97,7 +97,7 @@ fn build_prompt_assembly(
         agent_config.skill_registry.clone(),
         agent_config.path,
     );
-    context::append_prompt_context(&mut assembly, &context);
+    context::append_prompt_context(&mut assembly, context);
     assembly.add(telos_agent::MemorySection::new(memory_store));
     assembly
 }

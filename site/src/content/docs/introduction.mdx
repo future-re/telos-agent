@@ -1,0 +1,28 @@
+---
+title: Introduction
+description: Learn what telos is, how its runtime loop works, and where to use it.
+---
+
+`telos` is a Rust intent-driven agent runtime. It packages the core turn loop for an agent: user input becomes model sampling, model output may request tool execution, tool results are fed back into the model, and the turn completes with a final response.
+
+The project is designed to be used as the kernel for AI coding assistants, chatbots, and automation workflows. Its repository is [future-re/telos-agent](https://github.com/future-re/telos-agent).
+
+## Runtime Loop
+
+The runtime follows the loop described by the project README:
+
+```text
+intent -> execute -> think -> complete
+```
+
+In library terms, `AgentSession` owns the conversation state and runs a turn through `run_turn` or `run_turn_stream`. During a turn, telos samples from a `ModelProvider`, dispatches requested tools from a `ToolRegistry`, applies approval policy before sensitive work, records events, and returns a `TurnResult`.
+
+## Core Surfaces
+
+telos exposes three primary surfaces:
+
+- `telos_agent`, the Rust library crate for embedding the runtime.
+- `telos`, the CLI and full-screen TUI for terminal workflows.
+- A desktop client direction, currently represented by a Tauri, Vite, React, and TypeScript scaffold.
+
+The same core runtime concepts appear across those surfaces: sessions, providers, tools, approval, events, storage, memory, tasks, MCP, plugins, and diagnostics.

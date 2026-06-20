@@ -1,0 +1,26 @@
+---
+title: Rust API Reference
+description: Use generated rustdoc as the item-level source of truth for telos_agent.
+---
+
+The generated Rust API reference is available at:
+
+[Open the telos_agent rustdoc](/api/rust/telos_agent/)
+
+The website guides explain the main concepts and entry points. Generated rustdoc is the source of truth for item-level details such as module organization, function signatures, trait methods, structs, enums, fields, and feature-specific documentation.
+
+## Generate Locally
+
+From the repository root:
+
+```bash
+./scripts/generate-core-api-docs.sh
+```
+
+The generated entry point is:
+
+```text
+target/doc/telos_agent/index.html
+```
+
+Use the library guide for a concise map of the public surface, then use rustdoc when you need exact API signatures.

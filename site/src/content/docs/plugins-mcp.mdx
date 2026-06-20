@@ -1,0 +1,28 @@
+---
+title: Plugins and MCP
+description: Extend telos with plugin metadata, skills, prompt sections, and MCP tool bridges.
+---
+
+telos includes extension points for plugins and MCP so tool ecosystems can be registered with the same runtime used by sessions and the CLI.
+
+## Plugins
+
+The core API exposes `PluginRegistry`, `PluginId`, `PluginError`, and `BUILTIN_MARKETPLACE`. Plugins can load manifest metadata, tool specs, skills, prompt sections, MCP declarations, and subagents.
+
+Marketplace metadata is represented by `BUILTIN_MARKETPLACE` and plugin registry data. Use it to describe available plugin entries rather than hard-coding extension behavior in a client.
+
+## Skills
+
+The skill system uses Markdown skill files with YAML frontmatter. Loaded skills can be injected into prompts so an agent has specialized workflow or domain instructions available during a turn.
+
+## MCP Tool Bridge
+
+`McpManager`, `McpClient`, and `McpToolBridge` connect MCP servers to the tool registry over stdio JSON-RPC.
+
+MCP tools are registered with bridge names in this shape:
+
+```text
+mcp__<server>__<tool>
+```
+
+Once bridged, MCP tools participate in the same tool execution and approval flow as other registered tools.

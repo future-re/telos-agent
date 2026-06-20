@@ -1,0 +1,59 @@
+---
+title: Configuration
+description: Configure providers, models, environment variables, approvals, and diagnostics.
+---
+
+telos supports user-level and project-level configuration. User config lives at `~/.config/telos/config.toml`. Project config lives at `.telos.toml` in the project root and overrides matching user config keys. CLI flags override both.
+
+## Example Config
+
+```toml
+[agent]
+provider = "deepseek"
+max_iterations = 16
+
+[agent.models]
+thinking = "deepseek-v4-pro"
+fast = "deepseek-v4-flash"
+
+[env]
+DEEPSEEK_API_KEY = "sk-..."
+
+[approval]
+default_policy = "ask"
+
+[approval.policies]
+read = "allow"
+shell = "ask"
+write = "deny"
+
+[diagnostics]
+enabled = true
+retention_days = 14
+
+[diagnostics.github]
+enabled = false
+repository = "future-re/telos-agent"
+interval_hours = 24
+min_occurrences = 3
+```
+
+## Provider and Model
+
+`[agent].provider` selects the provider. The CLI accepts `deepseek`, `deep`, or `mock`.
+
+`[agent.models].thinking` controls planning, first iteration, recovery, and periodic rethink. `[agent.models].fast` controls tool execution and routine follow-up iterations. `[agent].model` can be used as a fallback when a specific route is not set.
+
+## Environment
+
+`[env]` can provide environment values such as `DEEPSEEK_API_KEY`. For the CLI, an explicit `--api-key` flag has higher priority, followed by provider-specific environment variables, config `[env]`, and then an interactive prompt.
+
+## Approval
+
+`[approval]` sets the default approval behavior. Per-tool policies live under `[approval.policies]` and use `allow`, `ask`, or `deny`.
+
+## Diagnostics
+
+`[diagnostics]` controls local sanitized tool failure records. CLI diagnostics are intended for local analysis and do not store or upload raw commands, full stdout/stderr, environment values, model messages, user prompts, or session transcripts.
+
+`[diagnostics.github]` is opt-in and can report recurring sanitized failures as GitHub issues when enabled and configured with credentials.

@@ -25,29 +25,6 @@ const installMethods = [
   },
 ];
 
-const runtimeSteps = [
-  {
-    label: { en: 'Prompt', zh: '提示' },
-    text: { en: 'User intent, memory, and project context', zh: '用户意图、记忆和项目上下文' },
-  },
-  {
-    label: { en: 'Model turn', zh: '模型回合' },
-    text: { en: 'Provider routing and typed streaming events', zh: '提供商路由与类型化流式事件' },
-  },
-  {
-    label: { en: 'Approval gate', zh: '审批关口' },
-    text: { en: 'Policy checks before shell, file, MCP, or plugin actions', zh: 'Shell、文件、MCP 或插件动作前先执行策略检查' },
-  },
-  {
-    label: { en: 'Tools', zh: '工具' },
-    text: { en: 'Validated side effects through one registry', zh: '通过同一个注册表执行已验证的副作用' },
-  },
-  {
-    label: { en: 'Result', zh: '结果' },
-    text: { en: 'Outputs and diagnostics return to the controlled loop', zh: '输出和诊断回到受控循环' },
-  },
-];
-
 const surfaces = [
   {
     label: { en: 'CLI / TUI', zh: 'CLI / TUI' },
@@ -161,11 +138,6 @@ const copy = {
     zh: '选择 Cargo 或 PyPI 安装，然后使用同一个 telos 命令启动。',
   },
   startTitle: { en: 'Start the CLI', zh: '启动 CLI' },
-  mapTitle: { en: 'Runtime map', zh: '运行时地图' },
-  mapNote: {
-    en: 'Every side effect passes through policy and returns evidence to the turn loop.',
-    zh: '每个副作用都先经过策略，再把证据回传到回合循环。',
-  },
   productEyebrow: { en: 'Product surfaces', zh: '产品扩展面' },
   productTitle: {
     en: 'One runtime boundary, multiple ways to ship.',
@@ -236,22 +208,6 @@ const copy = {
             <a class="button primary" href={href('/docs/quick-start/')}><Lang value={copy.primaryAction} /></a>
             <a class="button secondary" href={href('/api/rust/telos_agent/')}><Lang value={copy.secondaryAction} /></a>
           </div>
-        </div>
-
-        <div class="runtime-card" aria-label="Runtime preview">
-          <div class="runtime-card-heading">
-            <span><Lang value={copy.mapTitle} /></span>
-            <span>Rust</span>
-          </div>
-          <ol class="runtime-map">
-            {runtimeSteps.map((step) => (
-              <li>
-                <strong><Lang value={step.label} /></strong>
-                <span><Lang value={step.text} /></span>
-              </li>
-            ))}
-          </ol>
-          <p><Lang value={copy.mapNote} /></p>
         </div>
       </section>
 

@@ -50,18 +50,21 @@ fn merge_agent(
             provider: u.provider.clone(),
             max_iterations: u.max_iterations,
             models: u.models.clone(),
+            default_shell: u.default_shell,
         }),
         (None, Some(p)) => Some(AgentSection {
             model: p.model.clone(),
             provider: p.provider.clone(),
             max_iterations: p.max_iterations,
             models: p.models.clone(),
+            default_shell: p.default_shell,
         }),
         (Some(u), Some(p)) => Some(AgentSection {
             model: p.model.clone().or_else(|| u.model.clone()),
             provider: p.provider.clone().or_else(|| u.provider.clone()),
             max_iterations: p.max_iterations.or(u.max_iterations),
             models: p.models.clone().or_else(|| u.models.clone()),
+            default_shell: p.default_shell.or(u.default_shell),
         }),
     }
 }

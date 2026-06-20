@@ -55,12 +55,21 @@ pub struct ModelsSection {
     pub fast: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DefaultShell {
+    Bash,
+    #[serde(rename = "powershell")]
+    PowerShell,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct AgentSection {
     pub model: Option<String>,
     pub provider: Option<String>,
     pub max_iterations: Option<usize>,
     pub models: Option<ModelsSection>,
+    pub default_shell: Option<DefaultShell>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

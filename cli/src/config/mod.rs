@@ -11,8 +11,8 @@ pub use provider::{
     ResolvedProvider, build_agent_config, build_provider, build_provider_from_onboarding,
 };
 pub use types::{
-    AgentSection, ApprovalSection, DiagnosticsGithubSection, DiagnosticsSection, FileConfig,
-    ModelsSection, TuiDensity, TuiSection,
+    AgentSection, ApprovalSection, DefaultShell, DiagnosticsGithubSection, DiagnosticsSection,
+    FileConfig, ModelsSection, TuiDensity, TuiSection,
 };
 
 #[cfg(test)]
@@ -42,6 +42,7 @@ mod tests {
                 model: Some("deepseek-chat".into()),
                 max_iterations: None,
                 models: None,
+                default_shell: None,
             }),
             ..FileConfig::default()
         };
@@ -142,6 +143,19 @@ density = "compact"
     }
 
     #[test]
+    fn parses_agent_default_shell() {
+        let cfg: FileConfig = toml::from_str(
+            r#"
+[agent]
+default_shell = "powershell"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(cfg.agent.unwrap().default_shell, Some(DefaultShell::PowerShell));
+    }
+
+    #[test]
     fn rejects_invalid_tui_density_config() {
         let err = toml::from_str::<FileConfig>(
             r#"
@@ -182,6 +196,28 @@ density = "cozy"
         let merged = merge_configs(Some(user), Some(project));
 
         assert_eq!(merged.tui.unwrap().density, Some(TuiDensity::Compact));
+    }
+
+    #[test]
+    fn merge_configs_project_default_shell_overrides_user() {
+        let user = FileConfig {
+            agent: Some(AgentSection {
+                default_shell: Some(DefaultShell::Bash),
+                ..Default::default()
+            }),
+            ..FileConfig::default()
+        };
+        let project = FileConfig {
+            agent: Some(AgentSection {
+                default_shell: Some(DefaultShell::PowerShell),
+                ..Default::default()
+            }),
+            ..FileConfig::default()
+        };
+
+        let merged = merge_configs(Some(user), Some(project));
+
+        assert_eq!(merged.agent.unwrap().default_shell, Some(DefaultShell::PowerShell));
     }
 
     #[test]

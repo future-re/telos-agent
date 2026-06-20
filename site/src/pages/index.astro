@@ -6,9 +6,9 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const href = (path: string) => `${base}${path.startsWith('/') ? path : `/${path}`}`;
 
 const navItems = [
+  { label: { en: 'Product', zh: '产品' }, path: '#product' },
   { label: { en: 'Docs', zh: '文档' }, path: '/docs/introduction/' },
   { label: { en: 'API', zh: 'API' }, path: '/api/rust/telos_agent/' },
-  { label: { en: 'CLI', zh: 'CLI' }, path: '/docs/cli-guide/' },
   { label: { en: 'GitHub', zh: 'GitHub' }, path: 'https://github.com/future-re/telos-agent', external: true },
 ];
 
@@ -25,37 +25,84 @@ const installMethods = [
   },
 ];
 
-const capabilities = [
+const runtimeSteps = [
   {
-    label: { en: 'Runtime', zh: '运行时' },
-    title: { en: 'One loop for the whole turn', zh: '用一个循环管理完整回合' },
+    label: { en: 'Prompt', zh: '提示' },
+    text: { en: 'User intent, memory, and project context', zh: '用户意图、记忆和项目上下文' },
+  },
+  {
+    label: { en: 'Model turn', zh: '模型回合' },
+    text: { en: 'Provider routing and typed streaming events', zh: '提供商路由与类型化流式事件' },
+  },
+  {
+    label: { en: 'Approval gate', zh: '审批关口' },
+    text: { en: 'Policy checks before shell, file, MCP, or plugin actions', zh: 'Shell、文件、MCP 或插件动作前先执行策略检查' },
+  },
+  {
+    label: { en: 'Tools', zh: '工具' },
+    text: { en: 'Validated side effects through one registry', zh: '通过同一个注册表执行已验证的副作用' },
+  },
+  {
+    label: { en: 'Result', zh: '结果' },
+    text: { en: 'Outputs and diagnostics return to the controlled loop', zh: '输出和诊断回到受控循环' },
+  },
+];
+
+const surfaces = [
+  {
+    label: { en: 'CLI / TUI', zh: 'CLI / TUI' },
+    title: { en: 'Ship guarded terminal workflows', zh: '交付受控终端工作流' },
     text: {
-      en: 'Provider calls, streaming events, tool requests, approvals, cancellation, memory, and final responses stay in one explicit flow.',
-      zh: '提供商调用、流式事件、工具请求、审批、取消、记忆和最终响应都在同一条明确流程里。',
+      en: 'Run full-screen sessions, one-shot prompts, approvals, tasks, memory, and provider routing from the same runtime.',
+      zh: '用同一个运行时驱动全屏会话、一次性提示、审批、任务、记忆和提供商路由。',
     },
   },
   {
-    label: { en: 'Control', zh: '控制' },
-    title: { en: 'Policy before side effects', zh: '副作用执行前先过策略' },
+    label: { en: 'Rust library', zh: 'Rust 库' },
+    title: { en: 'Embed the turn loop', zh: '嵌入回合循环' },
     text: {
-      en: 'Shell commands, files, MCP tools, plugin tools, and custom tools pass through validation and approval gates.',
-      zh: 'Shell、文件、MCP 工具、插件工具和自定义工具都会经过验证与审批关口。',
+      en: 'Compose sessions, providers, tools, storage, approvals, and event streams inside your own product.',
+      zh: '在自己的产品里组合会话、提供商、工具、存储、审批和事件流。',
     },
   },
   {
-    label: { en: 'Extensions', zh: '扩展' },
-    title: { en: 'MCP and plugin surfaces', zh: 'MCP 与插件扩展面' },
+    label: { en: 'MCP and plugins', zh: 'MCP 与插件' },
+    title: { en: 'Extend without runtime rewrites', zh: '无需重写运行时即可扩展' },
     text: {
-      en: 'Package tools, skills, prompt sections, hooks, subagents, and marketplace metadata without changing the runtime.',
-      zh: '无需改运行时，就能打包工具、技能、提示段、钩子、子智能体和市场元数据。',
+      en: 'Bridge MCP servers and package tools, skills, prompt sections, subagents, and marketplace metadata.',
+      zh: '桥接 MCP 服务，并打包工具、技能、提示段、子智能体和市场元数据。',
     },
   },
   {
-    label: { en: 'Clients', zh: '客户端' },
-    title: { en: 'One core, many frontends', zh: '一个核心，多种前端' },
+    label: { en: 'Client direction', zh: '客户端方向' },
+    title: { en: 'One core for many frontends', zh: '一个核心，多种前端' },
     text: {
-      en: 'Use the same Rust runtime behind the CLI/TUI, desktop prototype, and embedded library integrations.',
-      zh: 'CLI/TUI、桌面原型和嵌入式库集成共用同一个 Rust 运行时。',
+      en: 'Reuse the same Rust runtime behind the CLI, desktop client work, and embedded application flows.',
+      zh: 'CLI、桌面客户端工作和嵌入式应用流程共用同一个 Rust 运行时。',
+    },
+  },
+];
+
+const narratives = [
+  {
+    title: { en: 'Make side effects inspectable', zh: '让副作用可被检查' },
+    text: {
+      en: 'telos keeps shell commands, file edits, MCP calls, plugin tools, and browser work visible to validation, policy, approval UI, diagnostics, and recovery.',
+      zh: 'telos 让 Shell 命令、文件编辑、MCP 调用、插件工具和浏览器操作都能被验证、策略、审批界面、诊断和恢复流程观察。',
+    },
+  },
+  {
+    title: { en: 'Stream the whole turn', zh: '流式呈现完整回合' },
+    text: {
+      en: 'Text, tool requests, tool results, cancellation, compaction, and stop reasons move as structured events instead of hidden client glue.',
+      zh: '文本、工具请求、工具结果、取消、压缩和停止原因都以结构化事件流动，而不是藏在客户端胶水代码里。',
+    },
+  },
+  {
+    title: { en: 'Keep extension points explicit', zh: '保持扩展点明确' },
+    text: {
+      en: 'Providers, tools, prompt sections, MCP bridges, plugin manifests, skills, memory, and subagents stay behind named interfaces.',
+      zh: '提供商、工具、提示段、MCP 桥、插件清单、技能、记忆和子智能体都保留在明确命名的接口之后。',
     },
   },
 ];
@@ -63,158 +110,77 @@ const capabilities = [
 const docs = [
   {
     label: { en: 'Quick Start', zh: '快速开始' },
-    text: {
-      en: 'Install the CLI, configure a provider, and run your first turn.',
-      zh: '安装 CLI、配置模型提供商，并运行第一个回合。',
-    },
+    text: { en: 'Install the CLI, configure a provider, and run your first turn.', zh: '安装 CLI、配置提供商，并运行第一个回合。' },
     path: '/docs/quick-start/',
   },
   {
     label: { en: 'Library API Guide', zh: '库 API 指南' },
-    text: {
-      en: 'Embed telos_agent and wire your own provider and tools.',
-      zh: '嵌入 telos_agent，并接入自己的提供商与工具。',
-    },
+    text: { en: 'Embed telos_agent and wire your own provider and tools.', zh: '嵌入 telos_agent，并接入自己的提供商与工具。' },
     path: '/docs/library-api/',
   },
   {
     label: { en: 'CLI Guide', zh: 'CLI 指南' },
-    text: {
-      en: 'Use sessions, commands, approval policies, and terminal workflows.',
-      zh: '了解会话、命令、审批策略和终端工作流。',
-    },
+    text: { en: 'Use sessions, commands, approval policies, and terminal workflows.', zh: '了解会话、命令、审批策略和终端工作流。' },
     path: '/docs/cli-guide/',
   },
   {
     label: { en: 'Configuration', zh: '配置' },
-    text: {
-      en: 'Layer project, user, provider, and policy settings.',
-      zh: '管理项目、用户、提供商和策略配置层。',
-    },
+    text: { en: 'Layer project, user, provider, model, and approval settings.', zh: '管理项目、用户、提供商、模型和审批配置层。' },
     path: '/docs/configuration/',
   },
   {
     label: { en: 'Plugins and MCP', zh: '插件与 MCP' },
-    text: {
-      en: 'Connect external tool ecosystems without changing the runtime.',
-      zh: '不改运行时即可连接外部工具生态。',
-    },
+    text: { en: 'Connect external tool ecosystems without changing the runtime.', zh: '不改运行时即可连接外部工具生态。' },
     path: '/docs/plugins-mcp/',
   },
   {
     label: { en: 'Rust API Reference', zh: 'Rust API 参考' },
-    text: {
-      en: 'Jump into generated rustdoc for exact item-level details.',
-      zh: '进入生成的 rustdoc，查看精确到条目的细节。',
-    },
+    text: { en: 'Jump into generated rustdoc for exact item-level details.', zh: '进入生成的 rustdoc，查看精确到条目的细节。' },
     path: '/api/rust/telos_agent/',
-  },
-];
-
-const runtimeSteps = [
-  {
-    number: '01',
-    title: { en: 'Assemble the turn', zh: '组装回合' },
-    text: {
-      en: 'User input, project context, memory, and instructions become a provider-ready request.',
-      zh: '用户输入、项目上下文、记忆和指令会被组装成可发送给提供商的请求。',
-    },
-  },
-  {
-    number: '02',
-    title: { en: 'Stream typed events', zh: '流式输出类型事件' },
-    text: {
-      en: 'Assistant text, tool calls, diagnostics, and lifecycle updates arrive as structured runtime events.',
-      zh: '助手文本、工具调用、诊断信息和生命周期更新都会以结构化运行时事件到达。',
-    },
-  },
-  {
-    number: '03',
-    title: { en: 'Gate every action', zh: '拦截每个动作' },
-    text: {
-      en: 'Tools are validated, matched against policy, and routed through approvals when needed.',
-      zh: '工具会被验证、匹配策略，并在需要时进入人工审批。',
-    },
-  },
-  {
-    number: '04',
-    title: { en: 'Feed back results', zh: '回传结果' },
-    text: {
-      en: 'Outputs, failures, and diagnostics return to the model through the same controlled loop.',
-      zh: '输出、失败和诊断信息会通过同一个受控循环回传给模型。',
-    },
-  },
-];
-
-const surfaces = [
-  { en: 'CLI / TUI', zh: 'CLI / TUI' },
-  { en: 'Rust library', zh: 'Rust 库' },
-  { en: 'Desktop client', zh: '桌面客户端' },
-  { en: 'MCP bridge', zh: 'MCP 桥接' },
-  { en: 'Plugin registry', zh: '插件注册表' },
-];
-
-const useCases = [
-  {
-    en: 'Build a CLI agent with guarded shell and file operations.',
-    zh: '构建带 Shell 与文件操作保护的 CLI 智能体。',
-  },
-  {
-    en: 'Embed a turn loop inside a product client without rewriting tool plumbing.',
-    zh: '把回合循环嵌入产品客户端，而不用重写工具管线。',
-  },
-  {
-    en: 'Expose MCP servers, plugin tools, and custom local tools through one registry.',
-    zh: '通过同一个注册表暴露 MCP 服务、插件工具和本地自定义工具。',
-  },
-  {
-    en: 'Ship workflows with approvals, diagnostics, and provider routing.',
-    zh: '交付带审批、诊断和提供商路由的可重复工作流。',
   },
 ];
 
 const copy = {
   eyebrow: {
-    en: 'Controlled runtime for tool-using agents',
-    zh: '面向工具型智能体的受控运行时',
+    en: 'Agent runtime for real systems',
+    zh: '面向真实系统的智能体运行时',
   },
   heroTitle: {
-    en: 'Let agents call tools safely.',
-    zh: '让智能体安全调用工具。',
+    en: 'Controlled autonomy for tool-using agents',
+    zh: '面向工具型智能体的受控自主运行时',
   },
   heroText: {
-    en: 'telos wraps model turns, tool execution, approvals, MCP, plugins, and memory in one runtime boundary that product clients can ship.',
-    zh: 'telos 把模型回合、工具执行、审批、MCP、插件和记忆收进同一个运行时边界，方便产品客户端直接交付。',
+    en: 'telos is a Rust runtime boundary for model turns, tool execution, approvals, MCP, plugins, memory, and product clients.',
+    zh: 'telos 是一个 Rust 运行时边界，用来承载模型回合、工具执行、审批、MCP、插件、记忆和产品客户端。',
   },
-  quickStart: { en: 'Quick Start', zh: '快速开始' },
-  installCli: { en: 'Install CLI', zh: '安装 CLI' },
+  primaryAction: { en: 'Start building', zh: '开始构建' },
+  secondaryAction: { en: 'View Rust API', zh: '查看 Rust API' },
   installTitle: { en: 'Install paths', zh: '安装方式' },
-  startTitle: { en: 'Start the CLI', zh: '启动 CLI' },
   installNote: {
     en: 'Choose Cargo or PyPI, then run the same telos command.',
     zh: '选择 Cargo 或 PyPI 安装，然后使用同一个 telos 命令启动。',
   },
-  libraryTitle: { en: 'Runtime loop', zh: '运行时循环' },
-  libraryNote: {
-    en: 'Typed events keep text, tool calls, approvals, and results visible to the client.',
-    zh: '类型化事件让文本、工具调用、审批和结果都对客户端可见。',
+  startTitle: { en: 'Start the CLI', zh: '启动 CLI' },
+  mapTitle: { en: 'Runtime map', zh: '运行时地图' },
+  mapNote: {
+    en: 'Every side effect passes through policy and returns evidence to the turn loop.',
+    zh: '每个副作用都先经过策略，再把证据回传到回合循环。',
   },
-  sectionRuntime: { en: 'Runtime boundary', zh: '运行时边界' },
-  sectionRuntimeTitle: {
-    en: 'Model output and side effects meet at one controlled interface.',
-    zh: '模型输出与系统副作用在同一个受控接口汇合。',
+  productEyebrow: { en: 'Product surfaces', zh: '产品扩展面' },
+  productTitle: {
+    en: 'One runtime boundary, multiple ways to ship.',
+    zh: '一个运行时边界，多种交付方式。',
   },
-  sectionRuntimeText: {
-    en: 'Instead of hiding tool calls in client glue code, telos makes each action visible to policy, logging, approval UI, diagnostics, and recovery.',
-    zh: 'telos 不把工具调用藏在客户端胶水代码里，而是让每个动作都可被策略、日志、审批界面、诊断和恢复流程观察。',
+  narrativeEyebrow: { en: 'Why telos', zh: '为什么是 telos' },
+  narrativeTitle: {
+    en: 'Built for agents that need to touch real systems.',
+    zh: '为需要接触真实系统的智能体构建。',
   },
-  sectionFit: { en: 'Operational fit', zh: '落地场景' },
-  sectionFitTitle: {
-    en: 'Designed for agents that need to touch real systems.',
-    zh: '为需要接触真实系统的智能体而设计。',
+  codeEyebrow: { en: 'Developer path', zh: '开发者路径' },
+  codeTitle: {
+    en: 'Install the client or embed the runtime.',
+    zh: '安装客户端，或嵌入运行时。',
   },
-  codeTitleOne: { en: 'CLI install paths', zh: 'CLI 安装方式' },
-  codeTitleTwo: { en: 'Library integration', zh: '库集成' },
   docsEyebrow: { en: 'Documentation', zh: '文档' },
   docsTitle: {
     en: 'Start with workflows, then drop into exact API details.',
@@ -225,7 +191,6 @@ const copy = {
     zh: '指南覆盖安装、CLI 使用、配置、插件、MCP、部署，以及 Rust 库接口。',
   },
 };
-
 ---
 
 <!doctype html>
@@ -237,7 +202,7 @@ const copy = {
       name="description"
       content="telos is a Rust agent runtime for tool execution, CLI workflows, MCP, plugins, and product clients."
     />
-    <title>telos - Rust agent runtime</title>
+    <title>telos - Controlled runtime for tool-using agents</title>
     <link rel="icon" href={href('/favicon.svg')} />
   </head>
   <body class="landing">
@@ -262,124 +227,117 @@ const copy = {
     </header>
 
     <main>
-      <section class="hero">
+      <section class="hero" id="product">
         <div class="hero-copy">
           <p class="eyebrow"><Lang value={copy.eyebrow} /></p>
           <h1><Lang value={copy.heroTitle} /></h1>
           <p class="hero-text"><Lang value={copy.heroText} /></p>
           <div class="hero-actions">
-            <a class="button primary" href={href('/docs/quick-start/')}><Lang value={copy.quickStart} /></a>
-            <a class="button secondary" href={href('/docs/cli-guide/')}><Lang value={copy.installCli} /></a>
+            <a class="button primary" href={href('/docs/quick-start/')}><Lang value={copy.primaryAction} /></a>
+            <a class="button secondary" href={href('/api/rust/telos_agent/')}><Lang value={copy.secondaryAction} /></a>
           </div>
         </div>
 
-        <div class="runtime-console" aria-label="Install and runtime preview">
-          <div class="install-panel primary-panel">
-            <div class="panel-heading">
-              <span><Lang value={copy.installTitle} /></span>
-              <span class="status-dot">ready</span>
-            </div>
-            <div class="install-options">
-              {installMethods.map((item) => (
-                <article>
-                  <strong><Lang value={item.label} /></strong>
-                  <code>{item.command}</code>
-                  <span><Lang value={item.note} /></span>
-                </article>
-              ))}
-            </div>
-            <div class="start-command">
-              <div><Lang value={copy.startTitle} /></div>
-              <pre><code>telos
-telos chat</code></pre>
-            </div>
-            <p><Lang value={copy.installNote} /></p>
+        <div class="runtime-card" aria-label="Runtime preview">
+          <div class="runtime-card-heading">
+            <span><Lang value={copy.mapTitle} /></span>
+            <span>Rust</span>
           </div>
-          <div class="runtime-summary">
-            <div class="panel-heading">
-              <span><Lang value={copy.libraryTitle} /></span>
-              <span>Rust</span>
-            </div>
-            <p><Lang value={copy.libraryNote} /></p>
-            <code>session.run_turn(&provider, &tools, prompt).await?</code>
-          </div>
+          <ol class="runtime-map">
+            {runtimeSteps.map((step) => (
+              <li>
+                <strong><Lang value={step.label} /></strong>
+                <span><Lang value={step.text} /></span>
+              </li>
+            ))}
+          </ol>
+          <p><Lang value={copy.mapNote} /></p>
         </div>
       </section>
 
-      <section class="surface-strip" aria-label="Runtime surfaces">
-        {surfaces.map((item) => (
-          <span><Lang value={item} /></span>
-        ))}
-      </section>
-
-      <section class="capabilities" aria-label="Capabilities">
-        {capabilities.map((item) => (
-          <article>
-            <p><Lang value={item.label} /></p>
-            <h2><Lang value={item.title} /></h2>
-            <p><Lang value={item.text} /></p>
-          </article>
-        ))}
-      </section>
-
-      <section class="architecture-section">
+      <section class="install-band" aria-label="Install telos">
         <div>
-          <p class="eyebrow"><Lang value={copy.sectionRuntime} /></p>
-          <h2><Lang value={copy.sectionRuntimeTitle} /></h2>
-          <p><Lang value={copy.sectionRuntimeText} /></p>
+          <p class="section-label"><Lang value={copy.installTitle} /></p>
+          <p><Lang value={copy.installNote} /></p>
         </div>
-        <ol class="runtime-steps">
-          {runtimeSteps.map((item) => (
-            <li>
-              <span>{item.number}</span>
-              <div>
-                <h3><Lang value={item.title} /></h3>
-                <p><Lang value={item.text} /></p>
-              </div>
-            </li>
+        <div class="install-grid">
+          {installMethods.map((item) => (
+            <article>
+              <strong><Lang value={item.label} /></strong>
+              <code>{item.command}</code>
+              <span><Lang value={item.note} /></span>
+            </article>
           ))}
-        </ol>
+          <article class="start-command">
+            <strong><Lang value={copy.startTitle} /></strong>
+            <pre><code>telos
+telos chat</code></pre>
+          </article>
+        </div>
       </section>
 
-      <section class="workflow-section" aria-label="Workflow examples">
-        <div class="workflow-copy">
-          <p class="eyebrow"><Lang value={copy.sectionFit} /></p>
-          <h2><Lang value={copy.sectionFitTitle} /></h2>
+      <section class="product-surfaces" aria-labelledby="surfaces-title">
+        <div class="section-heading">
+          <p class="eyebrow"><Lang value={copy.productEyebrow} /></p>
+          <h2 id="surfaces-title"><Lang value={copy.productTitle} /></h2>
         </div>
-        <div class="use-case-grid">
-          {useCases.map((item) => (
+        <div class="surface-grid">
+          {surfaces.map((item) => (
             <article>
-              <span></span>
-              <p><Lang value={item} /></p>
+              <p><Lang value={item.label} /></p>
+              <h3><Lang value={item.title} /></h3>
+              <span><Lang value={item.text} /></span>
             </article>
           ))}
         </div>
       </section>
 
-      <section class="code-section" aria-label="CLI and library examples">
-        <div class="command-panel">
-          <div class="panel-heading"><span><Lang value={copy.codeTitleOne} /></span></div>
-          <pre><code>cargo install telos-cli
+      <section class="narrative-section" aria-labelledby="narrative-title">
+        <div class="section-heading">
+          <p class="eyebrow"><Lang value={copy.narrativeEyebrow} /></p>
+          <h2 id="narrative-title"><Lang value={copy.narrativeTitle} /></h2>
+        </div>
+        <div class="narrative-grid">
+          {narratives.map((item) => (
+            <article>
+              <h3><Lang value={item.title} /></h3>
+              <p><Lang value={item.text} /></p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section class="code-section" aria-labelledby="code-title">
+        <div>
+          <p class="eyebrow"><Lang value={copy.codeEyebrow} /></p>
+          <h2 id="code-title"><Lang value={copy.codeTitle} /></h2>
+        </div>
+        <div class="code-panels">
+          <article class="command-panel">
+            <div class="panel-heading">CLI</div>
+            <pre><code>cargo install telos-cli
 pip install telos-cli
 
 telos
 telos chat
-telos --help
-telos "inspect this repository and suggest the next task"</code></pre>
-        </div>
-        <div class="command-panel">
-          <div class="panel-heading"><span><Lang value={copy.codeTitleTwo} /></span></div>
-          <pre><code>cargo add telos_agent
+telos "inspect this repository"</code></pre>
+          </article>
+          <article class="command-panel">
+            <div class="panel-heading">Library</div>
+            <pre><code>cargo add telos_agent
 
 let tools = ToolRegistry::default();
-let response = session.run_turn(&provider, &tools, prompt).await?;</code></pre>
+let response = session
+    .run_turn(&provider, &tools, prompt)
+    .await?;</code></pre>
+          </article>
         </div>
       </section>
 
-      <section class="docs-grid">
+      <section class="docs-grid" aria-labelledby="docs-title">
         <div>
           <p class="eyebrow"><Lang value={copy.docsEyebrow} /></p>
-          <h2><Lang value={copy.docsTitle} /></h2>
+          <h2 id="docs-title"><Lang value={copy.docsTitle} /></h2>
           <p><Lang value={copy.docsText} /></p>
         </div>
         <div class="doc-links">

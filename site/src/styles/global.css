@@ -22,17 +22,20 @@ body {
 
 [data-lang='en'] [data-lang-copy='zh'],
 [data-lang='zh'] [data-lang-copy='en'] {
-  display: none;
+  display: none !important;
 }
 
 .landing {
-  --page: #f7f5ef;
-  --ink: #101b18;
-  --muted: #5d6a66;
-  --line: #dcd8ce;
+  --page: #f5f1e7;
+  --ink: #101815;
+  --muted: #5a6761;
+  --line: #dcd6c9;
   --panel: #fffdf8;
-  --accent: #18a064;
-  --accent-dark: #0d4936;
+  --panel-strong: #efe8d9;
+  --green: #32c779;
+  --green-dark: #0d4936;
+  --teal: #4f8ea3;
+  --gold: #c6922f;
   min-height: 100vh;
   margin: 0;
   background: var(--page);
@@ -42,31 +45,31 @@ body {
     sans-serif;
 }
 
+.landing a {
+  color: inherit;
+}
+
 .landing .site-header {
-  position: relative;
-  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 22px;
   max-width: 1180px;
   margin: 0 auto;
   padding: 22px 24px;
-  color: #f7f5ef;
-}
-
-.landing .brand,
-.landing .site-header nav a,
-.landing .doc-links a {
-  color: inherit;
-  text-decoration: none;
+  background: #08110f;
+  color: #f7f2e8;
 }
 
 .landing .brand {
   display: inline-flex;
   align-items: center;
   gap: 11px;
+  flex: 0 0 auto;
+  color: inherit;
   font-size: 1.05rem;
   font-weight: 820;
+  text-decoration: none;
 }
 
 .landing .brand-mark {
@@ -85,23 +88,28 @@ body {
 .landing .header-actions {
   display: flex;
   align-items: center;
-  gap: 18px;
+  justify-content: flex-end;
+  gap: 16px;
+  min-width: 0;
 }
 
 .landing .site-header nav {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
   justify-content: flex-end;
+  gap: 4px;
 }
 
 .landing .site-header nav a {
+  display: inline-flex;
+  align-items: center;
   min-height: 34px;
   padding: 7px 10px;
   border-radius: 7px;
-  color: rgb(247 245 239 / 78%);
+  color: rgb(247 242 232 / 78%);
   font-size: 0.93rem;
   font-weight: 680;
+  text-decoration: none;
 }
 
 .landing .site-header nav a:hover {
@@ -111,6 +119,7 @@ body {
 
 .landing .language-switch {
   display: inline-flex;
+  flex: 0 0 auto;
   gap: 2px;
   padding: 3px;
   border: 1px solid rgb(255 255 255 / 18%);
@@ -124,7 +133,7 @@ body {
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: rgb(247 245 239 / 72%);
+  color: rgb(247 242 232 / 72%);
   cursor: pointer;
   font: inherit;
   font-size: 0.82rem;
@@ -132,36 +141,41 @@ body {
 }
 
 .landing .language-switch button[aria-pressed='true'] {
-  background: #f7f5ef;
+  background: #f7f2e8;
   color: #0c2a21;
 }
 
 .landing main {
-  margin-top: -78px;
+  background:
+    linear-gradient(180deg, #08110f 0, #0d1b17 620px, var(--page) 621px),
+    var(--page);
 }
 
 .landing .hero {
   display: grid;
-  grid-template-columns: minmax(0, 0.92fr) minmax(360px, 0.78fr);
-  gap: 64px;
+  grid-template-columns: minmax(0, 1.05fr) minmax(340px, 0.95fr);
+  gap: 48px;
   align-items: center;
-  min-height: 720px;
-  padding: 132px max(24px, calc((100vw - 1180px) / 2 + 24px)) 92px;
-  background:
-    radial-gradient(circle at 74% 30%, rgb(34 159 99 / 18%), transparent 34%),
-    linear-gradient(135deg, #08110f 0%, #0e211b 52%, #15251f 100%);
-  color: #f7f5ef;
+  max-width: 1180px;
+  min-height: 610px;
+  margin: 0 auto;
+  padding: 74px 24px 82px;
+  color: #f7f2e8;
 }
 
-.landing .hero-copy {
+.landing .hero-copy,
+.landing .section-heading,
+.landing .docs-grid > div:first-child,
+.landing .code-section > div:first-child {
   min-width: 0;
 }
 
-.landing .eyebrow {
+.landing .eyebrow,
+.landing .section-label {
   display: inline-flex;
   width: max-content;
   max-width: 100%;
-  margin: 0 0 20px;
+  margin: 0 0 18px;
   padding: 7px 11px;
   border: 1px solid rgb(118 215 161 / 30%);
   border-radius: 999px;
@@ -172,19 +186,19 @@ body {
 }
 
 .landing .hero h1 {
-  max-width: 710px;
+  max-width: 760px;
   margin: 0;
   color: #fffdf8;
-  font-size: clamp(3.15rem, 5.5vw, 5.15rem);
+  font-size: clamp(3.05rem, 5.2vw, 5rem);
   font-weight: 860;
   line-height: 1.03;
   letter-spacing: 0;
 }
 
 .landing .hero-text {
-  max-width: 650px;
+  max-width: 660px;
   margin: 24px 0 0;
-  color: rgb(247 245 239 / 78%);
+  color: rgb(247 242 232 / 78%);
   font-size: 1.08rem;
   line-height: 1.75;
 }
@@ -208,9 +222,9 @@ body {
 }
 
 .landing .button.primary {
-  background: #31c77a;
+  background: var(--green);
   color: #07120e;
-  box-shadow: 0 18px 36px rgb(49 199 122 / 22%);
+  box-shadow: 0 18px 36px rgb(49 199 122 / 20%);
 }
 
 .landing .button.primary:hover {
@@ -227,33 +241,17 @@ body {
   background: rgb(255 255 255 / 8%);
 }
 
-.landing .runtime-console {
-  display: grid;
-  gap: 14px;
+.landing .runtime-card {
   min-width: 0;
-}
-
-.landing .command-panel,
-.landing .install-panel,
-.landing .runtime-summary,
-.landing .capabilities article,
-.landing .runtime-steps li,
-.landing .use-case-grid article,
-.landing .doc-links a {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-}
-
-.landing .command-panel,
-.landing .install-panel,
-.landing .runtime-summary {
   overflow: hidden;
-  border-color: rgb(255 255 255 / 16%);
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 8px;
   background: #fffdf8;
+  color: var(--ink);
   box-shadow: 0 28px 70px rgb(0 0 0 / 24%);
 }
 
+.landing .runtime-card-heading,
 .landing .panel-heading {
   display: flex;
   align-items: center;
@@ -266,176 +264,208 @@ body {
   font-weight: 820;
 }
 
-.landing .panel-heading > span:last-child {
-  color: #6a746f;
+.landing .runtime-card-heading > span:last-child {
+  color: #176d4c;
   font-size: 0.72rem;
-  font-weight: 780;
+  font-weight: 840;
   text-transform: uppercase;
 }
 
-.landing .status-dot::before {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 6px;
-  border-radius: 999px;
-  background: #18a064;
-  content: "";
-}
-
-.landing .command-panel pre {
-  margin: 0;
-  padding: 20px;
-  overflow-x: auto;
-  background: #0b1110;
-  color: #edf8f2;
-  font-size: 0.9rem;
-  line-height: 1.7;
-  white-space: pre;
-}
-
-.landing .install-options {
+.landing .runtime-map {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
+  margin: 0;
+  padding: 0;
   background: #e6e1d8;
+  list-style: none;
 }
 
-.landing .install-options article {
+.landing .runtime-map li {
+  position: relative;
   display: grid;
-  gap: 10px;
-  min-width: 0;
-  padding: 17px;
+  gap: 6px;
+  min-height: 88px;
+  padding: 17px 18px 17px 52px;
   background: #fffdf8;
 }
 
-.landing .install-options strong {
-  color: #17231f;
-  font-size: 0.88rem;
+.landing .runtime-map li::before {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 7px;
+  background: #0f2d23;
+  color: #8ee4b1;
+  font-size: 0.72rem;
+  font-weight: 900;
+  content: counter(list-item, decimal-leading-zero);
 }
 
-.landing .install-options code {
-  display: block;
+.landing .runtime-map strong {
+  color: #17231f;
+  font-size: 0.94rem;
+}
+
+.landing .runtime-map span,
+.landing .runtime-card p {
+  color: #5c6964;
+  line-height: 1.52;
+}
+
+.landing .runtime-card p {
+  margin: 0;
+  padding: 15px 18px 18px;
+  background: #f5f2ea;
+}
+
+.landing .install-band,
+.landing .product-surfaces,
+.landing .narrative-section,
+.landing .code-section,
+.landing .docs-grid {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 58px 24px;
+}
+
+.landing .install-band {
+  display: grid;
+  grid-template-columns: 0.64fr 1.36fr;
+  gap: 28px;
+  align-items: center;
+  padding-top: 28px;
+}
+
+.landing .install-band > div:first-child p:last-child {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.62;
+}
+
+.landing .install-band .section-label {
+  border-color: #d7d0c3;
+  background: #fffdf8;
+  color: #176d4c;
+}
+
+.landing .install-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.landing .install-grid article,
+.landing .surface-grid article,
+.landing .narrative-grid article,
+.landing .doc-links a,
+.landing .command-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 14px 34px rgb(26 37 32 / 5%);
+}
+
+.landing .install-grid article {
+  display: grid;
+  gap: 9px;
   min-width: 0;
+  min-height: 132px;
+  padding: 17px;
+}
+
+.landing .install-grid strong {
+  color: #17231f;
+  font-size: 0.9rem;
+}
+
+.landing code,
+.landing pre {
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.landing .install-grid code,
+.landing .install-grid pre {
+  margin: 0;
   overflow-x: auto;
   color: #0d4936;
   font-size: 0.86rem;
   font-weight: 760;
+  line-height: 1.6;
   white-space: pre;
 }
 
-.landing .install-options span {
+.landing .install-grid span {
   color: #69766f;
   font-size: 0.8rem;
   line-height: 1.35;
 }
 
 .landing .start-command {
-  display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
-  align-items: stretch;
-  border-top: 1px solid #e6e1d8;
-  background: #0b1110;
+  background: #0b1110 !important;
 }
 
-.landing .start-command > div {
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  border-right: 1px solid rgb(255 255 255 / 10%);
-  color: #95e2b6;
-  font-size: 0.82rem;
-  font-weight: 820;
-}
-
-.landing .start-command pre {
-  margin: 0;
-  padding: 16px 18px;
-  overflow-x: auto;
+.landing .start-command strong,
+.landing .start-command code {
   color: #edf8f2;
-  font-size: 0.9rem;
-  line-height: 1.65;
 }
 
-.landing .command-panel code,
-.landing .install-panel code,
-.landing .runtime-summary code {
-  font-family:
-    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-}
-
-.landing .command-panel p,
-.landing .install-panel p,
-.landing .runtime-summary p {
-  margin: 0;
-  padding: 15px 17px 17px;
-  color: #596762;
-  font-size: 0.93rem;
-  line-height: 1.55;
-}
-
-.landing .runtime-summary code {
-  display: block;
-  margin: 0 17px 17px;
-  padding: 13px 14px;
-  overflow-x: auto;
-  border: 1px solid #e0dbd1;
-  border-radius: 7px;
-  background: #f5f2ea;
-  color: #1b2b25;
-  font-size: 0.82rem;
-  white-space: pre;
-}
-
-.landing .surface-strip,
-.landing .capabilities,
-.landing .architecture-section,
-.landing .workflow-section,
+.landing .product-surfaces,
+.landing .narrative-section,
 .landing .code-section,
 .landing .docs-grid {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 54px 24px;
-}
-
-.landing .surface-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding-top: 32px;
-  padding-bottom: 24px;
-}
-
-.landing .surface-strip span {
-  min-height: 38px;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 13px;
-  border: 1px solid #d8d3c8;
-  border-radius: 999px;
-  background: #fffdf8;
-  color: #34423d;
-  font-size: 0.88rem;
-  font-weight: 760;
-}
-
-.landing .capabilities {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  padding-top: 24px;
+  grid-template-columns: 0.76fr 1.24fr;
+  gap: 42px;
+  align-items: start;
 }
 
-.landing .capabilities article {
-  min-height: 214px;
-  padding: 22px;
-  box-shadow: 0 14px 34px rgb(26 37 32 / 5%);
+.landing .section-heading .eyebrow,
+.landing .code-section .eyebrow,
+.landing .docs-grid .eyebrow {
+  border-color: #d7d0c3;
+  background: #fffdf8;
+  color: #176d4c;
 }
 
-.landing .capabilities article > p:first-child {
+.landing h2,
+.landing h3 {
+  letter-spacing: 0;
+}
+
+.landing .section-heading h2,
+.landing .code-section h2,
+.landing .docs-grid h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 2.08rem;
+  line-height: 1.13;
+}
+
+.landing .surface-grid,
+.landing .narrative-grid,
+.landing .doc-links {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.landing .surface-grid article,
+.landing .narrative-grid article,
+.landing .doc-links a {
+  min-width: 0;
+  min-height: 158px;
+  padding: 20px;
+}
+
+.landing .surface-grid article > p {
   width: max-content;
   max-width: 100%;
-  margin: 0 0 22px;
+  margin: 0 0 20px;
   padding: 6px 9px;
   border-radius: 999px;
   background: #edf5ee;
@@ -444,161 +474,72 @@ body {
   font-weight: 800;
 }
 
-.landing .capabilities h2,
-.landing .architecture-section h2,
-.landing .workflow-section h2,
-.landing .docs-grid h2 {
+.landing .surface-grid h3,
+.landing .narrative-grid h3 {
   margin: 0;
   color: var(--ink);
-  line-height: 1.13;
-  letter-spacing: 0;
+  font-size: 1.08rem;
+  line-height: 1.22;
 }
 
-.landing .capabilities h2 {
-  font-size: 1.14rem;
-}
-
-.landing .capabilities article > p:last-child {
-  margin: 12px 0 0;
+.landing .surface-grid article > span,
+.landing .narrative-grid p,
+.landing .docs-grid > div:first-child > p,
+.landing .doc-links span {
   color: var(--muted);
   line-height: 1.58;
 }
 
-.landing .architecture-section,
-.landing .workflow-section,
-.landing .docs-grid {
-  display: grid;
-  grid-template-columns: 0.78fr 1.22fr;
-  gap: 42px;
-  align-items: start;
+.landing .surface-grid article > span,
+.landing .narrative-grid p {
+  display: block;
+  margin-top: 12px;
 }
 
-.landing .architecture-section h2,
-.landing .workflow-section h2,
-.landing .docs-grid h2 {
-  font-size: 2.05rem;
+.landing .narrative-grid {
+  grid-template-columns: 1fr;
 }
 
-.landing .architecture-section > div > p:last-child,
-.landing .docs-grid > div > p:last-child {
-  max-width: 440px;
-  color: var(--muted);
-  line-height: 1.68;
+.landing .narrative-grid article {
+  min-height: 116px;
 }
 
-.landing .architecture-section .eyebrow,
-.landing .workflow-section .eyebrow,
-.landing .docs-grid .eyebrow {
-  border-color: #d7d0c3;
-  background: #fffdf8;
-  color: #176d4c;
-}
-
-.landing .runtime-steps {
-  display: grid;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.landing .runtime-steps li {
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
-  gap: 15px;
-  min-height: 112px;
-  padding: 18px;
-}
-
-.landing .runtime-steps li > span {
-  display: grid;
-  width: 40px;
-  height: 40px;
-  place-items: center;
-  border-radius: 8px;
-  background: #0f2d23;
-  color: #8ee4b1;
-  font-size: 0.82rem;
-  font-weight: 900;
-}
-
-.landing .runtime-steps h3 {
-  margin: 0;
-  color: var(--ink);
-  font-size: 1rem;
-}
-
-.landing .runtime-steps p {
-  margin: 8px 0 0;
-  color: var(--muted);
-  line-height: 1.56;
-}
-
-.landing .workflow-section {
-  align-items: stretch;
-}
-
-.landing .workflow-copy {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-.landing .use-case-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.landing .use-case-grid article {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 12px;
-  min-height: 126px;
-  padding: 18px;
-}
-
-.landing .use-case-grid article span {
-  width: 9px;
-  height: 9px;
-  margin-top: 7px;
-  border-radius: 999px;
-  background: #c6922f;
-}
-
-.landing .use-case-grid article:nth-child(2) span,
-.landing .use-case-grid article:nth-child(3) span {
-  background: #4c7897;
-}
-
-.landing .use-case-grid p {
-  margin: 0;
-  color: #2b3a35;
-  line-height: 1.58;
-}
-
-.landing .code-section {
+.landing .code-panels {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
 
-.landing .code-section .command-panel {
-  border-color: var(--line);
+.landing .command-panel {
+  min-width: 0;
+  overflow: hidden;
   box-shadow: 0 16px 36px rgb(24 34 30 / 8%);
 }
 
-.landing .doc-links {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+.landing .command-panel pre {
+  margin: 0;
+  padding: 20px;
+  overflow-x: auto;
+  background: #0b1110;
+  color: #edf8f2;
+  font-size: 0.88rem;
+  line-height: 1.7;
+  white-space: pre;
+}
+
+.landing .docs-grid {
+  padding-bottom: 82px;
+}
+
+.landing .docs-grid > div:first-child > p {
+  max-width: 440px;
 }
 
 .landing .doc-links a {
   display: grid;
   gap: 8px;
-  min-height: 132px;
-  padding: 18px;
+  color: inherit;
+  text-decoration: none;
 }
 
 .landing .doc-links a:hover {
@@ -611,52 +552,32 @@ body {
   font-size: 1rem;
 }
 
-.landing .doc-links span {
-  color: var(--muted);
-  line-height: 1.52;
-}
-
 @media (max-width: 980px) {
-  .landing .hero {
-    grid-template-columns: 1fr;
-    gap: 40px;
-    min-height: auto;
-  }
-
-  .landing .capabilities {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 900px) {
-  .landing .site-header {
-    align-items: flex-start;
-    gap: 16px;
-  }
-
-  .landing .header-actions {
-    align-items: flex-end;
-    flex-direction: column-reverse;
-    gap: 10px;
-  }
-
-  .landing .architecture-section,
-  .landing .workflow-section,
+  .landing .hero,
+  .landing .install-band,
+  .landing .product-surfaces,
+  .landing .narrative-section,
   .landing .code-section,
   .landing .docs-grid {
     grid-template-columns: 1fr;
   }
+
+  .landing main {
+    background:
+      linear-gradient(180deg, #08110f 0, #0d1b17 920px, var(--page) 921px),
+      var(--page);
+  }
 }
 
-@media (max-width: 620px) {
+@media (max-width: 760px) {
   .landing .site-header {
+    align-items: flex-start;
     flex-direction: column;
-    color: #f7f5ef;
   }
 
-  .landing .header-actions,
-  .landing .site-header nav {
+  .landing .header-actions {
     align-items: flex-start;
+    flex-direction: column-reverse;
     width: 100%;
   }
 
@@ -664,31 +585,50 @@ body {
     justify-content: flex-start;
   }
 
-  .landing .language-switch {
-    width: max-content;
-  }
-
   .landing .hero {
-    padding-top: 136px;
+    min-height: auto;
+    padding-top: 44px;
   }
 
   .landing .hero h1 {
-    font-size: 2.85rem;
+    font-size: 2.7rem;
   }
 
-  .landing .capabilities,
-  .landing .use-case-grid,
+  .landing .install-grid,
+  .landing .surface-grid,
+  .landing .code-panels,
   .landing .doc-links {
     grid-template-columns: 1fr;
   }
 
-  .landing .architecture-section h2,
-  .landing .workflow-section h2,
+  .landing .runtime-map li {
+    padding-left: 17px;
+  }
+
+  .landing .runtime-map li::before {
+    position: static;
+    margin-bottom: 2px;
+  }
+
+  .landing .section-heading h2,
+  .landing .code-section h2,
   .landing .docs-grid h2 {
     font-size: 1.72rem;
   }
+}
 
-  .landing .runtime-steps li {
-    grid-template-columns: 1fr;
+@media (max-width: 430px) {
+  .landing .hero h1 {
+    font-size: 2.28rem;
+  }
+
+  .landing .hero,
+  .landing .install-band,
+  .landing .product-surfaces,
+  .landing .narrative-section,
+  .landing .code-section,
+  .landing .docs-grid {
+    padding-left: 18px;
+    padding-right: 18px;
   }
 }

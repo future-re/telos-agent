@@ -23,17 +23,28 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  AppearanceSettings,
+  FontChoice,
+  ThemeChoice,
+  fontOptions,
+  themeOptions,
+} from "@/appearance";
 import { DesktopSettingsOverrides, ResolvedDesktopSettings } from "@/desktopTypes";
 
 interface TopBarProps {
   metadata: string;
   panelOpen: boolean;
+  settingsOpen: boolean;
   settings: ResolvedDesktopSettings;
+  appearance: AppearanceSettings;
   overrides: DesktopSettingsOverrides;
   apiKeyDraft: string;
   savingKey: boolean;
   onApiKeyDraftChange: (value: string) => void;
+  onAppearanceChange: (settings: AppearanceSettings) => void;
   onOverridesChange: (settings: DesktopSettingsOverrides) => void;
+  onSettingsOpenChange: (open: boolean) => void;
   onSaveApiKey: () => void;
   onTogglePanel: () => void;
   onReset: () => void;
@@ -41,19 +52,23 @@ interface TopBarProps {
 
 export function TopBar({
   apiKeyDraft,
+  appearance,
   metadata,
+  onAppearanceChange,
   onApiKeyDraftChange,
   onOverridesChange,
   onReset,
   onSaveApiKey,
+  onSettingsOpenChange,
   onTogglePanel,
   overrides,
   panelOpen,
   savingKey,
   settings,
+  settingsOpen,
 }: TopBarProps) {
   const mergedAutoApprove = overrides.autoApprove ?? settings.autoApprove;
-  const mergedModel = overrides.model ?? settings.model;
+  const mergedModel = normalizeModelValue(overrides.model ?? settings.model);
   const mergedCwd = overrides.cwd ?? settings.cwd;
 
   return (
@@ -71,12 +86,16 @@ export function TopBar({
       <div className="flex shrink-0 items-center gap-2">
         <SettingsDialog
           apiKeyDraft={apiKeyDraft}
+          appearance={appearance}
           mergedAutoApprove={mergedAutoApprove}
           mergedCwd={mergedCwd}
           mergedModel={mergedModel}
           onApiKeyDraftChange={onApiKeyDraftChange}
+          onAppearanceChange={onAppearanceChange}
           onOverridesChange={onOverridesChange}
+          onOpenChange={onSettingsOpenChange}
           onSaveApiKey={onSaveApiKey}
+          open={settingsOpen}
           overrides={overrides}
           savingKey={savingKey}
           settings={settings}
@@ -110,29 +129,37 @@ export function TopBar({
 
 function SettingsDialog({
   apiKeyDraft,
+  appearance,
   mergedAutoApprove,
   mergedCwd,
   mergedModel,
   onApiKeyDraftChange,
+  onAppearanceChange,
+  onOpenChange,
   onOverridesChange,
   onSaveApiKey,
+  open,
   overrides,
   savingKey,
   settings,
 }: {
   apiKeyDraft: string;
+  appearance: AppearanceSettings;
   mergedAutoApprove: boolean;
   mergedCwd: string;
   mergedModel: string;
   onApiKeyDraftChange: (value: string) => void;
+  onAppearanceChange: (settings: AppearanceSettings) => void;
+  onOpenChange: (open: boolean) => void;
   onOverridesChange: (settings: DesktopSettingsOverrides) => void;
   onSaveApiKey: () => void;
+  open: boolean;
   overrides: DesktopSettingsOverrides;
   savingKey: boolean;
   settings: ResolvedDesktopSettings;
 }) {
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button type="button" variant={settings.apiKeyConfigured ? "outline" : "default"}>
           <Settings className="size-4" aria-hidden="true" />
@@ -148,6 +175,69 @@ function SettingsDialog({
         </DialogHeader>
 
         <div className="grid gap-4">
+          <section className="grid gap-3 rounded-md border bg-muted/25 p-3">
+            <div>
+              <h3 className="text-sm font-semibold">界面外观</h3>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                字体会随应用一起打包；背景主题只影响桌面端 UI，不写入 CLI agent 配置。
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1.5">
+                <span className="text-sm font-medium">中文字体</span>
+                <Select
+                  value={appearance.font}
+                  onValueChange={(font) =>
+                    onAppearanceChange({ ...appearance, font: font as FontChoice })
+                  }
+                >
+                  <SelectTrigger aria-label="中文字体">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {fontOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span className="text-xs text-muted-foreground">
+                  {fontOptions.find((option) => option.value === appearance.font)?.description}
+                </span>
+              </label>
+
+              <label className="grid gap-1.5">
+                <span className="text-sm font-medium">背景主题</span>
+                <Select
+                  value={appearance.theme}
+                  onValueChange={(theme) =>
+                    onAppearanceChange({ ...appearance, theme: theme as ThemeChoice })
+                  }
+                >
+                  <SelectTrigger aria-label="背景主题">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {themeOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="mt-1 flex gap-1.5" aria-hidden="true">
+                  {themeOptions.map((option) => (
+                    <span
+                      key={option.value}
+                      className={`size-5 rounded-md border shadow-sm theme-swatch-${option.value}`}
+                    />
+                  ))}
+                </div>
+              </label>
+            </div>
+          </section>
+
           <label className="grid gap-1.5">
             <span className="text-sm font-medium">DeepSeek API Key</span>
             <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
@@ -182,10 +272,8 @@ function SettingsDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="auto">自动</SelectItem>
-                  <SelectItem value="pro">DeepSeek V4 Pro</SelectItem>
-                  <SelectItem value="flash">DeepSeek V4 Flash</SelectItem>
-                  <SelectItem value="deepseek-v4-pro">deepseek-v4-pro</SelectItem>
-                  <SelectItem value="deepseek-v4-flash">deepseek-v4-flash</SelectItem>
+                  <SelectItem value="pro">Pro</SelectItem>
+                  <SelectItem value="flash">Flash</SelectItem>
                 </SelectContent>
               </Select>
             </label>
@@ -226,4 +314,17 @@ function SettingsDialog({
       </DialogContent>
     </Dialog>
   );
+}
+
+function normalizeModelValue(model?: string): string {
+  switch (model?.trim().toLowerCase()) {
+    case "pro":
+    case "deepseek-v4-pro":
+      return "pro";
+    case "flash":
+    case "deepseek-v4-flash":
+      return "flash";
+    default:
+      return "auto";
+  }
 }

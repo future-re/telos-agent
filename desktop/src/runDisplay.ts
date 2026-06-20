@@ -15,8 +15,10 @@ export interface RunDisplayInput {
 export interface RunDisplay {
   providerLabel: string;
   modelLabel: string;
+  modelDescription: string;
   cwdLabel: string;
   projectLabel: string;
+  workspaceLabel: string;
   memoryLabel: string;
   apiKeyLabel: string;
   approvalLabel: string;
@@ -26,41 +28,45 @@ export interface RunDisplay {
 
 export function buildRunDisplay(input: RunDisplayInput): RunDisplay {
   const providerLabel = input.provider === "deepseek" ? "DeepSeek" : "Mock";
-  const modelLabel = input.model?.trim() || "auto";
+  const model = normalizeModel(input.model);
+  const modelLabel = model.label;
   const cwdLabel = input.cwd?.trim() || "启动目录";
   const projectLabel = input.projectRoot?.trim() || "未检测到项目根目录";
+  const workspaceLabel = input.projectRoot?.trim() || cwdLabel;
   const memoryLabel = `${input.memoryCount ?? 0} 条记忆`;
   const apiKeyLabel = input.apiKeyConfigured ? "已配置" : "未配置";
   const approvalLabel = input.autoApprove ? "自动批准" : "手动确认";
   const activityLabel = input.running ? "运行中" : "空闲";
-  const statusLabel = statusToChinese(input.status);
 
   return {
     providerLabel,
     modelLabel,
+    modelDescription: model.description,
     cwdLabel,
     projectLabel,
+    workspaceLabel,
     memoryLabel,
     apiKeyLabel,
     approvalLabel,
     activityLabel,
-    runMetadata: `${providerLabel} / ${modelLabel} / ${statusLabel}`,
+    runMetadata: `${providerLabel} / ${modelLabel}`,
   };
 }
 
-function statusToChinese(status: string): string {
-  switch (status) {
-    case "idle":
-      return "空闲";
-    case "thinking":
-      return "思考中";
-    case "streaming":
-      return "生成中";
-    case "tool completed":
-      return "工具完成";
-    case "tool failed":
-      return "工具失败";
+function normalizeModel(model?: string): { label: string; description: string } {
+  const value = model?.trim().toLowerCase();
+  switch (value) {
+    case "":
+    case undefined:
+    case "auto":
+      return { label: "自动路由", description: "按任务自动选择 Pro 或 Flash" };
+    case "pro":
+    case "deepseek-v4-pro":
+      return { label: "DeepSeek V4 Pro", description: "适合复杂推理和规划" };
+    case "flash":
+    case "deepseek-v4-flash":
+      return { label: "DeepSeek V4 Flash", description: "适合快速响应和轻量任务" };
     default:
-      return status || "空闲";
+      return { label: model?.trim() || "自动路由", description: "来自配置文件的自定义模型" };
   }
 }

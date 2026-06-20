@@ -1,5 +1,6 @@
 import {
   Activity,
+  Settings,
   Bot,
   Check,
   Circle,
@@ -13,18 +14,30 @@ import {
 import { ToolActivity } from "@/chatState";
 import { RunDisplay } from "@/runDisplay";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 interface RunInspectorProps {
   display: RunDisplay;
+  onChooseDirectory: () => void;
+  onConfigure: () => void;
+  onOpenMemory: () => void;
   running: boolean;
   status: string;
   tools: ToolActivity[];
 }
 
-export function RunInspector({ display, running, status, tools }: RunInspectorProps) {
+export function RunInspector({
+  display,
+  onChooseDirectory,
+  onConfigure,
+  onOpenMemory,
+  running,
+  status,
+  tools,
+}: RunInspectorProps) {
   return (
     <aside className="grid min-h-screen min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-3 border-l bg-muted/40 p-4 max-[920px]:min-h-0 max-[920px]:border-l-0 max-[920px]:border-t">
       <div className="flex items-start justify-between gap-3">
@@ -41,30 +54,36 @@ export function RunInspector({ display, running, status, tools }: RunInspectorPr
       </div>
 
       <section className="grid grid-cols-2 gap-2" aria-label="当前配置">
-        <Metric icon={<Bot className="size-4" />} label="Provider" value={display.providerLabel} />
-        <Metric icon={<KeyRound className="size-4" />} label="API Key" value={display.apiKeyLabel} />
-        <Metric icon={<Check className="size-4" />} label="工具批准" value={display.approvalLabel} />
-        <Metric icon={<Library className="size-4" />} label="记忆" value={display.memoryLabel} />
+        <Metric icon={<Bot className="size-4" />} label="服务" value={display.providerLabel} />
+        <Metric icon={<KeyRound className="size-4" />} label="密钥" value={display.apiKeyLabel} />
+        <Metric icon={<Check className="size-4" />} label="权限" value={display.approvalLabel} />
         <Metric
-          className="col-span-2"
-          icon={<Folder className="size-4" />}
-          label="项目根目录"
-          value={display.projectLabel}
+          actionLabel="查看记忆"
+          icon={<Library className="size-4" />}
+          label="记忆"
+          onClick={onOpenMemory}
+          value={display.memoryLabel}
         />
         <Metric
+          actionLabel="选择目录"
           className="col-span-2"
           icon={<Folder className="size-4" />}
-          label="工作目录"
-          value={display.cwdLabel}
+          label="目录"
+          onClick={onChooseDirectory}
+          value={display.workspaceLabel}
         />
       </section>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
           <CardTitle className="flex items-center gap-2 text-sm">
             <Activity className="size-4" aria-hidden="true" />
             当前模型
           </CardTitle>
+          <Button type="button" variant="ghost" size="sm" onClick={onConfigure}>
+            <Settings className="size-4" aria-hidden="true" />
+            调整
+          </Button>
         </CardHeader>
         <CardContent>
           <div className="rounded-md border bg-background px-3 py-2">
@@ -72,7 +91,7 @@ export function RunInspector({ display, running, status, tools }: RunInspectorPr
               {display.modelLabel}
             </strong>
             <span className="mt-1 block text-xs text-muted-foreground">
-              {display.runMetadata}
+              {display.modelDescription}
             </span>
           </div>
         </CardContent>
@@ -110,27 +129,55 @@ export function RunInspector({ display, running, status, tools }: RunInspectorPr
 }
 
 function Metric({
+  actionLabel,
   className,
   icon,
   label,
+  onClick,
   value,
 }: {
+  actionLabel?: string;
   className?: string;
   icon: React.ReactNode;
   label: string;
+  onClick?: () => void;
   value: string;
 }) {
+  const content = (
+    <CardContent className="p-3 text-left">
+      <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        {icon}
+        {label}
+      </span>
+      <strong className="mt-2 block truncate text-sm" title={value}>
+        {value}
+      </strong>
+    </CardContent>
+  );
+
+  if (onClick) {
+    return (
+      <Card
+        className={cn(
+          "min-w-0 transition-colors hover:border-ring hover:bg-accent/60",
+          className,
+        )}
+      >
+        <button
+          type="button"
+          className="block h-full w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={actionLabel ?? label}
+          onClick={onClick}
+        >
+          {content}
+        </button>
+      </Card>
+    );
+  }
+
   return (
     <Card className={cn("min-w-0", className)}>
-      <CardContent className="p-3">
-        <span className="flex items-center gap-1.5 font-mono text-xs font-bold uppercase text-muted-foreground">
-          {icon}
-          {label}
-        </span>
-        <strong className="mt-2 block truncate text-sm" title={value}>
-          {value}
-        </strong>
-      </CardContent>
+      {content}
     </Card>
   );
 }

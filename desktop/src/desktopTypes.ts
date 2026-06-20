@@ -23,3 +23,26 @@ export interface ResolvedDesktopSettings {
   configPath?: string;
   instructionsFile?: string;
 }
+
+export interface MemoryBucket {
+  label: string;
+  count: number;
+}
+
+export interface MemoryPreview {
+  name: string;
+  description: string;
+  category: string;
+  status: string;
+  updated: string;
+  timesUsed: number;
+  tags: string[];
+}
+
+export interface MemoryOverview {
+  root: string;
+  total: number;
+  categories: MemoryBucket[];
+  statuses: MemoryBucket[];
+  recent: MemoryPreview[];
+}

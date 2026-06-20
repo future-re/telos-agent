@@ -17,14 +17,16 @@ describe("buildRunDisplay", () => {
       }),
     ).toEqual({
       providerLabel: "DeepSeek",
-      modelLabel: "deepseek-v4-pro",
+      modelLabel: "DeepSeek V4 Pro",
+      modelDescription: "适合复杂推理和规划",
       cwdLabel: "C:\\work\\telos",
       projectLabel: "C:\\work\\telos",
+      workspaceLabel: "C:\\work\\telos",
       memoryLabel: "3 条记忆",
       apiKeyLabel: "已配置",
       approvalLabel: "自动批准",
       activityLabel: "运行中",
-      runMetadata: "DeepSeek / deepseek-v4-pro / 思考中",
+      runMetadata: "DeepSeek / DeepSeek V4 Pro",
     });
   });
 
@@ -42,9 +44,11 @@ describe("buildRunDisplay", () => {
       }),
     ).toMatchObject({
       providerLabel: "Mock",
-      modelLabel: "auto",
+      modelLabel: "自动路由",
+      modelDescription: "按任务自动选择 Pro 或 Flash",
       cwdLabel: "启动目录",
       projectLabel: "未检测到项目根目录",
+      workspaceLabel: "启动目录",
       memoryLabel: "0 条记忆",
       apiKeyLabel: "未配置",
       approvalLabel: "手动确认",

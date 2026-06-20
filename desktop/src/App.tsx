@@ -1,6 +1,13 @@
 import { FormEvent, useEffect, useMemo, useReducer, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import {
+  AppearanceSettings,
+  applyAppearance,
+  loadAppearance,
+  saveAppearance,
+} from "@/appearance";
 import {
   ChatState,
   TelosEvent,
@@ -10,10 +17,16 @@ import {
 } from "@/chatState";
 import { Composer } from "@/components/Composer";
 import { Conversation } from "@/components/Conversation";
+import { MemoryOverviewDialog } from "@/components/MemoryOverviewDialog";
 import { RunInspector } from "@/components/RunInspector";
 import { TopBar } from "@/components/TopBar";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { DesktopSettingsOverrides, ResolvedDesktopSettings } from "@/desktopTypes";
+import {
+  DesktopSettingsOverrides,
+  MemoryOverview,
+  ResolvedDesktopSettings,
+} from "@/desktopTypes";
+import { cn } from "@/lib/utils";
 import { buildRunDisplay } from "@/runDisplay";
 
 interface PromptResult {
@@ -72,6 +85,11 @@ export function App() {
   const [savingKey, setSavingKey] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [appearance, setAppearance] = useState<AppearanceSettings>(() => loadAppearance());
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryOverview, setMemoryOverview] = useState<MemoryOverview | undefined>();
 
   useEffect(() => {
     const unlisten = listen<TelosEvent>("telos://event", (event) => {
@@ -87,6 +105,11 @@ export function App() {
       dispatch({ type: "error", message: `读取配置失败：${String(error)}` });
     });
   }, []);
+
+  useEffect(() => {
+    applyAppearance(appearance);
+    saveAppearance(appearance);
+  }, [appearance]);
 
   const effectiveSettings = useMemo(
     () => ({
@@ -192,15 +215,87 @@ export function App() {
     dispatch({ type: "reset" });
   }
 
+  async function chooseDirectory() {
+    if (!isTauriRuntime()) {
+      const selected = window.prompt("输入工作目录", effectiveSettings.cwd);
+      if (selected?.trim()) {
+        const next = { ...overrides, cwd: selected.trim() };
+        setOverrides(next);
+        await refreshSettings(next);
+      }
+      return;
+    }
+
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      defaultPath: effectiveSettings.cwd || undefined,
+      title: "选择工作目录",
+    });
+    if (typeof selected !== "string" || !selected.trim()) {
+      return;
+    }
+    const next = { ...overrides, cwd: selected };
+    setOverrides(next);
+    await refreshSettings(next);
+    await invoke("reset_session").catch(() => undefined);
+    dispatch({ type: "reset" });
+  }
+
+  async function openMemoryOverview() {
+    setMemoryOpen(true);
+    setMemoryLoading(true);
+    try {
+      if (!isTauriRuntime()) {
+        setMemoryOverview({
+          root: "浏览器预览模式",
+          total: 0,
+          categories: [
+            { label: "事实", count: 0 },
+            { label: "命令", count: 0 },
+            { label: "流程", count: 0 },
+            { label: "模式", count: 0 },
+            { label: "脚本", count: 0 },
+          ],
+          statuses: [
+            { label: "可用", count: 0 },
+            { label: "待修复", count: 0 },
+            { label: "已废弃", count: 0 },
+          ],
+          recent: [],
+        });
+        return;
+      }
+
+      const overview = await invoke<MemoryOverview>("memory_summary", {
+        request: effectiveSettings.cwd ? { cwd: effectiveSettings.cwd } : undefined,
+      });
+      setMemoryOverview(overview);
+    } catch (error) {
+      dispatch({ type: "error", message: `读取记忆失败：${String(error)}` });
+      setMemoryOverview(undefined);
+    } finally {
+      setMemoryLoading(false);
+    }
+  }
+
   return (
     <TooltipProvider delayDuration={250}>
-      <main className="grid min-h-screen w-full overflow-x-hidden bg-muted/40 text-foreground lg:grid-cols-[minmax(0,1fr)_minmax(352px,388px)]">
+      <main
+        className={cn(
+          "grid min-h-screen w-full overflow-x-hidden bg-muted/40 text-foreground",
+          inspectorOpen
+            ? "lg:grid-cols-[minmax(0,1fr)_minmax(352px,388px)]"
+            : "grid-cols-1",
+        )}
+      >
         <section className="grid min-h-screen w-full min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] bg-background">
           <TopBar
             apiKeyDraft={apiKeyDraft}
             metadata={display.runMetadata}
             onApiKeyDraftChange={setApiKeyDraft}
             onOverridesChange={updateOverrides}
+            onAppearanceChange={setAppearance}
             onReset={resetSession}
             onSaveApiKey={saveApiKey}
             onTogglePanel={() => setInspectorOpen((open) => !open)}
@@ -208,6 +303,9 @@ export function App() {
             panelOpen={inspectorOpen}
             savingKey={savingKey}
             settings={settings}
+            settingsOpen={settingsOpen}
+            onSettingsOpenChange={setSettingsOpen}
+            appearance={appearance}
           />
           <Conversation
             messages={state.messages}
@@ -230,12 +328,21 @@ export function App() {
         {inspectorOpen && (
           <RunInspector
             display={display}
+            onChooseDirectory={chooseDirectory}
+            onConfigure={() => setSettingsOpen(true)}
+            onOpenMemory={openMemoryOverview}
             running={state.running}
             status={state.status}
             tools={state.tools}
           />
         )}
       </main>
+      <MemoryOverviewDialog
+        loading={memoryLoading}
+        memory={memoryOverview}
+        open={memoryOpen}
+        onOpenChange={setMemoryOpen}
+      />
     </TooltipProvider>
   );
 }

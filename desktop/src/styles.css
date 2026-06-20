@@ -24,15 +24,16 @@
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
-  --font-sans: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB",
-    "Noto Sans CJK SC", "Noto Sans SC", Inter, "Segoe UI", ui-sans-serif, system-ui,
-    -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: var(--app-font-sans);
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, "Liberation Mono",
     monospace;
 }
 
 :root {
   --radius: 0.5rem;
+  --app-font-sans: "Noto Sans SC Variable", "Microsoft YaHei UI", "Microsoft YaHei",
+    "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC", Inter, "Segoe UI",
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --background: #f8fafc;
   --foreground: #172027;
   --card: #ffffff;
@@ -59,6 +60,88 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-font="system"] {
+  --app-font-sans: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB",
+    "Noto Sans CJK SC", "Noto Sans SC", Inter, "Segoe UI", ui-sans-serif, system-ui,
+    -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+:root[data-font="noto-sans"] {
+  --app-font-sans: "Noto Sans SC Variable", "Microsoft YaHei UI", "Microsoft YaHei",
+    "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC", Inter, "Segoe UI",
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+:root[data-font="wenkai"] {
+  --app-font-sans: "LXGW WenKai", "Noto Sans SC Variable", "Microsoft YaHei UI",
+    "Microsoft YaHei", "PingFang SC", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root[data-font="serif"] {
+  --app-font-sans: "Noto Serif SC", "Songti SC", SimSun, "Noto Sans SC Variable",
+    "Microsoft YaHei UI", serif;
+}
+
+:root[data-theme="warm"] {
+  --background: #faf8f3;
+  --foreground: #1f2428;
+  --card: #fffdf8;
+  --card-foreground: #1f2428;
+  --popover: #fffdf8;
+  --popover-foreground: #1f2428;
+  --primary: #22262a;
+  --primary-foreground: #fffdf8;
+  --secondary: #f0ebe1;
+  --secondary-foreground: #1f2428;
+  --muted: #f0ebe1;
+  --muted-foreground: #645f57;
+  --accent: #e8e1d4;
+  --accent-foreground: #1f2428;
+  --border: #ddd4c5;
+  --input: #d6ccbd;
+  --ring: #8b5e34;
+}
+
+:root[data-theme="green"] {
+  --background: #f4f8f2;
+  --foreground: #18221d;
+  --card: #fbfdf9;
+  --card-foreground: #18221d;
+  --popover: #fbfdf9;
+  --popover-foreground: #18221d;
+  --primary: #143626;
+  --primary-foreground: #f7fbf5;
+  --secondary: #e8f0e4;
+  --secondary-foreground: #18221d;
+  --muted: #e8f0e4;
+  --muted-foreground: #536250;
+  --accent: #dae7d5;
+  --accent-foreground: #18221d;
+  --border: #cbdac6;
+  --input: #bfceb9;
+  --ring: #2f7d4f;
+}
+
+:root[data-theme="ink"] {
+  --background: #111318;
+  --foreground: #eceff3;
+  --card: #181b22;
+  --card-foreground: #eceff3;
+  --popover: #1c2028;
+  --popover-foreground: #eceff3;
+  --primary: #eceff3;
+  --primary-foreground: #111318;
+  --secondary: #242936;
+  --secondary-foreground: #eceff3;
+  --muted: #242936;
+  --muted-foreground: #aab2bd;
+  --accent: #303849;
+  --accent-foreground: #f6f8fb;
+  --border: #303744;
+  --input: #394251;
+  --ring: #7aa2ff;
 }
 
 * {
@@ -88,4 +171,20 @@ button:disabled {
 
 ::selection {
   background: rgba(37, 99, 235, 0.18);
+}
+
+.theme-swatch-light {
+  background: #f8fafc;
+}
+
+.theme-swatch-warm {
+  background: #faf8f3;
+}
+
+.theme-swatch-green {
+  background: #f4f8f2;
+}
+
+.theme-swatch-ink {
+  background: #111318;
 }

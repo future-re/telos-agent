@@ -3,8 +3,8 @@ use tauri::{Emitter, State, Window};
 use tokio::sync::Mutex;
 
 use crate::agent_host::{
-    AgentHost, DesktopSettingsOverrides, ResolvedDesktopSettings, resolve_desktop_settings,
-    save_deepseek_api_key,
+    AgentHost, DesktopSettingsOverrides, MemoryOverview, ResolvedDesktopSettings, memory_overview,
+    resolve_desktop_settings, save_deepseek_api_key,
 };
 
 #[derive(Default)]
@@ -52,6 +52,14 @@ fn save_deepseek_key(request: SaveDeepSeekKeyRequest) -> Result<ResolvedDesktopS
 }
 
 #[tauri::command]
+fn memory_summary(request: Option<ResolveSettingsRequest>) -> Result<MemoryOverview, String> {
+    memory_overview(&DesktopSettingsOverrides {
+        cwd: request.and_then(|request| request.cwd),
+        ..DesktopSettingsOverrides::default()
+    })
+}
+
+#[tauri::command]
 async fn reset_session(state: State<'_, AppState>) -> Result<(), String> {
     let mut host = state.host.lock().await;
     *host = None;
@@ -86,10 +94,12 @@ async fn send_prompt(
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             resolved_settings,
             save_deepseek_key,
+            memory_summary,
             reset_session,
             send_prompt
         ])

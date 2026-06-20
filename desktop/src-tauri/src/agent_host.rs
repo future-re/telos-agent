@@ -7,8 +7,8 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use telos_agent::{
     AgentConfig, AgentSession, ApprovalDecision, AutoDenyHandler, CompletionResponse,
-    FixedDecisionHandler, JsonlStorage, Message, MockProvider, ModelProvider, StopReason,
-    ToolRegistry,
+    FixedDecisionHandler, JsonlStorage, MemoryCategory, MemoryEntry, MemoryQuery, MemorySort,
+    MemoryStatus, Message, MockProvider, ModelProvider, StopReason, ToolRegistry,
 };
 use telos_cli::cli::{ProviderArg, SharedOptions};
 use telos_cli::config::{self, FileConfig, ResolvedProvider};
@@ -49,6 +49,35 @@ pub struct ResolvedDesktopSettings {
     pub max_iterations: usize,
     pub config_path: Option<PathBuf>,
     pub instructions_file: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryOverview {
+    pub root: PathBuf,
+    pub total: usize,
+    pub categories: Vec<MemoryBucket>,
+    pub statuses: Vec<MemoryBucket>,
+    pub recent: Vec<MemoryPreview>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryBucket {
+    pub label: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryPreview {
+    pub name: String,
+    pub description: String,
+    pub category: String,
+    pub status: String,
+    pub updated: String,
+    pub times_used: u32,
+    pub tags: Vec<String>,
 }
 
 pub struct AgentHost {
@@ -241,6 +270,83 @@ pub fn save_deepseek_api_key(api_key: &str) -> Result<ResolvedDesktopSettings, S
     std::fs::write(&path, serialized).map_err(|e| e.to_string())?;
 
     resolve_desktop_settings(&DesktopSettingsOverrides::default())
+}
+
+pub fn memory_overview(overrides: &DesktopSettingsOverrides) -> Result<MemoryOverview, String> {
+    let resolved = resolve_desktop_settings(overrides)?;
+    let store = telos_agent::MemoryStore::new(resolved.memory_root.clone());
+    let entries = store.query(MemoryQuery {
+        limit: None,
+        include_body: false,
+        sort: MemorySort::RecentlyUpdated,
+        ..MemoryQuery::default()
+    });
+
+    let categories = [
+        (MemoryCategory::Fact, "事实"),
+        (MemoryCategory::Command, "命令"),
+        (MemoryCategory::Workflow, "流程"),
+        (MemoryCategory::Pattern, "模式"),
+        (MemoryCategory::Script, "脚本"),
+    ]
+    .into_iter()
+    .map(|(category, label)| MemoryBucket {
+        label: label.into(),
+        count: entries.iter().filter(|entry| entry.category == category).count(),
+    })
+    .collect();
+
+    let statuses = [
+        (MemoryStatus::Working, "可用"),
+        (MemoryStatus::NeedsFix, "待修复"),
+        (MemoryStatus::Deprecated, "已废弃"),
+    ]
+    .into_iter()
+    .map(|(status, label)| MemoryBucket {
+        label: label.into(),
+        count: entries.iter().filter(|entry| entry.status == status).count(),
+    })
+    .collect();
+
+    let recent = entries.iter().take(12).map(memory_preview).collect();
+
+    Ok(MemoryOverview {
+        root: resolved.memory_root,
+        total: entries.len(),
+        categories,
+        statuses,
+        recent,
+    })
+}
+
+fn memory_preview(entry: &MemoryEntry) -> MemoryPreview {
+    MemoryPreview {
+        name: entry.name.clone(),
+        description: entry.description.clone(),
+        category: memory_category_label(&entry.category).into(),
+        status: memory_status_label(&entry.status).into(),
+        updated: entry.updated.clone(),
+        times_used: entry.times_used,
+        tags: entry.tags.clone(),
+    }
+}
+
+fn memory_category_label(category: &MemoryCategory) -> &'static str {
+    match category {
+        MemoryCategory::Script => "脚本",
+        MemoryCategory::Command => "命令",
+        MemoryCategory::Pattern => "模式",
+        MemoryCategory::Fact => "事实",
+        MemoryCategory::Workflow => "流程",
+    }
+}
+
+fn memory_status_label(status: &MemoryStatus) -> &'static str {
+    match status {
+        MemoryStatus::Working => "可用",
+        MemoryStatus::NeedsFix => "待修复",
+        MemoryStatus::Deprecated => "已废弃",
+    }
 }
 
 fn prepare_desktop_runtime(

@@ -31,6 +31,10 @@ pub struct AgentDefinition {
     pub max_iterations: Option<usize>,
     pub background: bool,
     pub isolation: AgentIsolation,
+    pub initial_prompt: Option<String>,
+    pub permission_mode: Option<String>,
+    pub skills: Vec<String>,
+    pub effort: Option<String>,
     pub source: AgentSource,
 }
 
@@ -48,6 +52,11 @@ struct AgentFrontmatter {
     #[serde(default)]
     background: bool,
     isolation: Option<String>,
+    initial_prompt: Option<String>,
+    permission_mode: Option<String>,
+    #[serde(default)]
+    skills: Vec<String>,
+    effort: Option<String>,
 }
 
 impl AgentDefinition {
@@ -67,6 +76,10 @@ impl AgentDefinition {
             max_iterations: None,
             background: false,
             isolation: AgentIsolation::None,
+            initial_prompt: None,
+            permission_mode: None,
+            skills: Vec::new(),
+            effort: None,
             source,
         }
     }
@@ -110,6 +123,10 @@ impl AgentDefinition {
             max_iterations: frontmatter.max_iterations,
             background: frontmatter.background,
             isolation,
+            initial_prompt: optional_trimmed_string(frontmatter.initial_prompt),
+            permission_mode: optional_trimmed_string(frontmatter.permission_mode),
+            skills: frontmatter.skills,
+            effort: optional_trimmed_string(frontmatter.effort),
             source,
         })
     }
@@ -131,6 +148,13 @@ fn required_frontmatter_string(value: Option<String>, key: &str) -> Result<Strin
     } else {
         Ok(value.to_string())
     }
+}
+
+fn optional_trimmed_string(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let value = value.trim();
+        if value.is_empty() { None } else { Some(value.to_string()) }
+    })
 }
 
 pub(crate) fn parse_model_hint(raw: &str) -> Result<Option<ModelHint>, AgentError> {
@@ -162,6 +186,10 @@ model: execution
 maxIterations: 8
 background: true
 isolation: worktree
+initialPrompt: Read README.md first.
+permissionMode: plan
+skills: [debug, verify]
+effort: high
 ---
 You inspect the codebase and report findings.
 "#;
@@ -181,6 +209,10 @@ You inspect the codebase and report findings.
         assert_eq!(definition.max_iterations, Some(8));
         assert!(definition.background);
         assert_eq!(definition.isolation, AgentIsolation::Worktree);
+        assert_eq!(definition.initial_prompt.as_deref(), Some("Read README.md first."));
+        assert_eq!(definition.permission_mode.as_deref(), Some("plan"));
+        assert_eq!(definition.skills, vec!["debug", "verify"]);
+        assert_eq!(definition.effort.as_deref(), Some("high"));
     }
 
     #[test]

@@ -4,7 +4,7 @@ pub fn builtin_agents() -> Vec<AgentDefinition> {
     let mut general = AgentDefinition::new(
         "general-purpose",
         "Use this agent for general multi-step work when no specialized agent fits.",
-        "You are a general-purpose subagent. Complete the delegated task fully and report concise results.",
+        "You are a general-purpose subagent. Complete only the delegated task. Use the provided scope and constraints, avoid unrelated work, and report concise results with key files and any blockers.",
         AgentSource::BuiltIn,
     );
     general.allowed_tools = vec!["*".into()];
@@ -12,7 +12,7 @@ pub fn builtin_agents() -> Vec<AgentDefinition> {
     let mut explore = AgentDefinition::new(
         "Explore",
         "Use this agent for broad read-only codebase exploration and research.",
-        "You are an explore agent. Search and analyze existing code. Do not edit files. Report findings with file paths and concise evidence.",
+        "You are an explore agent. Search and analyze existing code. Do not edit files. Report findings with file paths, concise evidence, and any uncertainty. Do not duplicate unrelated investigation.",
         AgentSource::BuiltIn,
     );
     explore.allowed_tools = vec![
@@ -29,7 +29,7 @@ pub fn builtin_agents() -> Vec<AgentDefinition> {
     let mut plan = AgentDefinition::new(
         "Plan",
         "Use this agent to explore requirements and produce an implementation plan without editing files.",
-        "You are a planning agent. Explore the repository, identify constraints, and produce an actionable plan. Do not modify files.",
+        "You are a planning agent. Explore the repository, identify constraints, and produce an actionable implementation plan. Do not modify files. Keep the plan scoped to the delegated objective.",
         AgentSource::BuiltIn,
     );
     plan.allowed_tools = explore.allowed_tools.clone();
@@ -39,7 +39,7 @@ pub fn builtin_agents() -> Vec<AgentDefinition> {
     let mut verification = AgentDefinition::new(
         "Verification",
         "Use this agent to run checks, inspect failures, and verify completed work.",
-        "You are a verification agent. Run relevant checks, inspect failures carefully, and report exact verification evidence.",
+        "You are a verification agent. Run relevant checks, inspect failures carefully, and report exact verification evidence. Do not rubber-stamp work; explain any unverified risk.",
         AgentSource::BuiltIn,
     );
     verification.allowed_tools = vec![

@@ -104,7 +104,11 @@ impl Tool for SubagentTool {
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use the Subagent tool to delegate self-contained tasks, run parallel explore lenses, or protect the main context window. \
-Provide a clear description and prompt. Use subagent_type to choose a specialized agent when appropriate: general-purpose, Explore, Plan, or Verification. \
+Provide a clear 3-5 word description and a self-contained prompt with scope, relevant files, constraints, and expected output. \
+Use subagent_type to choose a specialized agent when appropriate: general-purpose, Explore, Plan, or Verification. \
+For independent research or verification, launch multiple subagent calls in the same assistant message so they can run in parallel. \
+Use run_in_background for long-running work, then inspect results with task_output or stop it with task_stop. \
+Use isolation: worktree for write-heavy work that should not touch the parent checkout. \
 Do not duplicate work already being performed in the parent session.",
         )
     }
@@ -291,7 +295,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn validate_rejects_background_and_worktree_until_supported() {
+    async fn validate_rejects_background_without_task_manager_and_fork_worktree() {
         let tool = SubagentTool::new(
             Arc::new(MockProvider::new(vec![])),
             ToolRegistry::new(),
@@ -308,19 +312,37 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(background.to_string().contains("run_in_background is not supported"));
+        assert!(background.to_string().contains("requires AgentConfig.task_manager"));
 
         let worktree = tool
             .validate(
                 &json!({
                     "prompt": "inspect",
-                    "isolation": "worktree"
+                    "mode": "fork",
+                    "isolation": "worktree",
+                    "forks": [{"lens": "a", "system_prompt": "a", "task": "a"}]
                 }),
                 &ToolContext::dummy(),
             )
             .await
             .unwrap_err();
-        assert!(worktree.to_string().contains("worktree isolation is not supported"));
+        assert!(worktree.to_string().contains("only supported in agent mode"));
+    }
+
+    #[test]
+    fn subagent_prompt_text_describes_distribution_controls() {
+        let tool = SubagentTool::new(
+            Arc::new(MockProvider::new(vec![])),
+            ToolRegistry::new(),
+            AgentConfig::default(),
+        );
+        let prompt = tool.prompt_text().unwrap();
+        assert!(prompt.contains("self-contained prompt"));
+        assert!(prompt.contains("multiple subagent calls"));
+        assert!(prompt.contains("run_in_background"));
+        assert!(prompt.contains("task_output"));
+        assert!(prompt.contains("task_stop"));
+        assert!(prompt.contains("isolation: worktree"));
     }
 
     #[tokio::test]
@@ -354,6 +376,51 @@ mod tests {
         assert_eq!(output.content["status"], "completed");
         assert_eq!(output.content["final_text"], "explore result");
         assert!(output.content["agent_id"].as_str().unwrap().starts_with("agent_"));
+    }
+
+    #[tokio::test]
+    async fn subagent_initial_prompt_is_prepended_to_delegated_prompt() {
+        let provider = Arc::new(MockProvider::new(vec![crate::provider::CompletionResponse {
+            message: crate::Message::assistant("done"),
+            stop_reason: crate::provider::StopReason::EndTurn,
+            usage: None,
+        }]));
+        let mut registry = SubagentRegistry::new();
+        let mut agent = AgentDefinition::new(
+            "preflight",
+            "Preflight agent",
+            "You prepare before work.",
+            AgentSource::BuiltIn,
+        );
+        agent.initial_prompt = Some("Read CONTRIBUTING.md first.".into());
+        registry.register(agent);
+        let tool = SubagentTool::with_registry(
+            provider.clone(),
+            ToolRegistry::new(),
+            AgentConfig::default(),
+            registry,
+        );
+
+        tool.invoke(
+            json!({
+                "description": "Run preflight",
+                "prompt": "Inspect parser",
+                "subagent_type": "preflight"
+            }),
+            ToolContext::dummy(),
+        )
+        .await
+        .unwrap();
+
+        let requests = provider.requests.lock().await;
+        let user_text = requests[0]
+            .messages
+            .iter()
+            .find(|message| message.role == crate::Role::User)
+            .expect("request should include delegated user prompt")
+            .text_content();
+        assert!(user_text.starts_with("Read CONTRIBUTING.md first."));
+        assert!(user_text.contains("Inspect parser"));
     }
 
     #[tokio::test]

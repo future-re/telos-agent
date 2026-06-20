@@ -48,6 +48,10 @@ impl SubagentTool {
             .and_then(|value| value.as_u64())
             .or(agent.max_iterations.map(|value| value as u64))
             .map(|value| value.max(1) as usize);
+        let effective_prompt = match agent.initial_prompt.as_deref() {
+            Some(initial_prompt) => format!("{initial_prompt}\n\n{prompt}"),
+            None => prompt.to_string(),
+        };
         let worktree_path = if matches!(
             arguments.get("isolation").and_then(|value| value.as_str()),
             Some("worktree")
@@ -92,7 +96,7 @@ impl SubagentTool {
             let mut config = self.config.clone();
             let task_manager_for_task = task_manager.clone();
             let agent_id_for_task = agent_id.clone();
-            let prompt = prompt.to_string();
+            let prompt = effective_prompt;
 
             tokio::spawn(async move {
                 config.cancellation = cancellation;
@@ -142,7 +146,7 @@ impl SubagentTool {
             self.config.clone(),
             agent,
             &agent_id,
-            prompt.to_string(),
+            effective_prompt,
             system_prompt,
             max_iterations,
             &mut context,

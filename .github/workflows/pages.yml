@@ -2,11 +2,9 @@ name: Pages
 
 on:
   push:
-    branches: ["main"]
     tags: ["*"]
   release:
     types: [published]
-  workflow_dispatch:
 
 permissions:
   contents: read

@@ -12,10 +12,17 @@ const navItems = [
   { label: { en: 'GitHub', zh: 'GitHub' }, path: 'https://github.com/future-re/telos-agent', external: true },
 ];
 
-const proofPoints = [
-  { en: 'Rust runtime core', zh: 'Rust 运行时核心' },
-  { en: 'PyPI CLI install', zh: 'PyPI CLI 安装' },
-  { en: 'MCP-ready tools', zh: 'MCP 工具就绪' },
+const installMethods = [
+  {
+    label: { en: 'Cargo', zh: 'Cargo' },
+    command: 'cargo install telos-cli',
+    note: { en: 'Native Rust install', zh: '原生 Rust 安装' },
+  },
+  {
+    label: { en: 'Python / PyPI', zh: 'Python / PyPI' },
+    command: 'pip install telos-cli',
+    note: { en: 'Python packaging path', zh: 'Python 包安装路径' },
+  },
 ];
 
 const capabilities = [
@@ -181,10 +188,11 @@ const copy = {
   },
   quickStart: { en: 'Quick Start', zh: '快速开始' },
   installCli: { en: 'Install CLI', zh: '安装 CLI' },
-  installTitle: { en: 'Install and run', zh: '安装并运行' },
+  installTitle: { en: 'Install paths', zh: '安装方式' },
+  startTitle: { en: 'Start the CLI', zh: '启动 CLI' },
   installNote: {
-    en: 'Start with the CLI, then embed the Rust crate when your client needs direct runtime control.',
-    zh: '先用 CLI 快速开始；当客户端需要直接控制运行时时，再嵌入 Rust crate。',
+    en: 'Choose Cargo or PyPI, then run the same telos command.',
+    zh: '选择 Cargo 或 PyPI 安装，然后使用同一个 telos 命令启动。',
   },
   libraryTitle: { en: 'Runtime loop', zh: '运行时循环' },
   libraryNote: {
@@ -205,7 +213,7 @@ const copy = {
     en: 'Designed for agents that need to touch real systems.',
     zh: '为需要接触真实系统的智能体而设计。',
   },
-  codeTitleOne: { en: 'CLI from Python packaging', zh: '通过 Python 包安装 CLI' },
+  codeTitleOne: { en: 'CLI install paths', zh: 'CLI 安装方式' },
   codeTitleTwo: { en: 'Library integration', zh: '库集成' },
   docsEyebrow: { en: 'Documentation', zh: '文档' },
   docsTitle: {
@@ -263,21 +271,28 @@ const copy = {
             <a class="button primary" href={href('/docs/quick-start/')}><Lang value={copy.quickStart} /></a>
             <a class="button secondary" href={href('/docs/cli-guide/')}><Lang value={copy.installCli} /></a>
           </div>
-          <div class="hero-proof" aria-label="Project highlights">
-            {proofPoints.map((item) => (
-              <span><Lang value={item} /></span>
-            ))}
-          </div>
         </div>
 
         <div class="runtime-console" aria-label="Install and runtime preview">
-          <div class="command-panel primary-panel">
+          <div class="install-panel primary-panel">
             <div class="panel-heading">
               <span><Lang value={copy.installTitle} /></span>
               <span class="status-dot">ready</span>
             </div>
-            <pre><code>pip install telos-cli
-telos "inspect this repository"</code></pre>
+            <div class="install-options">
+              {installMethods.map((item) => (
+                <article>
+                  <strong><Lang value={item.label} /></strong>
+                  <code>{item.command}</code>
+                  <span><Lang value={item.note} /></span>
+                </article>
+              ))}
+            </div>
+            <div class="start-command">
+              <div><Lang value={copy.startTitle} /></div>
+              <pre><code>telos
+telos chat</code></pre>
+            </div>
             <p><Lang value={copy.installNote} /></p>
           </div>
           <div class="runtime-summary">
@@ -344,7 +359,11 @@ telos "inspect this repository"</code></pre>
       <section class="code-section" aria-label="CLI and library examples">
         <div class="command-panel">
           <div class="panel-heading"><span><Lang value={copy.codeTitleOne} /></span></div>
-          <pre><code>pip install telos-cli
+          <pre><code>cargo install telos-cli
+pip install telos-cli
+
+telos
+telos chat
 telos --help
 telos "inspect this repository and suggest the next task"</code></pre>
         </div>

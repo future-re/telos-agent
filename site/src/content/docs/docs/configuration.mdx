@@ -3,14 +3,16 @@ title: Configuration
 description: Configure providers, models, environment variables, approvals, and diagnostics.
 ---
 
-telos supports user-level and project-level configuration. User config lives at `~/.config/telos/config.toml`. Project config lives at `.telos.toml` in the project root and overrides matching user config keys. CLI flags override both.
+telos supports user-level and project-level TOML configuration. User config lives at `~/.config/telos/config.toml`, unless `--config` or `TELOS_CONFIG` points to another file. Project config lives at `.telos.toml` in the detected project root and overrides matching user config keys. CLI flags and `TELOS_*` environment variables override config values where the option supports them.
 
 ## Example Config
 
 ```toml
 [agent]
 provider = "deepseek"
+model = "auto"
 max_iterations = 16
+default_shell = "bash"
 
 [agent.models]
 thinking = "deepseek-v4-pro"
@@ -23,9 +25,14 @@ DEEPSEEK_API_KEY = "sk-..."
 default_policy = "ask"
 
 [approval.policies]
-read = "allow"
-shell = "ask"
-write = "deny"
+Read = "allow"
+Bash = "ask"
+Write = "deny"
+
+[tui]
+density = "default"
+
+auto_mode = false
 
 [diagnostics]
 enabled = true
@@ -40,17 +47,27 @@ min_occurrences = 3
 
 ## Provider and Model
 
-`[agent].provider` selects the provider. The CLI accepts `deepseek`, `deep`, or `mock`.
+`[agent].provider` selects the provider. Config files accept `deepseek`, `deep`, or `mock`. The `--provider` CLI flag accepts `deepseek` or `mock`.
 
-`[agent.models].thinking` controls planning, first iteration, recovery, and periodic rethink. `[agent.models].fast` controls tool execution and routine follow-up iterations. `[agent].model` can be used as a fallback when a specific route is not set.
+`[agent].model` selects one model for all calls. For DeepSeek, `model = "auto"` uses routed mode with a thinking model and a fast model. `model = "pro"` maps to `deepseek-v4-pro`, and `model = "flash"` maps to `deepseek-v4-flash`.
+
+`[agent.models].thinking` controls planning, first iteration, recovery, and periodic rethink. `[agent.models].fast` controls tool execution and routine follow-up iterations. If no model is configured, DeepSeek defaults to `deepseek-v4-pro` for thinking and `deepseek-v4-flash` for fast execution.
+
+`[agent].default_shell` accepts `bash` or `powershell`. `[agent].max_iterations` defaults to `30`.
 
 ## Environment
 
-`[env]` can provide environment values such as `DEEPSEEK_API_KEY`. For the CLI, an explicit `--api-key` flag has higher priority, followed by provider-specific environment variables, config `[env]`, and then an interactive prompt.
+`[env]` can provide environment values such as `DEEPSEEK_API_KEY`. For the CLI, an explicit `--api-key` flag or `TELOS_API_KEY` has higher priority, followed by provider-specific environment variables, config `[env]`, and then an interactive prompt.
 
 ## Approval
 
-`[approval]` sets the default approval behavior. Per-tool policies live under `[approval.policies]` and use `allow`, `ask`, or `deny`.
+`[approval]` sets the default approval behavior. Per-tool policies live under `[approval.policies]` and use `allow`, `ask`, or `deny`. Policy keys can use canonical tool names such as `Bash`, `PowerShell`, `Read`, `Write`, and `Edit`, or aliases emitted by tool approval requests.
+
+## TUI
+
+`[tui].density` accepts `compact`, `default`, or `spacious`.
+
+`auto_mode` stores the TUI auto-approval toggle. The TUI may update this value in the project config when the user toggles auto mode.
 
 ## Diagnostics
 

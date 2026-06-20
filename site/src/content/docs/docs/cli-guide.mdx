@@ -3,18 +3,22 @@ title: CLI Guide
 description: Use telos from the terminal in TUI or one-shot mode.
 ---
 
-The `telos` CLI provides a Codex-style full-screen terminal interface and a single-prompt mode for one-shot tasks.
+The `telos` CLI provides a full-screen terminal UI and a single-prompt mode for
+one-shot tasks. It loads user config, project config, environment variables, and
+CLI flags before building the provider and runtime.
 
 ## Install
 
 ```bash
 cargo install telos-cli
-export DEEPSEEK_API_KEY=sk-...
+export TELOS_PROVIDER=deepseek
+export TELOS_API_KEY=sk-...
 ```
 
-API keys are resolved in this order: `--api-key`, provider-specific environment variable such as `DEEPSEEK_API_KEY`, config file `[env]`, then interactive prompt.
+For DeepSeek, `DEEPSEEK_API_KEY` also works. If no provider is configured and
+stdin is interactive, `telos` starts the setup wizard.
 
-## TUI Mode
+## Run Modes
 
 Run without a prompt to start the full-screen TUI:
 
@@ -22,9 +26,11 @@ Run without a prompt to start the full-screen TUI:
 telos
 ```
 
-The TUI streams markdown output, displays tool-call indicators, supports inline approval, can toggle automatic approval, and auto-saves sessions under `.telos/sessions/`.
+You can also use the explicit chat command:
 
-## One-Shot Mode
+```bash
+telos chat
+```
 
 Pass a prompt to run a single task and exit:
 
@@ -32,13 +38,86 @@ Pass a prompt to run a single task and exit:
 telos "Review src/lib.rs"
 ```
 
-## Provider and Model Flags
+The TUI streams markdown output, displays tool-call progress, supports inline
+approval, can toggle auto-approval mode, and stores sessions under
+`.telos/sessions/` in the detected project root.
 
-Choose the DeepSeek provider and one model:
+Common TUI slash commands:
+
+| Command | Use |
+|---|---|
+| `/help` | Show the in-app command list. |
+| `/tool` | Show registered tools and aliases. |
+| `/model` | Switch between DeepSeek `auto`, `pro`, `flash`, or a custom model label for later turns. |
+| `/api` | Save a DeepSeek API key to the user config and apply it to the current session. |
+| `/session` | Create, list, or resume stored sessions. |
+| `/tasks` | Show persisted tasks. |
+| `/auto` | Toggle TUI auto-approval mode. |
+| `/clear` | Clear the visible conversation. |
+
+## Config Files
+
+telos reads two TOML config layers:
+
+- User config: `~/.config/telos/config.toml`, or the path passed with
+  `--config` / `TELOS_CONFIG`.
+- Project config: `.telos.toml` in the detected project root.
+
+Project config overrides matching user config fields. CLI flags and `TELOS_*`
+environment variables override config values where the option supports them.
+
+Project root detection starts from `--cwd` / `TELOS_CWD` when provided, otherwise
+from the current directory. It walks upward until it finds `.telos.toml` or
+`.git`.
+
+## Minimal DeepSeek Config
+
+```toml
+[agent]
+provider = "deepseek"
+
+[env]
+DEEPSEEK_API_KEY = "sk-..."
+```
+
+The equivalent environment setup is:
+
+```bash
+export TELOS_PROVIDER=deepseek
+export TELOS_API_KEY=sk-...
+```
+
+API keys are resolved in this order:
+
+1. `--api-key` / `TELOS_API_KEY`
+2. Provider-specific environment variable, currently `DEEPSEEK_API_KEY`
+3. Config `[env].DEEPSEEK_API_KEY`
+4. Interactive hidden prompt, only when stdin is a terminal
+
+## Provider and Models
+
+The `--provider` flag accepts `deepseek` or `mock`:
+
+```bash
+telos --provider deepseek "Refactor error handling"
+telos --provider mock "Dry run the CLI path"
+```
+
+In config files, `[agent].provider` accepts `deepseek`, `deep`, or `mock`.
+
+By default, DeepSeek uses routed models:
+
+- thinking model: `deepseek-v4-pro`
+- fast model: `deepseek-v4-flash`
+
+Set one model for all DeepSeek calls:
 
 ```bash
 telos --provider deepseek --model deepseek-v4-pro "Refactor error handling"
 ```
+
+`--model pro` maps to `deepseek-v4-pro`, `--model flash` maps to
+`deepseek-v4-flash`, and `--model auto` selects the routed default.
 
 Use separate thinking and fast models:
 
@@ -49,7 +128,82 @@ telos --provider deepseek \
   "Refactor error handling"
 ```
 
-The CLI accepts `deepseek`, `deep`, or `mock` for provider resolution. Without explicit DeepSeek model settings, it defaults to `deepseek-v4-pro` for thinking and `deepseek-v4-flash` for fast execution.
+The matching config shape is:
+
+```toml
+[agent]
+provider = "deepseek"
+model = "auto"
+max_iterations = 30
+default_shell = "bash"
+
+[agent.models]
+thinking = "deepseek-v4-pro"
+fast = "deepseek-v4-flash"
+```
+
+`default_shell` accepts `bash` or `powershell`. `max_iterations` defaults to
+`30` unless set in config or overridden with `--max-iterations`.
+
+## Approval and Auto Mode
+
+Approval policy is configured with `allow`, `ask`, or `deny`:
+
+```toml
+[approval]
+default_policy = "ask"
+
+[approval.policies]
+Bash = "ask"
+Read = "allow"
+Write = "deny"
+```
+
+Tool policy keys can use canonical tool names such as `Bash`, `Read`, and
+`Write`, or aliases accepted by the tool's approval request. Policy values also
+accept `always-allow`, `always-ask`, and `always-deny`.
+
+In one-shot mode, approval prompts are printed to the terminal. In TUI mode,
+approval requests are shown inline. The TUI auto-approval toggle is stored as:
+
+```toml
+auto_mode = false
+```
+
+`auto_mode` is read by the TUI. It is not a replacement for provider or API key
+configuration.
+
+## TUI Layout
+
+The TUI supports density presets:
+
+```toml
+[tui]
+density = "default"
+```
+
+Valid values are `compact`, `default`, and `spacious`.
+
+## Common Flags
+
+```bash
+telos --cwd /path/to/project "Summarize this repository"
+telos --config ~/.config/telos/config.toml "Use explicit config"
+telos --max-iterations 12 "Keep this turn short"
+telos --no-validate-schema "Skip automatic tool argument schema validation"
+```
+
+Environment variable equivalents:
+
+```bash
+export TELOS_PROVIDER=deepseek
+export TELOS_MODEL=auto
+export TELOS_THINKING_MODEL=deepseek-v4-pro
+export TELOS_FAST_MODEL=deepseek-v4-flash
+export TELOS_API_KEY=sk-...
+export TELOS_CWD=/path/to/project
+export TELOS_CONFIG=~/.config/telos/config.toml
+```
 
 ## Completions
 

@@ -10,6 +10,9 @@ const checks = [
   ['Chinese language label', '中文'],
   ['English homepage copy', 'Let agents call tools safely'],
   ['Chinese homepage copy', '让智能体安全调用工具'],
+  ['Cargo CLI install', 'cargo install telos-cli'],
+  ['PyPI CLI install', 'pip install telos-cli'],
+  ['TUI start command', 'telos\ntelos chat'],
   ['client-side language script', 'data-language-target'],
 ];
 

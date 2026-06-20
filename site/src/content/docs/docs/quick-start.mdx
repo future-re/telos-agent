@@ -9,8 +9,12 @@ Use the CLI when you want an agent in the terminal. Use the Rust library when yo
 
 ```bash
 cargo install telos-cli
-export DEEPSEEK_API_KEY=sk-...
+export TELOS_PROVIDER=deepseek
+export TELOS_API_KEY=sk-...
 ```
+
+`DEEPSEEK_API_KEY` also works for the DeepSeek provider. If you run `telos`
+interactively without a configured provider, the CLI opens the setup wizard.
 
 Start the full-screen TUI:
 
@@ -24,11 +28,26 @@ Run one prompt and exit:
 telos "Review src/lib.rs"
 ```
 
+You can keep credentials in a user config file instead of shell env:
+
+```toml
+# ~/.config/telos/config.toml
+[agent]
+provider = "deepseek"
+model = "auto"
+
+[env]
+DEEPSEEK_API_KEY = "sk-..."
+```
+
 Choose a provider and model explicitly:
 
 ```bash
 telos --provider deepseek --model deepseek-v4-pro "Refactor error handling"
 ```
+
+`--model auto` uses the default routed DeepSeek setup: `deepseek-v4-pro` for
+thinking and `deepseek-v4-flash` for fast execution.
 
 Use separate thinking and fast execution models:
 

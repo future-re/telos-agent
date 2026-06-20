@@ -9,7 +9,9 @@ import {
   Plus,
   Settings,
   SlidersHorizontal,
+  Sigma,
 } from "lucide-react";
+import { TokenUsage } from "@/chatState";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -47,6 +49,13 @@ import {
   SettingsSection,
 } from "@/desktopTypes";
 import { cn } from "@/lib/utils";
+import { formatTokenCount } from "@/tokenUsage";
+import { TokenUsageHistory } from "@/tokenUsageHistory";
+import {
+  buildTodayTokenMetrics,
+  buildTokenUsageDashboard,
+  TokenUsageDashboardItem,
+} from "@/tokenUsageDashboard";
 
 interface TopBarProps {
   metadata: string;
@@ -58,6 +67,9 @@ interface TopBarProps {
   overrides: DesktopSettingsOverrides;
   apiKeyDraft: string;
   savingKey: boolean;
+  sessionUsage?: TokenUsage;
+  todayUsage?: TokenUsage;
+  tokenHistory: TokenUsageHistory;
   onApiKeyDraftChange: (value: string) => void;
   onAppearanceChange: (settings: AppearanceSettings) => void;
   onOverridesChange: (settings: DesktopSettingsOverrides) => void;
@@ -66,6 +78,7 @@ interface TopBarProps {
   onSaveApiKey: () => void;
   onTogglePanel: () => void;
   onReset: () => void;
+  turnUsage?: TokenUsage;
 }
 
 export function TopBar({
@@ -83,9 +96,13 @@ export function TopBar({
   overrides,
   panelOpen,
   savingKey,
+  sessionUsage,
   settings,
   settingsOpen,
   settingsSection,
+  todayUsage,
+  tokenHistory,
+  turnUsage,
 }: TopBarProps) {
   const mergedAutoApprove = overrides.autoApprove ?? settings.autoApprove;
   const mergedModel = normalizeModelValue(overrides.model ?? settings.model);
@@ -103,6 +120,8 @@ export function TopBar({
         </div>
       </div>
 
+      <TokenTopStrip usage={todayUsage} />
+
       <div className="flex shrink-0 items-center gap-2">
         <SettingsDialog
           apiKeyDraft={apiKeyDraft}
@@ -118,9 +137,12 @@ export function TopBar({
           open={settingsOpen}
           overrides={overrides}
           savingKey={savingKey}
+          sessionUsage={sessionUsage}
           settings={settings}
+          tokenHistory={tokenHistory}
           activeSection={settingsSection}
           onActiveSectionChange={onSettingsSectionChange}
+          turnUsage={turnUsage}
         />
         <Tooltip>
           <TooltipTrigger asChild>
@@ -164,7 +186,10 @@ function SettingsDialog({
   open,
   overrides,
   savingKey,
+  sessionUsage,
   settings,
+  tokenHistory,
+  turnUsage,
   onActiveSectionChange,
 }: {
   activeSection: SettingsSection;
@@ -182,9 +207,16 @@ function SettingsDialog({
   open: boolean;
   overrides: DesktopSettingsOverrides;
   savingKey: boolean;
+  sessionUsage?: TokenUsage;
   settings: ResolvedDesktopSettings;
+  tokenHistory: TokenUsageHistory;
+  turnUsage?: TokenUsage;
 }) {
   const section = sectionMeta[activeSection] ?? sectionMeta.appearance;
+  const usageDashboard = buildTokenUsageDashboard({ sessionUsage, turnUsage });
+  const historyItems = Object.entries(tokenHistory)
+    .sort(([left], [right]) => right.localeCompare(left))
+    .slice(0, 14);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -287,6 +319,38 @@ function SettingsDialog({
                     ))}
                   </div>
                 </label>
+              </div>
+            )}
+
+            {activeSection === "usage" && (
+              <div className="grid gap-3">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {usageDashboard
+                    .filter((item) => item.id !== "today")
+                    .map((item) => (
+                      <UsagePanelItem key={item.id} item={item} />
+                    ))}
+                </div>
+                <div className="grid gap-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <h4 className="text-sm font-semibold">历史统计</h4>
+                    <span className="text-xs text-muted-foreground">最近 14 天</span>
+                  </div>
+                  <div className="grid max-h-52 gap-1.5 overflow-y-auto pr-2">
+                    {historyItems.length === 0 ? (
+                      <div className="rounded-md border border-dashed bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
+                        暂无历史 Token 上报。
+                      </div>
+                    ) : (
+                      historyItems.map(([day, usage]) => (
+                        <UsageHistoryRow key={day} day={day} usage={usage} />
+                      ))
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                  历史 Token 统计会保存在本机浏览器存储中。当前数据来自 provider 的真实 usage 上报；没有上报时不会估算。
+                </div>
               </div>
             )}
 
@@ -404,12 +468,36 @@ function SettingsDialog({
   );
 }
 
+function TokenTopStrip({ usage }: { usage?: TokenUsage }) {
+  const metrics = buildTodayTokenMetrics(usage);
+
+  return (
+    <div
+      className="hidden min-w-0 max-w-[36rem] flex-1 items-center justify-center px-2 text-[13px] text-muted-foreground lg:flex"
+      aria-label="今日 Token 统计"
+    >
+      <span className="mr-3 shrink-0 text-sm font-medium text-foreground">今日 Token</span>
+      <span className="flex min-w-0 flex-wrap justify-center gap-x-4 gap-y-1">
+        {metrics.map((item) => (
+          <span key={item.id} className="whitespace-nowrap">
+            {item.label}{" "}
+            <strong className="font-mono text-sm font-semibold text-foreground">
+              {item.value}
+            </strong>
+          </span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
 const settingsSections: Array<{
   id: SettingsSection;
   label: string;
   icon: typeof Settings;
 }> = [
   { id: "appearance", label: "界面外观", icon: Palette },
+  { id: "usage", label: "Token 统计", icon: Sigma },
   { id: "service", label: "服务", icon: Bot },
   { id: "key", label: "密钥", icon: KeyRound },
   { id: "approval", label: "权限", icon: Check },
@@ -421,6 +509,10 @@ const sectionMeta: Record<SettingsSection, { title: string; description: string 
   appearance: {
     title: "界面外观",
     description: "字体随桌面应用打包；背景主题只影响桌面端 UI。",
+  },
+  usage: {
+    title: "Token 统计",
+    description: "查看当前会话和当前单轮的真实 token 消耗。",
   },
   service: {
     title: "服务设置",
@@ -443,6 +535,51 @@ const sectionMeta: Record<SettingsSection, { title: string; description: string 
     description: "覆盖当前桌面对话的运行目录。",
   },
 };
+
+function UsagePanelItem({ item }: { item: TokenUsageDashboardItem }) {
+  return (
+    <div className="rounded-md border bg-background px-3 py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-medium text-muted-foreground">{item.label}</span>
+        <strong
+          className={cn(
+            "font-mono text-base text-foreground",
+            item.empty && "text-sm font-medium text-muted-foreground",
+          )}
+        >
+          {item.value}
+        </strong>
+      </div>
+      {item.details.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          {item.details.map((detail) => (
+            <span key={detail}>{detail}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UsageHistoryRow({ day, usage }: { day: string; usage: TokenUsage }) {
+  return (
+    <div className="rounded-md border bg-background px-3 py-2">
+      <div className="flex items-center justify-between gap-3">
+        <strong className="font-mono text-sm text-foreground">{day}</strong>
+        <strong className="font-mono text-sm text-foreground">
+          {formatTokenCount(usage.totalTokens)}
+        </strong>
+      </div>
+      <div className="mt-1.5 flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span>输入 {formatTokenCount(usage.inputTokens)}</span>
+        <span>输出 {formatTokenCount(usage.outputTokens)}</span>
+        {usage.reasoningTokens !== undefined && (
+          <span>思考 {formatTokenCount(usage.reasoningTokens)}</span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function normalizeModelValue(model?: string): string {
   switch (model?.trim().toLowerCase()) {

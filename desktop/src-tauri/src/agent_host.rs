@@ -82,7 +82,7 @@ pub struct MemoryPreview {
 
 pub struct AgentHost {
     session: AgentSession,
-    provider: Arc<dyn ModelProvider>,
+    provider: Arc<dyn ModelProvider + Send + Sync>,
     tools: ToolRegistry,
     memory_store: Arc<std::sync::Mutex<telos_agent::MemoryStore>>,
     tool_details: HashMap<String, String>,
@@ -106,15 +106,26 @@ impl AgentHost {
             Some(Arc::new(JsonlStorage::new(sessions_dir).map_err(|e| e.to_string())?));
 
         let provider = match config::build_provider(&shared, &merged).map_err(|e| e.to_string())? {
-            ResolvedProvider::DeepSeek(provider) => Arc::new(provider) as Arc<dyn ModelProvider>,
-            ResolvedProvider::Routed(provider) => Arc::new(provider) as Arc<dyn ModelProvider>,
+            ResolvedProvider::DeepSeek(provider) => {
+                Arc::new(provider) as Arc<dyn ModelProvider + Send + Sync>
+            }
+            ResolvedProvider::Routed(provider) => {
+                Arc::new(provider) as Arc<dyn ModelProvider + Send + Sync>
+            }
             ResolvedProvider::Mock(_) => Arc::new(MockProvider::new(vec![CompletionResponse {
                 message: Message::assistant("桌面端当前使用 Mock Provider，没有真实模型调用。"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
-            }])) as Arc<dyn ModelProvider>,
+            }])) as Arc<dyn ModelProvider + Send + Sync>,
         };
 
+        register_subagent_tool(&mut runtime.tools, &runtime.agent_config, Arc::clone(&provider));
+        runtime.agent_config.prompt_assembly = Some(Arc::new(build_desktop_prompt_assembly(
+            &runtime.agent_config,
+            &runtime.tools,
+            &runtime.project_context,
+            runtime.memory_store.clone(),
+        )));
         let session = AgentSession::new(runtime.agent_config).map_err(|e| e.to_string())?;
 
         Ok(Self {
@@ -194,6 +205,7 @@ struct PreparedDesktopRuntime {
     agent_config: AgentConfig,
     tools: ToolRegistry,
     memory_store: Arc<std::sync::Mutex<telos_agent::MemoryStore>>,
+    project_context: telos_cli::context::ProjectContext,
 }
 
 pub fn resolve_desktop_settings(
@@ -373,15 +385,42 @@ fn prepare_desktop_runtime(
     ));
     telos_agent::register_task_tools(&mut tools, task_manager);
 
-    let mut assembly = telos_cli::context::build_prompt_assembly(&context);
-    telos_cli::memory_runtime::register_memory_runtime(
-        &mut tools,
-        &mut assembly,
+    telos_agent::register_memory_tools(&mut tools, memory_store.clone());
+    let assembly = build_desktop_prompt_assembly(
+        &agent_config,
+        &tools,
+        &context,
         memory_store.clone(),
     );
     agent_config.prompt_assembly = Some(Arc::new(assembly));
 
-    Ok(PreparedDesktopRuntime { agent_config, tools, memory_store })
+    Ok(PreparedDesktopRuntime { agent_config, tools, memory_store, project_context: context })
+}
+
+fn build_desktop_prompt_assembly(
+    agent_config: &AgentConfig,
+    tools: &ToolRegistry,
+    context: &telos_cli::context::ProjectContext,
+    memory_store: Arc<std::sync::Mutex<telos_agent::MemoryStore>>,
+) -> telos_agent::PromptAssembly {
+    let tools = Arc::new(tools.clone());
+    let mut assembly = telos_agent::prompt::default_coding_assembly(
+        tools,
+        agent_config.cwd.clone(),
+        agent_config.skill_registry.clone(),
+        agent_config.path,
+    );
+    telos_cli::context::append_prompt_context(&mut assembly, context);
+    assembly.add(telos_agent::MemorySection::new(memory_store));
+    assembly
+}
+
+fn register_subagent_tool(
+    tools: &mut ToolRegistry,
+    agent_config: &AgentConfig,
+    provider: Arc<dyn ModelProvider + Send + Sync>,
+) {
+    tools.register(telos_agent::SubagentTool::new(provider, tools.clone(), agent_config.clone()));
 }
 
 fn load_merged_config(cwd: &Path) -> Result<FileConfig, String> {
@@ -539,5 +578,34 @@ max_iterations = 9
         .unwrap();
 
         assert_eq!(resolved.memory_root, temp.path().join(".telos").join("memory"));
+    }
+
+    #[tokio::test]
+    async fn desktop_prompt_registers_system_subagent_tool() {
+        let temp = tempfile::tempdir().expect("tempdir should be created");
+        let memory_store = Arc::new(std::sync::Mutex::new(telos_agent::MemoryStore::new(
+            temp.path().join("memory"),
+        )));
+        let provider = Arc::new(MockProvider::new(vec![]));
+        let agent_config = AgentConfig {
+            cwd: temp.path().to_path_buf(),
+            ..AgentConfig::default()
+        };
+        let mut tools = ToolRegistry::new();
+        telos_agent::register_core_tools(&mut tools);
+
+        register_subagent_tool(&mut tools, &agent_config, provider);
+        let prompt = build_desktop_prompt_assembly(
+            &agent_config,
+            &tools,
+            &telos_cli::context::ProjectContext::empty(),
+            memory_store,
+        )
+        .build()
+        .await;
+
+        assert!(tools.get("subagent").is_ok());
+        assert!(prompt.contains("Subagent"));
+        assert!(prompt.contains("subagent_type"));
     }
 }

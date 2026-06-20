@@ -16,7 +16,6 @@ import { RunDisplay } from "@/runDisplay";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 interface RunInspectorProps {
@@ -39,15 +38,15 @@ export function RunInspector({
   tools,
 }: RunInspectorProps) {
   return (
-    <aside className="grid h-screen min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-3 overflow-hidden border-l bg-muted/40 p-4 max-[920px]:h-auto max-[920px]:min-h-0 max-[920px]:border-l-0 max-[920px]:border-t">
+    <aside className="grid h-screen min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-2.5 overflow-hidden border-l bg-muted/40 p-3 max-[920px]:h-auto max-[920px]:min-h-0 max-[920px]:border-l-0 max-[920px]:border-t">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-mono text-xs font-bold uppercase text-muted-foreground">运行状态</p>
-          <h2 className="mt-1 text-2xl font-semibold leading-none tracking-normal">
+          <h2 className="mt-1 truncate text-xl font-semibold leading-tight tracking-normal" title={display.activityLabel}>
             {display.activityLabel}
           </h2>
         </div>
-        <Badge variant={running ? "success" : "outline"} className="max-w-40 truncate">
+        <Badge variant={running ? "success" : "outline"} className="max-w-28 shrink-0 truncate">
           <Circle className="size-2" aria-hidden="true" />
           {statusLabel(status)}
         </Badge>
@@ -99,13 +98,13 @@ export function RunInspector({
           onClick={() => onConfigure("model")}
           aria-label="打开模型设置"
         >
-          <CardHeader className="flex-row items-center space-y-0 pb-3">
+          <CardHeader className="flex-row items-center space-y-0 p-3 pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <Activity className="size-4" aria-hidden="true" />
               当前模型
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-3 pt-0">
             <div className="rounded-md border bg-background px-3 py-2">
               <strong className="block truncate text-sm" title={display.modelLabel}>
                 {display.modelLabel}
@@ -119,7 +118,7 @@ export function RunInspector({
       </Card>
 
       <Card className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
-        <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
+        <CardHeader className="flex-row items-center justify-between space-y-0 p-3 pb-2">
           <CardTitle className="flex items-center gap-2 text-sm">
             <Activity className="size-4" aria-hidden="true" />
             工具活动
@@ -128,8 +127,8 @@ export function RunInspector({
             {tools.length} 条
           </span>
         </CardHeader>
-        <CardContent className="min-h-0 min-w-0">
-          <ScrollArea className="h-full min-w-0">
+        <CardContent className="min-h-0 min-w-0 p-3 pt-0">
+          <div className="no-scrollbar h-full min-w-0 overflow-y-auto pr-3">
             {tools.length === 0 ? (
               <div className="flex items-center gap-2 rounded-md border border-dashed bg-muted/40 p-3 text-sm text-muted-foreground">
                 <Wrench className="size-4" aria-hidden="true" />
@@ -142,7 +141,7 @@ export function RunInspector({
                 ))}
               </div>
             )}
-          </ScrollArea>
+          </div>
         </CardContent>
       </Card>
     </aside>
@@ -165,12 +164,12 @@ function Metric({
   value: string;
 }) {
   const content = (
-    <CardContent className="p-3 text-left">
+    <CardContent className="p-2.5 text-left">
       <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         {icon}
         {label}
       </span>
-      <strong className="mt-2 block truncate text-sm" title={value}>
+      <strong className="mt-1.5 block truncate text-sm" title={value}>
         {value}
       </strong>
     </CardContent>

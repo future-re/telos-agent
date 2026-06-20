@@ -44,4 +44,27 @@ describe("reduceTelosEvent", () => {
       },
     ]);
   });
+
+  it("aggregates provider token usage for the active turn", () => {
+    const started = reduceTelosEvent(initialChatState, {
+      kind: "provider_usage",
+      inputTokens: 10,
+      outputTokens: 4,
+      totalTokens: 14,
+      reasoningTokens: 2,
+    });
+    const updated = reduceTelosEvent(started, {
+      kind: "provider_usage",
+      inputTokens: 6,
+      outputTokens: 3,
+      totalTokens: 9,
+    });
+
+    expect(updated.currentTurnUsage).toEqual({
+      inputTokens: 16,
+      outputTokens: 7,
+      totalTokens: 23,
+      reasoningTokens: 2,
+    });
+  });
 });

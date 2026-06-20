@@ -4392,6 +4392,7 @@ dependencies = [
  "telos_agent",
  "tempfile",
  "tokio",
+ "tokio-util",
  "toml 0.8.2",
 ]
 

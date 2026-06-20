@@ -1,14 +1,18 @@
-import { useEffect, useRef } from "react";
-import { Bot, KeyRound, UserRound } from "lucide-react";
-import { ChatMessage } from "@/chatState";
+import { useEffect, useMemo, useRef } from "react";
+import { KeyRound, Sparkles } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { ChatMessage, TokenUsage } from "@/chatState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
+import { ConversationTurn, groupConversationMessages } from "@/conversationView";
+import { formatTokenCount } from "@/tokenUsage";
 
 interface ConversationProps {
   messages: ChatMessage[];
   needsApiKey: boolean;
+  usageByTurnId: Record<string, TokenUsage>;
   apiKeyDraft: string;
   savingKey: boolean;
   onApiKeyChange: (value: string) => void;
@@ -16,10 +20,9 @@ interface ConversationProps {
   onPickPrompt: (prompt: string) => void;
 }
 
-const roleLabels: Record<ChatMessage["role"], string> = {
+const roleLabels: Record<ConversationTurn["role"], string> = {
   user: "你",
   assistant: "telos",
-  thinking: "思考中",
   system: "系统",
 };
 
@@ -27,23 +30,25 @@ export function Conversation({
   apiKeyDraft,
   messages,
   needsApiKey,
+  usageByTurnId,
   onApiKeyChange,
   onConfigureApiKey,
   onPickPrompt,
   savingKey,
 }: ConversationProps) {
   const endRef = useRef<HTMLDivElement | null>(null);
+  const turns = useMemo(() => groupConversationMessages(messages), [messages]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
-  }, [messages]);
+  }, [turns]);
 
   return (
-    <section className="h-full min-h-0 overflow-hidden bg-muted/20">
+    <section className="h-full min-h-0 overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.08),transparent_32rem),linear-gradient(180deg,var(--background),var(--muted))]">
       <ScrollArea className="h-full w-full">
-        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-4 py-6 md:px-6">
-          {messages.length === 0 ? (
-            <div className="flex min-h-[420px] flex-1 items-center">
+        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-4 py-6 md:px-6 md:py-8">
+          {turns.length === 0 ? (
+            <div className="flex min-h-[420px] flex-1 items-end pb-8 md:pb-12">
               <div className="w-full">
                 {needsApiKey ? (
                   <OnboardingCard
@@ -58,9 +63,13 @@ export function Conversation({
               </div>
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1 flex-col gap-4">
-              {messages.map((message) => (
-                <MessageBubble key={message.id} message={message} />
+            <div className="flex min-h-0 flex-1 flex-col gap-6">
+              {turns.map((turn) => (
+                <MessageTurn
+                  key={turn.id}
+                  turn={turn}
+                  usage={turn.turnId ? usageByTurnId[turn.turnId] : undefined}
+                />
               ))}
               <div ref={endRef} />
             </div>
@@ -71,55 +80,89 @@ export function Conversation({
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
-  const isUser = message.role === "user";
-  const isSystem = message.role === "system";
-  const isThinking = message.role === "thinking";
+function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsage }) {
+  if (turn.role === "system") {
+    return (
+      <div className="flex justify-center">
+        <p className="max-w-2xl rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs leading-5 text-amber-950">
+          {turn.content}
+        </p>
+      </div>
+    );
+  }
+
+  if (turn.role === "user") {
+    return (
+      <article className="flex justify-end">
+        <div className="max-w-[min(680px,82%)]">
+          <div className="mb-1.5 pr-1 text-right text-[13px] font-medium text-muted-foreground">
+            {roleLabels.user}
+          </div>
+          <div className="rounded-2xl rounded-br-md bg-primary px-4 py-3 text-[15px] leading-7 text-primary-foreground shadow-[0_10px_24px_rgba(15,23,42,0.14)]">
+            <MarkdownContent className="markdown-body markdown-body-user" content={turn.content} />
+          </div>
+        </div>
+      </article>
+    );
+  }
+
+  const assistantTurn = turn;
 
   return (
-    <article
-      className={cn(
-        "flex w-full gap-3",
-        isUser && "justify-end",
-        isSystem && "justify-center",
-      )}
-    >
-      {!isUser && !isSystem && (
-        <Avatar className={isThinking ? "border-emerald-200 bg-emerald-50 text-emerald-700" : ""}>
-          <Bot className="size-4" aria-hidden="true" />
-        </Avatar>
-      )}
-      <div
-        className={cn(
-          "min-w-0 max-w-[min(760px,calc(100%-3rem))] rounded-lg border px-4 py-3 shadow-sm",
-          isUser && "bg-primary text-primary-foreground",
-          message.role === "assistant" && "bg-card text-card-foreground",
-          isThinking && "border-emerald-200 bg-emerald-50 text-emerald-950",
-          isSystem && "max-w-2xl border-amber-200 bg-amber-50 text-amber-950",
+    <article className="min-w-0">
+      <div className="min-w-0 border-l pl-4">
+        <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
+          <span>{roleLabels.assistant}</span>
+          {assistantTurn.streaming && (
+            <span className="thinking-dots" aria-label="正在生成" />
+          )}
+          {usage && (
+            <span className="rounded-full border bg-background px-2 py-0.5 font-mono text-[11px]">
+              {formatTokenCount(usage.totalTokens)} tokens
+            </span>
+          )}
+        </div>
+        {assistantTurn.thinking && (
+          <details className="group mb-3 text-[13px] text-muted-foreground">
+            <summary className="inline-flex cursor-pointer select-none items-center gap-2 rounded-md px-0 font-medium text-muted-foreground hover:text-foreground">
+              <span className="thinking-spark" aria-hidden="true" />
+              思考过程
+            </summary>
+            <div className="thinking-panel mt-2 whitespace-pre-wrap break-words pl-3 leading-6 text-muted-foreground">
+              {assistantTurn.thinking}
+            </div>
+          </details>
         )}
-      >
-        <div className="mb-1.5 text-xs font-medium opacity-70">{roleLabels[message.role]}</div>
-        <div className="whitespace-pre-wrap break-words text-sm leading-7">{message.content}</div>
+        <MarkdownContent
+          className="markdown-body text-[15px] leading-8 text-foreground"
+          content={assistantTurn.content || (assistantTurn.streaming ? "正在生成..." : "")}
+        />
       </div>
-      {isUser && (
-        <Avatar className="border-primary bg-primary text-primary-foreground">
-          <UserRound className="size-4" aria-hidden="true" />
-        </Avatar>
-      )}
     </article>
   );
 }
 
-function Avatar({ children, className }: { children: React.ReactNode; className?: string }) {
+function MarkdownContent({ className, content }: { className?: string; content: string }) {
   return (
-    <span
-      className={cn(
-        "mt-1 flex size-8 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground",
-        className,
-      )}
-    >
-      {children}
-    </span>
+    <div className={className}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ children, href }) => (
+            <a href={href} rel="noreferrer" target="_blank">
+              {children}
+            </a>
+          ),
+          table: ({ children }) => (
+            <div className="markdown-table-wrap">
+              <table>{children}</table>
+            </div>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
   );
 }
 
@@ -135,18 +178,17 @@ function OnboardingCard({
   savingKey: boolean;
 }) {
   return (
-    <div className="mx-auto w-full max-w-xl rounded-lg border bg-background p-5 shadow-sm">
-      <div className="mb-4 flex size-10 items-center justify-center rounded-md border bg-card">
-        <Bot className="size-5" aria-hidden="true" />
+    <div className="mx-auto grid w-full max-w-xl gap-5">
+      <div>
+        <p className="mb-2 text-xs font-medium text-muted-foreground">首次设置</p>
+        <h2 className="text-2xl font-semibold leading-tight tracking-normal text-foreground">
+          配置 DeepSeek API Key
+        </h2>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          密钥会写入 CLI 共用的用户配置文件。配置完成后，项目配置、记忆和工作目录会按 CLI 规则生效。
+        </p>
       </div>
-      <p className="mb-2 text-xs font-medium text-muted-foreground">首次设置</p>
-      <h2 className="text-2xl font-semibold leading-tight tracking-normal text-foreground">
-        配置 DeepSeek API Key
-      </h2>
-      <p className="mt-3 text-sm leading-6 text-muted-foreground">
-        密钥会写入 CLI 共用的用户配置文件。配置完成后，项目配置、记忆和工作目录会按 CLI 规则生效。
-      </p>
-      <div className="mt-5 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
         <div className="relative min-w-0">
           <KeyRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -167,18 +209,19 @@ function OnboardingCard({
 
 function PromptStarter({ onPickPrompt }: { onPickPrompt: (prompt: string) => void }) {
   return (
-    <div className="mx-auto w-full max-w-2xl rounded-lg border bg-background p-5 shadow-sm">
-      <div className="mb-4 flex size-10 items-center justify-center rounded-md border bg-card">
-        <Bot className="size-5" aria-hidden="true" />
+    <div className="mx-auto grid w-full max-w-2xl justify-items-center gap-4 text-center">
+      <div className="flex size-11 items-center justify-center rounded-xl border bg-background/75 text-muted-foreground shadow-sm">
+        <Sparkles className="size-5" aria-hidden="true" />
       </div>
-      <p className="mb-2 text-xs font-medium text-muted-foreground">对话面板</p>
-      <h2 className="text-2xl font-semibold leading-tight tracking-normal text-foreground">
-        给 telos 一个明确任务
-      </h2>
-      <p className="mt-3 text-sm leading-6 text-muted-foreground">
-        可以检查当前工作区、解释变更、修改代码或执行验证。消息会固定在这个对话面板中滚动。
-      </p>
-      <div className="mt-5 flex flex-wrap gap-2">
+      <div className="grid gap-2">
+        <h2 className="text-3xl font-semibold leading-tight tracking-normal text-foreground">
+          给 telos 一个明确任务
+        </h2>
+        <p className="text-[15px] leading-7 text-muted-foreground">
+          可以检查当前工作区、解释变更、修改代码或执行验证。
+        </p>
+      </div>
+      <div className="flex flex-wrap justify-center gap-2">
         <Button type="button" variant="outline" onClick={() => onPickPrompt("检查这个仓库")}>
           检查这个仓库
         </Button>

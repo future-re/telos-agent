@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State, Window};
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::agent_host::{
     AgentHost, DesktopSettingsOverrides, MemoryOverview, ResolvedDesktopSettings, memory_overview,
@@ -10,6 +11,7 @@ use crate::agent_host::{
 #[derive(Default)]
 struct AppState {
     host: Mutex<Option<AgentHost>>,
+    cancel: Mutex<Option<CancellationToken>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -39,7 +41,9 @@ struct SaveDeepSeekKeyRequest {
 }
 
 #[tauri::command]
-fn resolved_settings(request: Option<ResolveSettingsRequest>) -> Result<ResolvedDesktopSettings, String> {
+fn resolved_settings(
+    request: Option<ResolveSettingsRequest>,
+) -> Result<ResolvedDesktopSettings, String> {
     resolve_desktop_settings(&DesktopSettingsOverrides {
         cwd: request.and_then(|request| request.cwd),
         ..DesktopSettingsOverrides::default()
@@ -61,8 +65,19 @@ fn memory_summary(request: Option<ResolveSettingsRequest>) -> Result<MemoryOverv
 
 #[tauri::command]
 async fn reset_session(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(token) = state.cancel.lock().await.take() {
+        token.cancel();
+    }
     let mut host = state.host.lock().await;
     *host = None;
+    Ok(())
+}
+
+#[tauri::command]
+async fn cancel_current_task(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(token) = state.cancel.lock().await.take() {
+        token.cancel();
+    }
     Ok(())
 }
 
@@ -83,11 +98,23 @@ async fn send_prompt(
     }
     let host = host.as_mut().ok_or_else(|| "Agent host failed to initialize".to_string())?;
 
-    let final_text = host
-        .run_prompt(prompt, |event| {
+    let token = CancellationToken::new();
+    *state.cancel.lock().await = Some(token.clone());
+
+    let final_text = tokio::select! {
+        result = host.run_prompt(prompt, |event| {
             let _ = window.emit("telos://event", event);
-        })
-        .await?;
+        }) => result?,
+        _ = token.cancelled() => {
+            let _ = window.emit("telos://event", serde_json::json!({
+                "kind": "cancelled",
+                "message": "已停止当前任务"
+            }));
+            String::new()
+        }
+    };
+
+    *state.cancel.lock().await = None;
 
     Ok(PromptResult { final_text })
 }
@@ -101,6 +128,7 @@ pub fn run() {
             save_deepseek_key,
             memory_summary,
             reset_session,
+            cancel_current_task,
             send_prompt
         ])
         .run(tauri::generate_context!())

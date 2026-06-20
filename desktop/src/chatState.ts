@@ -4,7 +4,17 @@ export interface ChatMessage {
   id: string;
   role: MessageRole;
   content: string;
+  turnId?: string;
   streaming?: boolean;
+}
+
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  promptCacheHitTokens?: number;
+  promptCacheMissTokens?: number;
+  reasoningTokens?: number;
 }
 
 export type ToolStatus = "running" | "completed" | "failed";
@@ -20,6 +30,12 @@ export interface ToolActivity {
 export interface TelosEvent {
   kind: string;
   text?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  promptCacheHitTokens?: number;
+  promptCacheMissTokens?: number;
+  reasoningTokens?: number;
   toolCallId?: string;
   toolName?: string;
   detail?: string;
@@ -32,6 +48,9 @@ export interface ChatState {
   tools: ToolActivity[];
   status: string;
   running: boolean;
+  currentTurnId?: string;
+  currentTurnUsage?: TokenUsage;
+  usageByTurnId: Record<string, TokenUsage>;
 }
 
 export const initialChatState: ChatState = {
@@ -39,15 +58,17 @@ export const initialChatState: ChatState = {
   tools: [],
   status: "idle",
   running: false,
+  usageByTurnId: {},
 };
 
 let nextMessageId = 1;
 
-export function userMessage(content: string): ChatMessage {
+export function userMessage(content: string, turnId?: string): ChatMessage {
   return {
-    id: `local-${nextMessageId++}`,
+    id: turnId ?? `local-${nextMessageId++}`,
     role: "user",
     content,
+    turnId,
   };
 }
 
@@ -94,12 +115,28 @@ export function reduceTelosEvent(state: ChatState, event: TelosEvent): ChatState
             : tool,
         ),
       };
+    case "provider_usage":
+      return applyProviderUsage(state, event);
     case "turn_finished":
       return {
         ...state,
         status: "idle",
         running: false,
         messages: state.messages.map((message) => ({ ...message, streaming: false })),
+        usageByTurnId:
+          state.currentTurnId && state.currentTurnUsage
+            ? { ...state.usageByTurnId, [state.currentTurnId]: state.currentTurnUsage }
+            : state.usageByTurnId,
+      };
+    case "cancelled":
+      return {
+        ...state,
+        status: "idle",
+        running: false,
+        messages: state.messages.map((message) => ({ ...message, streaming: false })),
+        tools: state.tools.map((tool) =>
+          tool.status === "running" ? { ...tool, status: "failed", detail: "已停止" } : tool,
+        ),
       };
     case "provider_retry":
     case "token_budget_exceeded":
@@ -113,11 +150,14 @@ export function reduceTelosEvent(state: ChatState, event: TelosEvent): ChatState
 }
 
 export function startUserTurn(state: ChatState, prompt: string): ChatState {
+  const turnId = `turn-${nextMessageId++}`;
   return {
     ...state,
     running: true,
     status: "thinking",
-    messages: [...state.messages, userMessage(prompt)],
+    currentTurnId: turnId,
+    currentTurnUsage: undefined,
+    messages: [...state.messages, userMessage(prompt, turnId)],
     tools: [],
   };
 }
@@ -155,10 +195,52 @@ function appendStreamingMessage(
         id: `event-${nextMessageId++}`,
         role,
         content: text,
+        turnId: state.currentTurnId,
         streaming: true,
       },
     ],
   };
+}
+
+function applyProviderUsage(state: ChatState, event: TelosEvent): ChatState {
+  if (event.inputTokens === undefined || event.outputTokens === undefined) {
+    return state;
+  }
+
+  const nextUsage = addUsage(state.currentTurnUsage, {
+    inputTokens: event.inputTokens,
+    outputTokens: event.outputTokens,
+    totalTokens: event.totalTokens ?? event.inputTokens + event.outputTokens,
+    promptCacheHitTokens: event.promptCacheHitTokens,
+    promptCacheMissTokens: event.promptCacheMissTokens,
+    reasoningTokens: event.reasoningTokens,
+  });
+
+  return {
+    ...state,
+    currentTurnUsage: nextUsage,
+    usageByTurnId: state.currentTurnId
+      ? { ...state.usageByTurnId, [state.currentTurnId]: nextUsage }
+      : state.usageByTurnId,
+  };
+}
+
+function addUsage(current: TokenUsage | undefined, next: TokenUsage): TokenUsage {
+  return {
+    inputTokens: (current?.inputTokens ?? 0) + next.inputTokens,
+    outputTokens: (current?.outputTokens ?? 0) + next.outputTokens,
+    totalTokens: (current?.totalTokens ?? 0) + next.totalTokens,
+    promptCacheHitTokens: addOptional(current?.promptCacheHitTokens, next.promptCacheHitTokens),
+    promptCacheMissTokens: addOptional(current?.promptCacheMissTokens, next.promptCacheMissTokens),
+    reasoningTokens: addOptional(current?.reasoningTokens, next.reasoningTokens),
+  };
+}
+
+function addOptional(current: number | undefined, next: number | undefined): number | undefined {
+  if (current === undefined && next === undefined) {
+    return undefined;
+  }
+  return (current ?? 0) + (next ?? 0);
 }
 
 function upsertTool(tools: ToolActivity[], next: ToolActivity): ToolActivity[] {

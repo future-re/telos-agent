@@ -2,6 +2,7 @@ import { ProviderKind } from "@/runDisplay";
 
 export type SettingsSection =
   | "appearance"
+  | "usage"
   | "service"
   | "key"
   | "approval"

@@ -1,33 +1,67 @@
 import { FormEvent } from "react";
-import { Send } from "lucide-react";
+import { ArrowUp, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
 interface ComposerProps {
   value: string;
-  disabled: boolean;
+  sendDisabled: boolean;
   disabledReason?: string;
+  running: boolean;
   onChange: (value: string) => void;
+  onStop: () => void;
   onSubmit: (event: FormEvent) => void;
 }
 
-export function Composer({ disabled, disabledReason, onChange, onSubmit, value }: ComposerProps) {
+export function Composer({
+  disabledReason,
+  onChange,
+  onStop,
+  onSubmit,
+  running,
+  sendDisabled,
+  value,
+}: ComposerProps) {
   return (
     <form
-      className="grid max-h-40 w-full min-w-0 shrink-0 items-end gap-3 border-t bg-background/95 px-5 py-3 md:grid-cols-[minmax(0,1fr)_auto]"
+      className="w-full shrink-0 border-t bg-background/90 px-4 py-3 shadow-[0_-12px_36px_rgba(15,23,42,0.06)] backdrop-blur md:px-6"
       onSubmit={onSubmit}
     >
-      <Textarea
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={disabledReason ?? "让 telos 检查、解释、修改或验证..."}
-        rows={2}
-        className="max-h-28 min-h-20 resize-none bg-card"
-      />
-      <Button type="submit" disabled={disabled} className="w-full md:w-auto">
-        <Send className="size-4" aria-hidden="true" />
-        发送
-      </Button>
+      <div className="mx-auto w-full max-w-4xl">
+        <div className="flex min-h-14 items-center gap-2 rounded-lg border bg-card px-3 py-2 shadow-[0_8px_24px_rgba(15,23,42,0.07)] transition-colors focus-within:border-ring">
+          <Textarea
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+                return;
+              }
+              event.preventDefault();
+              if (!running && !sendDisabled) {
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            placeholder={disabledReason ?? "让 telos 检查、解释、修改或验证..."}
+            rows={1}
+            className="max-h-28 min-h-10 resize-none border-0 bg-transparent px-0 py-2 text-[15px] leading-6 shadow-none focus-visible:ring-0"
+          />
+          <Button
+            type={running ? "button" : "submit"}
+            disabled={!running && sendDisabled}
+            onClick={running ? onStop : undefined}
+            size="icon"
+            variant={running ? "outline" : "default"}
+            className="flex size-10 shrink-0 items-center justify-center rounded-md p-0 shadow-sm"
+            aria-label={running ? "停止当前任务" : "发送"}
+          >
+            {running ? (
+              <Square className="size-4 fill-current" aria-hidden="true" />
+            ) : (
+              <ArrowUp className="size-4" aria-hidden="true" />
+            )}
+          </Button>
+        </div>
+      </div>
     </form>
   );
 }

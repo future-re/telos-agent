@@ -6,6 +6,12 @@ use telos_agent::TurnEvent;
 pub struct DesktopEvent {
     pub kind: String,
     pub text: Option<String>,
+    pub input_tokens: Option<usize>,
+    pub output_tokens: Option<usize>,
+    pub total_tokens: Option<usize>,
+    pub prompt_cache_hit_tokens: Option<usize>,
+    pub prompt_cache_miss_tokens: Option<usize>,
+    pub reasoning_tokens: Option<usize>,
     pub tool_call_id: Option<String>,
     pub tool_name: Option<String>,
     pub detail: Option<String>,
@@ -18,6 +24,12 @@ impl DesktopEvent {
         Self {
             kind: kind.into(),
             text: None,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+            prompt_cache_hit_tokens: None,
+            prompt_cache_miss_tokens: None,
+            reasoning_tokens: None,
             tool_call_id: None,
             tool_name: None,
             detail: None,
@@ -52,6 +64,22 @@ pub fn map_turn_event(event: TurnEvent) -> DesktopEvent {
             is_error: Some(is_error),
             ..DesktopEvent::new("tool_completed")
         },
+        TurnEvent::ProviderUsage {
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            prompt_cache_hit_tokens,
+            prompt_cache_miss_tokens,
+            reasoning_tokens,
+        } => DesktopEvent {
+            input_tokens: Some(input_tokens),
+            output_tokens: Some(output_tokens),
+            total_tokens,
+            prompt_cache_hit_tokens,
+            prompt_cache_miss_tokens,
+            reasoning_tokens,
+            ..DesktopEvent::new("provider_usage")
+        },
         TurnEvent::TurnFinished { final_text, .. } => {
             DesktopEvent { text: Some(final_text), ..DesktopEvent::new("turn_finished") }
         }
@@ -80,5 +108,24 @@ mod tests {
 
         assert_eq!(event.kind, "assistant_delta");
         assert_eq!(event.text.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn maps_provider_usage_for_frontend() {
+        let event = map_turn_event(TurnEvent::ProviderUsage {
+            input_tokens: 10,
+            output_tokens: 4,
+            total_tokens: Some(14),
+            prompt_cache_hit_tokens: Some(3),
+            prompt_cache_miss_tokens: None,
+            reasoning_tokens: Some(2),
+        });
+
+        assert_eq!(event.kind, "provider_usage");
+        assert_eq!(event.input_tokens, Some(10));
+        assert_eq!(event.output_tokens, Some(4));
+        assert_eq!(event.total_tokens, Some(14));
+        assert_eq!(event.prompt_cache_hit_tokens, Some(3));
+        assert_eq!(event.reasoning_tokens, Some(2));
     }
 }

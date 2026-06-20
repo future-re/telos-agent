@@ -21,8 +21,8 @@ mod turn_events;
 mod turn_summary;
 
 use crate::config::TuiDensity;
-use crate::tui::approval_inline;
 use crate::tui::approval::PendingApproval;
+use crate::tui::approval_inline;
 use crate::tui::chat_widget::ChatWidget;
 use crate::tui::event::{AppEvent, Event};
 use crate::tui::history_cell::{TurnSummaryCell, UserCell};
@@ -376,8 +376,11 @@ impl App {
 
         // Layout: chat | compact tool activity | inline approval | input | status
         let activity_height = self.tool_activity.height(area.width as usize);
-        let approval_height =
-            if self.inline_approval.is_some() { approval_inline::INLINE_APPROVAL_HEIGHT } else { 0 };
+        let approval_height = if self.inline_approval.is_some() {
+            approval_inline::INLINE_APPROVAL_HEIGHT
+        } else {
+            0
+        };
         let constraints = vec![
             Constraint::Min(0),                                    // chat
             Constraint::Length(activity_height),                   // recent tool/command activity
@@ -758,10 +761,7 @@ mod tests {
         let (tx, _rx) = oneshot::channel();
         let (approval_tx, approval_rx) = tokio::sync::mpsc::unbounded_channel();
         approval_tx
-            .send(PendingApproval {
-                request: approval_request("echo inline"),
-                respond: Some(tx),
-            })
+            .send(PendingApproval { request: approval_request("echo inline"), respond: Some(tx) })
             .unwrap();
         app.approval_rx = approval_rx;
 

@@ -67,8 +67,9 @@ pub fn render(frame: &mut Frame, area: Rect, theme: &Theme, pending: &PendingApp
         })
         .collect::<Vec<_>>();
 
-    let block =
-        Block::default().borders(Borders::ALL).border_style(Style::default().fg(theme.tool_pending_fg));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.tool_pending_fg));
 
     frame.render_widget(
         Paragraph::new(Text::from(lines)).block(block).wrap(Wrap { trim: true }),
@@ -115,10 +116,7 @@ mod tests {
     #[test]
     fn lines_include_reason() {
         let lines = approval_lines(
-            &pending(
-                "Write",
-                json!({ "file_path": "src/main.rs", "content": "fn main() {}" }),
-            ),
+            &pending("Write", json!({ "file_path": "src/main.rs", "content": "fn main() {}" })),
             80,
         );
         let text = lines.join("\n");

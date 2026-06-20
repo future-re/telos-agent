@@ -46,7 +46,11 @@ struct TuiGuard;
 impl Drop for TuiGuard {
     fn drop(&mut self) {
         let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::event::DisableMouseCapture,
+            crossterm::terminal::LeaveAlternateScreen
+        );
     }
 }
 
@@ -65,7 +69,11 @@ pub async fn run(
 ) -> Result<()> {
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = stdout();
-    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
+    crossterm::execute!(
+        stdout,
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture
+    )?;
     let _guard = TuiGuard;
 
     let backend = CrosstermBackend::new(stdout);

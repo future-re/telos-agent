@@ -47,19 +47,23 @@ impl App {
                 }
 
                 if self.inline_approval.is_some() {
-                    match key.code {
-                        KeyCode::Char('a') | KeyCode::Char('y') => {
+                    match (key.code, key.modifiers) {
+                        (KeyCode::Char('a') | KeyCode::Char('y'), KeyModifiers::NONE) => {
                             self.resolve_inline_approval(telos_agent::ApprovalDecision::Allow);
                             return Ok(());
                         }
-                        KeyCode::Char('d') | KeyCode::Char('n') => {
+                        (KeyCode::Char('d') | KeyCode::Char('n'), KeyModifiers::NONE) => {
                             self.resolve_inline_approval(telos_agent::ApprovalDecision::Deny {
                                 reason: "denied by user".into(),
                             });
                             return Ok(());
                         }
-                        KeyCode::Char('e') => {
+                        (KeyCode::Char('e'), KeyModifiers::NONE) => {
                             self.open_inline_approval_edit_popup();
+                            return Ok(());
+                        }
+                        (KeyCode::Char('t') | KeyCode::Char(' '), KeyModifiers::NONE) => {
+                            self.toggle_inline_approval_expanded();
                             return Ok(());
                         }
                         _ => {}
@@ -260,7 +264,20 @@ impl App {
                 }
             }
             Event::Resize { .. } => {}
-            Event::Mouse(_) => {}
+            Event::Mouse(mouse) => {
+                use crossterm::event::{MouseButton, MouseEventKind};
+
+                match mouse.kind {
+                    MouseEventKind::ScrollUp => self.chat.scroll_up(1),
+                    MouseEventKind::ScrollDown => self.chat.scroll_down(1),
+                    MouseEventKind::Down(MouseButton::Left)
+                        if self.inline_approval_command_contains_point(mouse.column, mouse.row) =>
+                    {
+                        self.toggle_inline_approval_expanded();
+                    }
+                    _ => {}
+                }
+            }
             // Turn, TurnComplete, and SessionError are only received via
             // turn_rx.try_recv() inside the Tick handler above and never
             // arrive at the outer match from the main event loop.

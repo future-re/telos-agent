@@ -27,6 +27,7 @@ impl App {
     pub(super) fn enqueue_inline_approval(&mut self, pending: PendingApproval) {
         if self.inline_approval.is_none() {
             self.inline_approval = Some(pending);
+            self.inline_approval_expanded = false;
         } else {
             self.inline_approval_queue.push_back(pending);
         }
@@ -40,21 +41,50 @@ impl App {
             self.status_text = "approval response channel closed".to_string();
         }
         self.inline_approval = self.inline_approval_queue.pop_front();
+        self.inline_approval_expanded = false;
     }
 
     pub(super) fn open_inline_approval_edit_popup(&mut self) {
         if let Some(pending) = self.inline_approval.take() {
+            self.inline_approval_expanded = false;
             self.open_approval_edit_popup(pending);
         }
+    }
+
+    pub(super) fn toggle_inline_approval_expanded(&mut self) -> bool {
+        if self.inline_approval.is_none() {
+            return false;
+        }
+        self.inline_approval_expanded = !self.inline_approval_expanded;
+        true
+    }
+
+    pub(super) fn inline_approval_command_contains_point(&self, column: u16, row: u16) -> bool {
+        let Some(area) = self.inline_approval_area else {
+            return false;
+        };
+        let Some(pending) = &self.inline_approval else {
+            return false;
+        };
+        let command_lines = crate::tui::approval_inline::approval_lines(
+            pending,
+            area.width as usize,
+            self.inline_approval_expanded,
+        )
+        .len()
+        .saturating_sub(3);
+        let command_start = area.y.saturating_add(2);
+        let command_end = command_start.saturating_add(command_lines as u16);
+
+        column >= area.x.saturating_add(1)
+            && column < area.x.saturating_add(area.width.saturating_sub(1))
+            && row >= command_start
+            && row < command_end
     }
 
     pub(super) async fn handle_input_event(&mut self, event: InputEvent) {
         match event {
             InputEvent::Submit(prompt) => {
-                if self.turn_active {
-                    self.input.restore_text(prompt);
-                    return;
-                }
                 self.send_prompt(prompt).await;
             }
             InputEvent::SlashCommand(cmd) => {

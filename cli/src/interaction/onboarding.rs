@@ -29,14 +29,14 @@ fn models_for(provider: ProviderArg) -> &'static [ModelInfo] {
     match provider {
         ProviderArg::Deepseek => &[
             ModelInfo {
-                id: "deepseek-v4-flash",
-                label: "V4 Flash (recommended)",
-                desc: "fast • 1M ctx • $0.14/$0.28 per 1M",
-            },
-            ModelInfo {
                 id: "deepseek-v4-pro",
                 label: "V4 Pro",
                 desc: "powerful reasoning • 1M ctx • $0.44/$0.87 per 1M",
+            },
+            ModelInfo {
+                id: "deepseek-v4-flash",
+                label: "V4 Flash",
+                desc: "fast • 1M ctx • $0.14/$0.28 per 1M",
             },
         ],
         ProviderArg::Mock => &[],
@@ -51,17 +51,11 @@ fn models_for(provider: ProviderArg) -> &'static [ModelInfo] {
 /// (Ctrl+C or EOF), or `Err(...)` on I/O failure.
 pub fn run() -> Result<Option<OnboardingResult>> {
     // ── Welcome banner ────────────────────────────────────────────────
-    eprintln!();
-    eprintln!("╔══════════════════════════════════════════════╗");
-    eprintln!("║        telos · First-time Setup             ║");
-    eprintln!("╚══════════════════════════════════════════════╝");
-    eprintln!();
-    eprintln!("  No provider configured. Let's set one up.");
-    eprintln!();
+    eprintln!("{}", setup_intro_text());
 
     // ── Provider selection ────────────────────────────────────────────
-    eprintln!("  Available provider:");
-    eprintln!("    [1] DeepSeek — api.deepseek.com");
+    eprintln!("Provider");
+    eprintln!("  [1] DeepSeek   api.deepseek.com");
     eprintln!();
 
     let provider = loop {
@@ -80,37 +74,23 @@ pub fn run() -> Result<Option<OnboardingResult>> {
     };
 
     // ── API key ────────────────────────────────────────────────────────
-    eprintln!();
-    eprintln!("  {} API key", provider_display(provider));
-    eprintln!("  Get one at: {}", provider_signup_url(provider));
-    eprintln!();
+    eprintln!("{}", api_key_help_text(provider));
 
-    let api_key = match read_password_masked("  API key: ") {
-        Ok(key) => key,
-        Err(_) => return Ok(None), // Ctrl+C or I/O error
+    let api_key = match prompt_input("  API key: ")? {
+        Some(key) => key,
+        None => return Ok(None),
     };
 
     if api_key.is_empty() {
-        eprintln!("  ✗ API key cannot be empty. Setup cancelled.");
+        eprintln!("  API key cannot be empty. Setup cancelled.");
         return Ok(None);
     }
-    eprintln!("  ✓ API key received ({} characters)", api_key.len());
+    eprintln!("  API key received ({} characters)", api_key.len());
 
     // ── Model selection (dual-model) ──────────────────────────────────────
     let models = models_for(provider);
 
-    eprintln!();
-    eprintln!("  telos uses two models by default:");
-    eprintln!();
-    eprintln!("    🧠 Thinking  → deepseek-v4-pro");
-    eprintln!("       Planning, complex reasoning, error recovery");
-    eprintln!();
-    eprintln!("    ⚡ Fast      → deepseek-v4-flash");
-    eprintln!("       Tool execution, file ops, summarization");
-    eprintln!();
-    eprintln!("  This gives you powerful reasoning when needed,");
-    eprintln!("  and fast, cheap execution for routine work.");
-    eprintln!();
+    eprintln!("{}", default_model_summary_text());
 
     // Default dual-model setup
     let thinking_model = "deepseek-v4-pro".to_string();
@@ -167,14 +147,18 @@ pub fn run() -> Result<Option<OnboardingResult>> {
 
         (thinking, fast)
     } else {
-        eprintln!("  ✓ Using default dual-model setup");
+        eprintln!("  Using default dual-model setup");
         (thinking_model, fast_model)
     };
 
     // ── Save to config? ────────────────────────────────────────────────
     eprintln!();
+    eprintln!("Save");
+    eprintln!("  Store provider, models, and API key in ~/.config/telos/config.toml.");
+    eprintln!("  The config file is restricted to your user account on Unix.");
+    eprintln!();
     let save = loop {
-        match prompt_input("  Save to ~/.config/telos/config.toml? [Y/n]: ")? {
+        match prompt_input("  Save this setup? [Y/n]: ")? {
             Some(s) if s.is_empty() => break true,
             Some(s) => match s.to_lowercase().as_str() {
                 "y" | "yes" => break true,
@@ -254,7 +238,7 @@ pub fn save_config(result: &OnboardingResult) -> Result<()> {
     }
 
     eprintln!();
-    eprintln!("  ✓ Config saved to {}", path.display());
+    eprintln!("  Config saved to {}", path.display());
     Ok(())
 }
 
@@ -275,8 +259,6 @@ fn prompt_input(prompt: &str) -> Result<Option<String>> {
     }
 
     let mut input = String::new();
-    // Lock stdin briefly — the lock is dropped after the match, so
-    // rpassword::prompt_password can lock stdin again without conflict.
     match std::io::stdin().lock().read_line(&mut input) {
         Ok(0) => Ok(None), // EOF
         Ok(_) => Ok(Some(input.trim().to_string())),
@@ -299,124 +281,81 @@ fn provider_signup_url(p: ProviderArg) -> &'static str {
     }
 }
 
-/// Read a password from stdin, showing `*` for each character typed.
-/// Supports Backspace to delete the last character.
-/// Returns `Ok(String)` on Enter, `Err(...)` on Ctrl+C or I/O failure.
-///
-/// Uses raw terminal I/O on Unix; falls back to `rpassword` on other platforms.
-fn read_password_masked(prompt: &str) -> Result<String, anyhow::Error> {
-    if !prompt.is_empty() {
-        write!(std::io::stderr(), "{prompt}")?;
-        std::io::stderr().flush()?;
-    }
-
-    #[cfg(unix)]
-    {
-        read_password_masked_unix()
-    }
-    #[cfg(not(unix))]
-    {
-        // Fallback: use rpassword (no asterisk feedback on Windows).
-        rpassword::prompt_password("").map(|s| s.trim().to_string()).map_err(|e| anyhow::anyhow!(e))
-    }
+fn setup_intro_text() -> String {
+    [
+        "",
+        "telos setup",
+        "No provider is configured yet. This short setup will choose:",
+        "  1. Provider",
+        "  2. API key",
+        "  3. Models",
+        "  4. Save preference",
+        "",
+    ]
+    .join("\n")
 }
 
-#[cfg(unix)]
-fn read_password_masked_unix() -> Result<String, anyhow::Error> {
-    use std::os::fd::AsRawFd;
-
-    let stdin_fd = std::io::stdin().as_raw_fd();
-    let mut termios: libc::termios = unsafe { std::mem::zeroed() };
-
-    // Save current terminal settings.
-    if unsafe { libc::tcgetattr(stdin_fd, &mut termios) } != 0 {
-        anyhow::bail!("failed to get terminal attributes");
-    }
-    let saved = termios;
-
-    // Set non-canonical mode, disable echo.
-    termios.c_lflag &= !(libc::ICANON | libc::ECHO);
-    termios.c_cc[libc::VMIN] = 1;
-    termios.c_cc[libc::VTIME] = 0;
-    if unsafe { libc::tcsetattr(stdin_fd, libc::TCSANOW, &termios) } != 0 {
-        anyhow::bail!("failed to set terminal attributes");
-    }
-
-    let result = read_with_asterisks();
-
-    // Restore terminal settings.
-    unsafe {
-        libc::tcsetattr(stdin_fd, libc::TCSANOW, &saved);
-    }
-
-    result
+fn api_key_help_text(provider: ProviderArg) -> String {
+    format!(
+        "\nAPI key\n  Get one at: {}\n  Input is visible while you type and saved only if you confirm.\n",
+        provider_signup_url(provider)
+    )
 }
 
-#[cfg(unix)]
-fn read_with_asterisks() -> Result<String, anyhow::Error> {
-    use std::io::Read;
-
-    let mut password = String::new();
-    let mut stdin = std::io::stdin();
-    let mut buf = [0u8; 1];
-    let mut stderr = std::io::stderr();
-
-    loop {
-        match stdin.read_exact(&mut buf) {
-            Ok(()) => {
-                let ch = buf[0];
-                match ch {
-                    b'\r' | b'\n' => {
-                        // Enter — finish.
-                        writeln!(stderr)?;
-                        return Ok(password);
-                    }
-                    0x7f | b'\x08' => {
-                        // Backspace / Delete.
-                        if !password.is_empty() {
-                            password.pop();
-                            // Erase the last `*` from the terminal.
-                            write!(stderr, "\x08 \x08")?;
-                            stderr.flush()?;
-                        }
-                    }
-                    0x03 => {
-                        // Ctrl+C.
-                        writeln!(stderr)?;
-                        anyhow::bail!("cancelled");
-                    }
-                    0x04 => {
-                        // Ctrl+D (EOF on empty).
-                        if password.is_empty() {
-                            writeln!(stderr)?;
-                            anyhow::bail!("cancelled");
-                        }
-                    }
-                    _ if ch.is_ascii_graphic() || ch == b' ' => {
-                        // Printable character — buffer it and show `*`.
-                        password.push(ch as char);
-                        write!(stderr, "*")?;
-                        stderr.flush()?;
-                    }
-                    _ => {
-                        // Ignore other control characters.
-                    }
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
-                writeln!(stderr)?;
-                anyhow::bail!("cancelled");
-            }
-            Err(e) => {
-                return Err(e.into());
-            }
-        }
-    }
+fn default_model_summary_text() -> String {
+    [
+        "",
+        "Models",
+        "  Default routing uses two models:",
+        "",
+        "  Thinking  deepseek-v4-pro",
+        "            Planning, complex reasoning, error recovery",
+        "",
+        "  Fast      deepseek-v4-flash",
+        "            Tool execution, file operations, summarization",
+        "",
+    ]
+    .join("\n")
 }
 
 fn provider_to_config_str(p: ProviderArg) -> &'static str {
     match p {
         ProviderArg::Deepseek => "deepseek",
         ProviderArg::Mock => "mock",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setup_intro_sets_a_clear_first_run_tone() {
+        let text = setup_intro_text();
+
+        assert!(text.contains("telos setup"));
+        assert!(text.contains("Provider"));
+        assert!(text.contains("API key"));
+        assert!(text.contains("Models"));
+        assert!(!text.contains("╔"));
+    }
+
+    #[test]
+    fn api_key_help_makes_visible_input_and_save_scope_explicit() {
+        let text = api_key_help_text(ProviderArg::Deepseek);
+
+        assert!(text.contains("visible while you type"));
+        assert!(text.contains("saved only if you confirm"));
+        assert!(text.contains("https://platform.deepseek.com/api_keys"));
+    }
+
+    #[test]
+    fn default_model_summary_shows_dual_model_defaults() {
+        let text = default_model_summary_text();
+
+        assert!(text.contains("Thinking"));
+        assert!(text.contains("deepseek-v4-pro"));
+        assert!(text.contains("Fast"));
+        assert!(text.contains("deepseek-v4-flash"));
     }
 }

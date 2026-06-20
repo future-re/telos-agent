@@ -1,13 +1,15 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use tui_textarea::TextArea;
 
 use crate::tui::command_popup::{CommandPopup, SlashCommand};
 use crate::tui::theme::Theme;
+
+const PROMPT_WIDTH: u16 = 1;
 
 /// What the input panel wants the app to do next.
 #[derive(Debug, Clone)]
@@ -70,7 +72,7 @@ pub struct InputPanel {
 impl InputPanel {
     pub fn new() -> Self {
         let mut textarea = TextArea::default();
-        textarea.set_placeholder_text("Ask tiny-agent to edit, inspect, or run...");
+        textarea.set_placeholder_text("Ask tiny-agent...");
         textarea.set_cursor_line_style(Style::default().add_modifier(Modifier::UNDERLINED));
         Self {
             textarea,
@@ -93,6 +95,22 @@ impl InputPanel {
     /// Current input mode.
     pub fn input_mode(&self) -> InputMode {
         self.mode
+    }
+
+    pub fn desired_height(&self, width: usize, min_height: u16, max_height: u16) -> u16 {
+        if self.is_empty() {
+            return min_height;
+        }
+        let usable_width = composer_text_width(width as u16);
+        let text_lines = self
+            .textarea
+            .lines()
+            .iter()
+            .map(|line| line.chars().count().max(1).div_ceil(usable_width))
+            .sum::<usize>()
+            .max(1);
+        let wanted = text_lines.saturating_add(3) as u16;
+        wanted.clamp(min_height, max_height.max(min_height))
     }
 
     pub fn wants_vertical_nav_key(&self, key: KeyEvent) -> bool {
@@ -146,6 +164,10 @@ impl InputPanel {
                     self.popup.show();
                     self.textarea.move_cursor(tui_textarea::CursorMove::End);
                 }
+                InputEvent::None
+            }
+            (KeyCode::Char('a'), KeyModifiers::CONTROL) => {
+                self.textarea.select_all();
                 InputEvent::None
             }
             // ── Slash command detection ─────────────────────────────
@@ -351,11 +373,9 @@ impl InputPanel {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        // Prompt prefix
-        let prompt_w = 3u16;
-        let prompt_area = Rect { x: inner.x, y: inner.y, width: prompt_w, height: 1 };
+        let prompt_area = Rect { x: inner.x, y: inner.y, width: PROMPT_WIDTH, height: 1 };
         let prompt = Paragraph::new(Line::from(Span::styled(
-            "› ",
+            "›",
             Style::default().fg(theme.user_fg).add_modifier(Modifier::BOLD),
         )));
         frame.render_widget(prompt, prompt_area);
@@ -386,20 +406,101 @@ impl InputPanel {
             );
         }
 
-        // Render the textarea
         let input_area = Rect {
-            x: inner.x + prompt_w,
+            x: inner.x + PROMPT_WIDTH,
             y: inner.y,
-            width: inner.width.saturating_sub(prompt_w),
+            width: inner.width.saturating_sub(PROMPT_WIDTH),
             height: inner.height.saturating_sub(1),
         };
-        frame.render_widget(&self.textarea, input_area);
+        self.render_composer_text(frame, input_area, active, &theme);
 
         // Render command popup above the input area
         if self.popup.visible {
             self.popup.render(frame, input_area, &theme);
         }
     }
+
+    fn render_composer_text(&self, frame: &mut Frame, area: Rect, active: bool, theme: &Theme) {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let width = usize::from(area.width).max(1);
+        let (visible_lines, cursor_row, cursor_col, style) = if self.is_empty() {
+            let placeholder = self.textarea.placeholder_text();
+            (
+                wrap_line(placeholder, width),
+                0,
+                0,
+                self.textarea
+                    .placeholder_style()
+                    .unwrap_or_else(|| Style::default().fg(theme.input_placeholder)),
+            )
+        } else {
+            let wrapped = wrap_lines(self.textarea.lines(), width);
+            let (cursor_row, cursor_col) =
+                wrapped_cursor(self.textarea.lines(), self.textarea.cursor(), width);
+            (wrapped, cursor_row, cursor_col, self.textarea.style())
+        };
+
+        let height = usize::from(area.height);
+        let top_row = cursor_row.saturating_add(1).saturating_sub(height);
+        let lines = visible_lines
+            .into_iter()
+            .skip(top_row)
+            .take(height)
+            .map(|line| Line::from(Span::styled(line, style)))
+            .collect::<Vec<_>>();
+
+        frame.render_widget(Paragraph::new(Text::from(lines)), area);
+
+        if active && !self.is_empty() {
+            frame.set_cursor_position(Position {
+                x: area.x + (cursor_col as u16).min(area.width.saturating_sub(1)),
+                y: area.y
+                    + (cursor_row.saturating_sub(top_row) as u16)
+                        .min(area.height.saturating_sub(1)),
+            });
+        }
+    }
+}
+
+fn composer_text_width(outer_width: u16) -> usize {
+    usize::from(outer_width.saturating_sub(2).saturating_sub(PROMPT_WIDTH)).max(1)
+}
+
+fn wrap_lines(lines: &[String], width: usize) -> Vec<String> {
+    lines.iter().flat_map(|line| wrap_line(line, width)).collect()
+}
+
+fn wrap_line(line: &str, width: usize) -> Vec<String> {
+    if line.is_empty() {
+        return vec![String::new()];
+    }
+
+    let mut wrapped = Vec::new();
+    let mut current = String::new();
+    for ch in line.chars() {
+        if current.chars().count() >= width {
+            wrapped.push(current);
+            current = String::new();
+        }
+        current.push(ch);
+    }
+    wrapped.push(current);
+    wrapped
+}
+
+fn wrapped_cursor(lines: &[String], cursor: (usize, usize), width: usize) -> (usize, usize) {
+    let (cursor_line, cursor_col) = cursor;
+    let rows_before = lines
+        .iter()
+        .take(cursor_line)
+        .map(|line| line.chars().count().max(1).div_ceil(width))
+        .sum::<usize>();
+    let cursor_row = rows_before + cursor_col / width;
+    let cursor_col = cursor_col % width;
+    (cursor_row, cursor_col)
 }
 
 impl Default for InputPanel {
@@ -412,6 +513,8 @@ impl Default for InputPanel {
 mod tests {
     use super::{ComposerHints, InputMode, InputPanel};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -427,6 +530,11 @@ mod tests {
 
     fn set_text(panel: &mut InputPanel, value: &str) {
         panel.set_text(value);
+    }
+
+    fn rendered_row(terminal: &Terminal<TestBackend>, row: u16) -> String {
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.width).map(|x| buffer[(x, row)].symbol()).collect::<String>()
     }
 
     #[test]
@@ -454,6 +562,65 @@ mod tests {
 
         assert_eq!(hints.left, " History 3/5 ");
         assert_eq!(hints.right, None);
+    }
+
+    #[test]
+    fn empty_composer_uses_short_placeholder() {
+        let panel = InputPanel::new();
+        let backend = ratatui::backend::TestBackend::new(60, 4);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| panel.render(frame, frame.area(), true)).unwrap();
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("Ask tiny-agent..."));
+        assert!(!rendered.contains("edit, inspect, or run"));
+    }
+
+    #[test]
+    fn composer_render_wraps_long_input_and_keeps_text_close_to_prompt() {
+        let mut panel = InputPanel::new();
+        set_text(&mut panel, "alpha bravo charlie delta echo");
+        let backend = TestBackend::new(24, 6);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| panel.render(frame, frame.area(), true)).unwrap();
+
+        let first_input_row = rendered_row(&terminal, 1);
+        let second_input_row = rendered_row(&terminal, 2);
+        assert!(
+            first_input_row.contains("│›alpha"),
+            "first input row should keep text close to the prompt: {first_input_row:?}"
+        );
+        assert!(
+            second_input_row.contains("charlie") || second_input_row.contains("delta"),
+            "long input should wrap onto the next row: {second_input_row:?}"
+        );
+    }
+
+    #[test]
+    fn desired_height_grows_with_multiline_input() {
+        let mut panel = InputPanel::new();
+        assert_eq!(panel.desired_height(80, 4, 8), 4);
+        assert_eq!(panel.desired_height(80, 3, 8), 3);
+
+        set_text(&mut panel, "line one\nline two\nline three");
+
+        assert_eq!(panel.desired_height(80, 4, 8), 6);
+    }
+
+    #[test]
+    fn desired_height_grows_with_wrapped_long_input_and_caps() {
+        let mut panel = InputPanel::new();
+        set_text(&mut panel, "this is a long prompt that should wrap across several terminal rows");
+
+        assert_eq!(panel.desired_height(24, 4, 5), 5);
     }
 
     #[test]
@@ -531,6 +698,17 @@ mod tests {
         panel.handle_key(ctrl_key(KeyCode::Up));
         assert_eq!(text(&panel), "previous");
         assert!(panel.wants_vertical_nav_key(key(KeyCode::Down)));
+    }
+
+    #[test]
+    fn ctrl_a_then_backspace_clears_composer() {
+        let mut panel = InputPanel::new();
+        set_text(&mut panel, "delete all of this");
+
+        panel.handle_key(ctrl_key(KeyCode::Char('a')));
+        panel.handle_key(key(KeyCode::Backspace));
+
+        assert_eq!(text(&panel), "");
     }
 
     #[test]

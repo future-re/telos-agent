@@ -162,6 +162,83 @@ fn missing_tool_returns_error_result_message() {
     });
 }
 
+#[tokio::test]
+async fn runtime_input_after_tool_forces_thinking_reconsideration() {
+    let provider = Arc::new(MockProvider::new(vec![
+        CompletionResponse {
+            message: Message {
+                role: telos_agent::Role::Assistant,
+                blocks: vec![ContentBlock::ToolCall(ToolCall {
+                    id: "call-1".into(),
+                    name: "wait".into(),
+                    arguments: json!({}),
+                })],
+            },
+            stop_reason: StopReason::ToolUse,
+            usage: None,
+        },
+        CompletionResponse {
+            message: Message::assistant("I reconsidered with the new input."),
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+        },
+    ]));
+
+    let started = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let mut tools = ToolRegistry::new();
+    tools.register(WaitTool { started: Arc::clone(&started), release: Arc::clone(&release) });
+
+    let mut session = AgentSession::new(AgentConfig::default()).unwrap();
+    let (input_tx, input_rx) = turn_input_channel();
+    let provider_for_task = Arc::clone(&provider);
+
+    let handle = tokio::spawn(async move {
+        let erased = ErasedProvider(provider_for_task.as_ref());
+        let events = session
+            .run_turn_stream_with_input(&erased, &tools, "start", input_rx)
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        (session, events)
+    });
+
+    tokio::time::timeout(std::time::Duration::from_millis(100), started.notified())
+        .await
+        .expect("wait tool should start");
+    input_tx.send("new constraint from user".to_string()).unwrap();
+    release.notify_waiters();
+
+    let (session, events) = handle.await.unwrap();
+    let requests = provider.requests.lock().await;
+
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].model_hint, Some(ModelHint::Thinking));
+    let second_request_text =
+        requests[1].messages.iter().map(Message::text_content).collect::<Vec<_>>().join("\n");
+    assert!(second_request_text.contains("new constraint from user"));
+    assert!(events.iter().any(|event| {
+        matches!(event, TurnEvent::User(message) if message.text_content() == "new constraint from user")
+    }));
+
+    let tool_result_index = session
+        .messages()
+        .iter()
+        .position(|message| message.role == telos_agent::Role::Tool)
+        .expect("tool result should be stored");
+    let injected_user_index = session
+        .messages()
+        .iter()
+        .position(|message| {
+            message.role == telos_agent::Role::User
+                && message.text_content() == "new constraint from user"
+        })
+        .expect("runtime input should be stored");
+    assert!(tool_result_index < injected_user_index);
+}
+
 #[test]
 fn permission_denial_returns_structured_tool_error() {
     let runtime = tokio::runtime::Runtime::new().unwrap();

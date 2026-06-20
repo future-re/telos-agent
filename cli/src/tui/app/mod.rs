@@ -1,5 +1,5 @@
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,8 +53,8 @@ pub struct TuiLayoutSettings {
 impl TuiLayoutSettings {
     pub fn from_density(density: TuiDensity) -> Self {
         match density {
-            TuiDensity::Compact => Self { input_height: 4, tool_activity_max_lines: 6 },
-            TuiDensity::Default => Self { input_height: 5, tool_activity_max_lines: 10 },
+            TuiDensity::Compact => Self { input_height: 3, tool_activity_max_lines: 6 },
+            TuiDensity::Default => Self { input_height: 4, tool_activity_max_lines: 10 },
             TuiDensity::Spacious => Self { input_height: 7, tool_activity_max_lines: 14 },
         }
     }
@@ -136,6 +136,10 @@ pub struct App {
     editing_approval: Option<PendingApproval>,
     /// Approval request currently shown in the inline approval panel.
     inline_approval: Option<PendingApproval>,
+    /// Whether the active inline approval command detail is expanded.
+    inline_approval_expanded: bool,
+    /// Last area used to render the inline approval panel.
+    inline_approval_area: Option<Rect>,
     /// Pending approval requests waiting for the inline panel.
     inline_approval_queue: VecDeque<PendingApproval>,
     /// Send commands to the background agent task.
@@ -261,6 +265,8 @@ impl App {
             tool_infos,
             editing_approval: None,
             inline_approval: None,
+            inline_approval_expanded: false,
+            inline_approval_area: None,
             inline_approval_queue: VecDeque::new(),
             spinner_frame: 0,
             token_budget_max,
@@ -295,6 +301,14 @@ impl App {
         let up_k = self.turn_input_tokens as f64 / 1000.0;
         let down_k = self.turn_output_tokens as f64 / 1000.0;
         format!("↑{:.1}k ↓{:.1}k", up_k, down_k)
+    }
+
+    fn input_panel_height(&self, width: usize) -> u16 {
+        self.input.desired_height(
+            width,
+            self.layout_settings.input_height,
+            self.layout_settings.input_height.saturating_add(4),
+        )
     }
 
     fn reset_turn_usage(&mut self) {
@@ -359,14 +373,18 @@ impl App {
 
     /// Send a user prompt to the background agent task.
     pub async fn send_prompt(&mut self, prompt: String) {
-        self.cancellation.reset();
         crate::memory_runtime::record_user_preference(&self.memory, &prompt).await;
         self.chat.push_cell(Box::new(UserCell { content: prompt.clone() }));
-        self.tool_activity.clear();
-        self.base_status = self.status_text.clone();
         let _ = self.turn_tx.send(BackgroundCommand::Prompt(prompt));
-        self.mode = Mode::Streaming;
-        self.turn_active = true;
+        if self.turn_active {
+            self.status_text = "input queued for rethink".to_string();
+        } else {
+            self.cancellation.reset();
+            self.tool_activity.clear();
+            self.base_status = self.status_text.clone();
+            self.mode = Mode::Streaming;
+            self.turn_active = true;
+        }
     }
 
     /// Draw the entire UI.
@@ -376,17 +394,22 @@ impl App {
 
         // Layout: chat | compact tool activity | inline approval | input | status
         let activity_height = self.tool_activity.height(area.width as usize);
-        let approval_height = if self.inline_approval.is_some() {
-            approval_inline::INLINE_APPROVAL_HEIGHT
+        let approval_height = if let Some(pending) = &self.inline_approval {
+            approval_inline::inline_approval_height(
+                pending,
+                area.width as usize,
+                self.inline_approval_expanded,
+            )
         } else {
             0
         };
+        let input_height = self.input_panel_height(area.width as usize);
         let constraints = vec![
-            Constraint::Min(0),                                    // chat
-            Constraint::Length(activity_height),                   // recent tool/command activity
-            Constraint::Length(approval_height),                   // pending approval
-            Constraint::Length(self.layout_settings.input_height), // input panel
-            Constraint::Length(1),                                 // status bar
+            Constraint::Min(0),                  // chat
+            Constraint::Length(activity_height), // recent tool/command activity
+            Constraint::Length(approval_height), // pending approval
+            Constraint::Length(input_height),    // input panel
+            Constraint::Length(1),               // status bar
         ];
 
         let layout =
@@ -395,7 +418,16 @@ impl App {
         self.chat.render(frame, layout[0], &theme);
         self.tool_activity.render(frame, layout[1], &theme);
         if let Some(pending) = &self.inline_approval {
-            approval_inline::render(frame, layout[2], &theme, pending);
+            self.inline_approval_area = Some(layout[2]);
+            approval_inline::render(
+                frame,
+                layout[2],
+                &theme,
+                pending,
+                self.inline_approval_expanded,
+            );
+        } else {
+            self.inline_approval_area = None;
         }
         self.input.render(frame, layout[3], self.mode != Mode::Approving);
 
@@ -432,6 +464,11 @@ impl App {
 mod tests {
     use super::*;
     use crate::config::TuiDensity;
+    use crossterm::event::{
+        KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    };
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
     use serde_json::json;
     use std::path::PathBuf;
     use std::sync::atomic::AtomicBool;
@@ -449,20 +486,52 @@ mod tests {
         }
     }
 
+    fn test_app(temp: &tempfile::TempDir) -> App {
+        let config = telos_agent::AgentConfig::default();
+        let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
+        let tools = telos_agent::ToolRegistry::new();
+        let memory = Arc::new(Mutex::new(MemoryStore::new(temp.path().join("memory"))));
+
+        App::new(
+            config,
+            provider,
+            tools,
+            "telos".into(),
+            Some(temp.path()),
+            temp.path(),
+            false,
+            memory,
+            ModelSwitchConfig::default(),
+        )
+        .unwrap()
+    }
+
     #[test]
     fn layout_settings_map_density_presets() {
         assert_eq!(
             TuiLayoutSettings::from_density(TuiDensity::Compact),
-            TuiLayoutSettings { input_height: 4, tool_activity_max_lines: 6 }
+            TuiLayoutSettings { input_height: 3, tool_activity_max_lines: 6 }
         );
         assert_eq!(
             TuiLayoutSettings::from_density(TuiDensity::Default),
-            TuiLayoutSettings { input_height: 5, tool_activity_max_lines: 10 }
+            TuiLayoutSettings { input_height: 4, tool_activity_max_lines: 10 }
         );
         assert_eq!(
             TuiLayoutSettings::from_density(TuiDensity::Spacious),
             TuiLayoutSettings { input_height: 7, tool_activity_max_lines: 14 }
         );
+    }
+
+    #[tokio::test]
+    async fn input_panel_height_grows_with_composer_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+
+        assert_eq!(app.input_panel_height(80), 4);
+
+        app.input.restore_text("line one\nline two\nline three".into());
+
+        assert_eq!(app.input_panel_height(80), 6);
     }
 
     #[tokio::test]
@@ -492,6 +561,24 @@ mod tests {
         app.send_prompt("hello".into()).await;
 
         assert!(!cancelled.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn submit_during_active_turn_is_accepted_for_rethink() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.turn_active = true;
+        app.mode = Mode::Streaming;
+        app.status_text = "running tool".to_string();
+
+        app.handle_input_event(crate::tui::input_panel::InputEvent::Submit(
+            "consider this too".into(),
+        ))
+        .await;
+
+        assert!(app.turn_active);
+        assert_eq!(app.mode, Mode::Streaming);
+        assert_eq!(app.status_text, "input queued for rethink");
     }
 
     #[tokio::test]
@@ -705,6 +792,98 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn inline_approval_t_key_toggles_command_expansion() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        let (tx, _rx) = oneshot::channel();
+        app.enqueue_inline_approval(PendingApproval {
+            request: approval_request(
+                "find . -maxdepth 2 -type f -name \"*.md\" -o -name \"*.py\"",
+            ),
+            respond: Some(tx),
+        });
+
+        assert!(!app.inline_approval_expanded);
+
+        app.handle_event(Event::Key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE)))
+            .await
+            .unwrap();
+
+        assert!(app.inline_approval_expanded);
+
+        app.handle_event(Event::Key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE)))
+            .await
+            .unwrap();
+
+        assert!(!app.inline_approval_expanded);
+    }
+
+    #[tokio::test]
+    async fn clicking_inline_approval_command_toggles_expansion() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        let (tx, _rx) = oneshot::channel();
+        app.enqueue_inline_approval(PendingApproval {
+            request: approval_request(
+                "find . -maxdepth 2 -type f -name \"*.md\" -o -name \"*.py\"",
+            ),
+            respond: Some(tx),
+        });
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let area = app.inline_approval_area.expect("approval area should be tracked after draw");
+
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: area.x + 3,
+            row: area.y + 3,
+            modifiers: KeyModifiers::NONE,
+        }))
+        .await
+        .unwrap();
+        assert!(!app.inline_approval_expanded);
+
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: area.x + 3,
+            row: area.y + 2,
+            modifiers: KeyModifiers::NONE,
+        }))
+        .await
+        .unwrap();
+        assert!(app.inline_approval_expanded);
+    }
+
+    #[tokio::test]
+    async fn mouse_wheel_scrolls_chat_history() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.chat.scroll_offset = 3;
+
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 10,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        }))
+        .await
+        .unwrap();
+        assert_eq!(app.chat.scroll_offset, 4);
+
+        app.handle_event(Event::Mouse(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 10,
+            row: 10,
+            modifiers: KeyModifiers::NONE,
+        }))
+        .await
+        .unwrap();
+        assert_eq!(app.chat.scroll_offset, 3);
+    }
+
+    #[tokio::test]
     async fn enqueue_pending_approvals_keeps_fifo_order() {
         let config = telos_agent::AgentConfig::default();
         let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
@@ -813,7 +992,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn streaming_enter_keeps_draft_and_does_not_dispatch_prompt() {
+    async fn streaming_enter_submits_prompt_for_rethink() {
         let config = telos_agent::AgentConfig::default();
         let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
         let tools = telos_agent::ToolRegistry::new();
@@ -849,8 +1028,9 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(app.input.text(), "hi");
-        assert_eq!(app.chat.len(), 0);
+        assert_eq!(app.input.text(), "");
+        assert_eq!(app.chat.len(), 1);
+        assert_eq!(app.status_text, "input queued for rethink");
         assert_eq!(app.mode, Mode::Streaming);
     }
 }

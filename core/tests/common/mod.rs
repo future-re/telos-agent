@@ -172,3 +172,29 @@ impl Tool for ProgressTool {
         Ok(ToolOutput::json(json!({ "done": true })))
     }
 }
+
+pub struct WaitTool {
+    pub started: Arc<tokio::sync::Notify>,
+    pub release: Arc<tokio::sync::Notify>,
+}
+
+#[async_trait]
+impl Tool for WaitTool {
+    fn definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: "wait".into(),
+            description: "Wait until the test releases the tool".into(),
+            input_schema: json!({ "type": "object" }),
+        }
+    }
+
+    async fn invoke(
+        &self,
+        _arguments: Value,
+        _context: ToolContext,
+    ) -> Result<ToolOutput, AgentError> {
+        self.started.notify_waiters();
+        self.release.notified().await;
+        Ok(ToolOutput::json(json!({ "status": "released" })))
+    }
+}

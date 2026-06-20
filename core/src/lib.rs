@@ -201,7 +201,9 @@ pub use provider::{
     RoutedModelConfig, RoutedProvider, StopReason, TokenUsage,
 };
 // Runtime — the agent session and the streaming turn loop.
-pub use runtime::{AgentSession, TurnEvent, TurnResult};
+pub use runtime::{
+    AgentSession, TurnEvent, TurnInputReceiver, TurnInputSender, TurnResult, turn_input_channel,
+};
 // Skills — user-defined slash-commands loaded from markdown files.
 pub use skills::{Skill, SkillArg, SkillLoader, SkillRegistry, SkillSource};
 // Storage — persistence backends for saving and resuming sessions.

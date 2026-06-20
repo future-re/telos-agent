@@ -15,7 +15,8 @@ use crate::error::AgentError;
 use crate::hooks::{HookContext, HookPhase};
 use crate::message::Message;
 use crate::metrics::SessionMetrics;
-use crate::provider::{ModelProvider, StopReason, TokenUsage};
+use crate::provider::{ModelHint, ModelProvider, StopReason, TokenUsage};
+use crate::runtime::TurnInputReceiver;
 use crate::runtime::{TurnEvent, TurnResult};
 use crate::tool::FileReadState;
 use crate::tool::ToolRegistry;
@@ -105,6 +106,27 @@ impl AgentSession {
         tools: &'a ToolRegistry,
         user_input: impl Into<String> + 'a,
     ) -> impl Stream<Item = Result<TurnEvent, AgentError>> + 'a {
+        self.run_turn_stream_with_input(
+            provider,
+            tools,
+            user_input,
+            crate::runtime::input::empty_turn_input_receiver(),
+        )
+    }
+
+    /// Run one turn with a live input channel.
+    ///
+    /// Inputs received while tools are running are appended to the same turn
+    /// after tool results and before the next provider request. The next
+    /// provider request is forced to [`ModelHint::Thinking`] so routed
+    /// providers can use a stronger model for reconsideration.
+    pub fn run_turn_stream_with_input<'a, P: ModelProvider + 'a>(
+        &'a mut self,
+        provider: &'a P,
+        tools: &'a ToolRegistry,
+        user_input: impl Into<String> + 'a,
+        mut turn_input: TurnInputReceiver,
+    ) -> impl Stream<Item = Result<TurnEvent, AgentError>> + 'a {
         try_stream! {
             let mut tools = tools.clone();
             if let Some(skill_registry) = self.config.skill_registry.clone() {
@@ -152,6 +174,7 @@ impl AgentSession {
             // Track state for model routing decisions
             let mut previous_tool_error = false;
             let mut consecutive_noop = 0usize;
+            let mut force_thinking_next_iteration = false;
             loop {
                 if iterations >= self.config.max_iterations {
                     Err(AgentError::MaxIterations(self.config.max_iterations))?;
@@ -201,12 +224,23 @@ impl AgentSession {
                     }
                 }
 
-                let hint = Self::resolve_hint(
-                    &self.config,
-                    iterations,
-                    previous_tool_error,
-                    consecutive_noop,
-                );
+                for message in Self::drain_turn_input(&mut turn_input) {
+                    self.messages.push(message.clone());
+                    force_thinking_next_iteration = true;
+                    yield TurnEvent::User(message);
+                }
+
+                let hint = if force_thinking_next_iteration {
+                    force_thinking_next_iteration = false;
+                    ModelHint::Thinking
+                } else {
+                    Self::resolve_hint(
+                        &self.config,
+                        iterations,
+                        previous_tool_error,
+                        consecutive_noop,
+                    )
+                };
 
                 let (assistant_message, stop_reason, usage, provider_events) =
                     self.call_provider(provider, &tool_definitions, hint).await?;
@@ -262,6 +296,19 @@ impl AgentSession {
                 }
 
                 if tool_calls.is_empty() {
+                    let mut reconsideration_inputs = Vec::new();
+                    for message in Self::drain_turn_input(&mut turn_input) {
+                        self.messages.push(message.clone());
+                        reconsideration_inputs.push(message);
+                    }
+                    if !reconsideration_inputs.is_empty() {
+                        for message in reconsideration_inputs {
+                            yield TurnEvent::User(message);
+                        }
+                        force_thinking_next_iteration = true;
+                        continue;
+                    }
+
                     let stop_events = self
                         .run_hook_phase(HookPhase::Stop, &hook_context, &assistant_message)
                         .await?;
@@ -292,8 +339,25 @@ impl AgentSession {
 
                 self.messages.push(tool_message.clone());
                 yield TurnEvent::ToolResult(tool_message);
+
+                for message in Self::drain_turn_input(&mut turn_input) {
+                    self.messages.push(message.clone());
+                    force_thinking_next_iteration = true;
+                    yield TurnEvent::User(message);
+                }
             }
         }
+    }
+
+    fn drain_turn_input(turn_input: &mut TurnInputReceiver) -> Vec<Message> {
+        let mut messages = Vec::new();
+        while let Ok(input) = turn_input.try_recv() {
+            let input = input.trim().to_string();
+            if !input.is_empty() {
+                messages.push(Message::user(input));
+            }
+        }
+        messages
     }
 
     /// Run one turn to completion and return the collected events plus the

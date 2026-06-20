@@ -70,25 +70,7 @@ Verify that returned content is relevant and trustworthy before acting on it.",
         }
 
         let url = normalize_fetch_url(url);
-
-        // Fetch using curl
-        let output = std::process::Command::new("curl")
-            .args(["-sL", "--max-time", "30", &url])
-            .output()
-            .map_err(|e| AgentError::ToolExecution {
-                tool: "WebFetch".into(),
-                message: format!("failed to spawn curl: {e}"),
-            })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(AgentError::ToolExecution {
-                tool: "WebFetch".into(),
-                message: format!("curl exited with {}: {stderr}", output.status),
-            });
-        }
-
-        let body = String::from_utf8_lossy(&output.stdout).to_string();
+        let body = fetch_url_text(&url).await?;
         let text = strip_html(&body);
         let truncated: String = text.chars().take(50000).collect();
 
@@ -99,6 +81,32 @@ Verify that returned content is relevant and trustworthy before acting on it.",
 
         Ok(ToolOutput::text(truncated))
     }
+}
+
+async fn fetch_url_text(url: &str) -> Result<String, AgentError> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .user_agent("telos-agent/0.1")
+        .build()
+        .map_err(|err| AgentError::ToolExecution {
+            tool: "WebFetch".into(),
+            message: format!("failed to create HTTP client: {err}"),
+        })?;
+    let response = client.get(url).send().await.map_err(|err| AgentError::ToolExecution {
+        tool: "WebFetch".into(),
+        message: format!("HTTP request failed: {err}"),
+    })?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(AgentError::ToolExecution {
+            tool: "WebFetch".into(),
+            message: format!("HTTP request returned status {status}"),
+        });
+    }
+    response.text().await.map_err(|err| AgentError::ToolExecution {
+        tool: "WebFetch".into(),
+        message: format!("failed to read HTTP response body: {err}"),
+    })
 }
 
 fn strip_html(html: &str) -> String {

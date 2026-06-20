@@ -14,7 +14,7 @@ pub enum ToolState {
 
 pub(crate) fn is_shell_tool_name(name: &str) -> bool {
     let lower = name.to_lowercase();
-    lower == "bash" || lower == "shell"
+    lower == "bash" || lower == "shell" || lower == "powershell"
 }
 
 pub(crate) fn tool_title(
@@ -175,6 +175,7 @@ mod tests {
     fn shared_helpers_preserve_existing_text_behavior() {
         assert!(is_shell_tool_name("Bash"));
         assert!(is_shell_tool_name("shell"));
+        assert!(is_shell_tool_name("PowerShell"));
         assert!(!is_shell_tool_name("WebSearch"));
         assert_eq!(truncate_chars("状态栏测试", 4), "状态栏…");
         assert_eq!(transcript_width(3), 16);

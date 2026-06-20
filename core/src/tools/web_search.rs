@@ -88,12 +88,12 @@ switch to WebFetch with known official/source URLs, use available context, or as
         let filters = DomainFilters::from_args(&args)?;
         emit_search_progress(&context, "searching web", query, None);
 
-        match bing_cn_search(query, &filters) {
+        match bing_cn_search(query, &filters).await {
             Ok(output) => {
                 emit_result_progress(&context, query, &output);
                 Ok(output)
             }
-            Err(bing_err) => match duckduckgo_lite_search(query, &filters) {
+            Err(bing_err) => match duckduckgo_lite_search(query, &filters).await {
                 Ok(output) => {
                     emit_result_progress(&context, query, &output);
                     Ok(output)

@@ -8,6 +8,7 @@ use std::any::Any;
 
 use crate::tui::approval::PendingApproval;
 use crate::tui::theme::Theme;
+use crate::tui::tool_rendering::is_shell_tool_name;
 
 /// What the app should do after an overlay processes a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,11 +86,12 @@ impl Overlay for ApprovalOverlay {
 
         // Tool-specific content
         let tool_lower = tool_name.to_lowercase();
-        if tool_lower == "bash" || tool_lower == "shell" {
+        if is_shell_tool_name(tool_name) {
             if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
                 text_lines.push(Line::from(""));
+                let prompt = if tool_lower == "powershell" { "PS> " } else { "$ " };
                 text_lines.push(Line::from(Span::styled(
-                    format!("  $ {}", truncate_for_popup(cmd, 200)),
+                    format!("  {prompt}{}", truncate_for_popup(cmd, 200)),
                     Style::default().fg(theme.approval_cmd_fg),
                 )));
             }
@@ -222,10 +224,12 @@ pub fn approval_content_lines(tool_name: &str, args: &serde_json::Value, width: 
     let tool_lower = tool_name.to_lowercase();
     let mut lines = 1usize; // tool name line
 
-    if tool_lower == "bash" || tool_lower == "shell" {
+    if is_shell_tool_name(tool_name) {
         if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
             lines += 1; // blank
-            lines += count_wrapped_lines(&format!("  $ {}", truncate_for_popup(cmd, 200)), width);
+            let prompt = if tool_lower == "powershell" { "PS> " } else { "$ " };
+            lines +=
+                count_wrapped_lines(&format!("  {prompt}{}", truncate_for_popup(cmd, 200)), width);
         }
     } else if tool_lower == "edit" {
         let file = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("");

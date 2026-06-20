@@ -146,6 +146,7 @@ async fn plugin_tool_integration() {
     let tmp = TempDir::new().unwrap();
     let plugin_dir = tmp.path().join("installed").join("mytool@test");
     std::fs::create_dir_all(plugin_dir.join("tools")).unwrap();
+    let (command, args, description) = plugin_uppercase_command_spec();
 
     // Write plugin.json
     let manifest = serde_json::json!({
@@ -162,14 +163,14 @@ async fn plugin_tool_integration() {
     // Write a tool spec
     let tool_spec = serde_json::json!({
         "name": "uppercase",
-        "description": "Converts text to uppercase using tr",
+        "description": description,
         "inputSchema": {
             "type": "object",
             "properties": {"text": {"type": "string"}},
             "required": ["text"]
         },
-        "command": "tr",
-        "args": ["[:lower:]", "[:upper:]"],
+        "command": command,
+        "args": args,
         "permission": "allow",
         "isConcurrencySafe": true
     });
@@ -203,4 +204,30 @@ async fn plugin_tool_integration() {
     // Verify the tool is registered with namespace
     let tool = tools.get("plugin__mytool__uppercase");
     assert!(tool.is_ok(), "plugin tool should be registered: {:?}", tool.err());
+}
+
+#[cfg(windows)]
+fn plugin_uppercase_command_spec() -> (&'static str, serde_json::Value, &'static str) {
+    (
+        "powershell",
+        json!([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$input = [Console]::In.ReadToEnd() | ConvertFrom-Json; [Console]::Out.Write($input.text.ToUpperInvariant())"
+        ]),
+        "Converts text to uppercase using PowerShell",
+    )
+}
+
+#[cfg(not(windows))]
+fn plugin_uppercase_command_spec() -> (&'static str, serde_json::Value, &'static str) {
+    (
+        "/bin/sh",
+        json!([
+            "-c",
+            "input=$(cat); printf '%s' \"$input\" | sed -n 's/.*\"text\":\"\\([^\"]*\\)\".*/\\1/p' | tr '[:lower:]' '[:upper:]'"
+        ]),
+        "Converts text to uppercase using POSIX shell tools",
+    )
 }

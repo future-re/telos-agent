@@ -91,7 +91,13 @@ async fn web_search_tool_returns_results() {
         Err(e) => {
             // Network failures (timeout, DNS, etc.) are acceptable in CI/test
             let msg = e.to_string();
-            assert!(msg.contains("curl"), "WebSearch tool returned unexpected error: {msg}");
+            assert!(
+                msg.contains("HTTP request")
+                    || msg.contains("Bing search provider")
+                    || msg.contains("DuckDuckGo")
+                    || msg.contains("fallback failed"),
+                "WebSearch tool returned unexpected error: {msg}"
+            );
         }
     }
 }

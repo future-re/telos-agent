@@ -159,7 +159,7 @@ pub use approval::{
 // Compaction — history- and message-level shrinking strategies.
 pub use compaction::{CompactionStrategy, SummaryCompaction};
 // Configuration — the session config aggregate, task path, and token-budget knob.
-pub use config::{AgentConfig, TaskPath, TokenBudget};
+pub use config::{AgentConfig, TaskPath, TokenBudget, platform_base_env};
 // Diagnostics — sanitized local recording of tool execution failures.
 pub use diagnostics::{
     JsonlToolDiagnosticsSink, NoopToolDiagnosticsSink, SanitizedToolFailure, ToolDiagnosticsSink,

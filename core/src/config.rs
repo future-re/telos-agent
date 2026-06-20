@@ -16,6 +16,43 @@ use crate::error::AgentError;
 use crate::hooks::HookRegistry;
 use crate::storage::Storage;
 
+/// Return the small set of host environment variables needed for tools to
+/// launch platform-native child processes without inheriting the full process
+/// environment.
+pub fn platform_base_env() -> HashMap<String, String> {
+    let mut env = HashMap::new();
+    for key in platform_base_env_keys() {
+        if let Some((actual_key, value)) =
+            std::env::vars().find(|(name, _)| name.eq_ignore_ascii_case(key))
+        {
+            env.insert(actual_key, value);
+        }
+    }
+    env
+}
+
+#[cfg(windows)]
+fn platform_base_env_keys() -> &'static [&'static str] {
+    &[
+        "Path",
+        "SystemRoot",
+        "WINDIR",
+        "USERPROFILE",
+        "TEMP",
+        "TMP",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "ComSpec",
+        "PATHEXT",
+        "PSModulePath",
+    ]
+}
+
+#[cfg(not(windows))]
+fn platform_base_env_keys() -> &'static [&'static str] {
+    &["PATH", "HOME"]
+}
+
 /// Shared cancellation state for one agent runtime.
 ///
 /// The atomic flag preserves cheap synchronous checks, while the notify handle
@@ -205,11 +242,11 @@ impl Default for AgentConfig {
             prompt_assembly: None,
             max_iterations: 30,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            // Start with a minimal environment for shell tools. Callers that need
-            // specific variables can add them explicitly; inheriting the entire
-            // process environment risks leaking secrets to arbitrary tool calls.
-            // A default PATH keeps simple safe commands (`ls`, `cat`, etc.) working.
-            env: HashMap::from([("PATH".into(), "/usr/local/bin:/usr/bin:/bin".into())]),
+            // Start with a minimal platform environment for shell tools. Callers
+            // that need specific variables can add them explicitly; inheriting
+            // the entire process environment risks leaking secrets to arbitrary
+            // tool calls.
+            env: platform_base_env(),
             max_tool_result_chars: usize::MAX,
             hooks: Arc::new(HookRegistry::new()),
             storage: None,
@@ -457,10 +494,61 @@ mod tests {
     }
 
     #[test]
-    fn default_env_contains_only_path() {
+    #[cfg(not(windows))]
+    fn default_env_contains_unix_runtime_env() {
         let config = AgentConfig::default();
-        assert_eq!(config.env.len(), 1);
-        assert_eq!(config.env.get("PATH"), Some(&"/usr/local/bin:/usr/bin:/bin".into()));
+        assert!(config.env.contains_key("PATH"));
+        assert_eq!(config.env.get("HOME"), std::env::var("HOME").ok().as_ref());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn default_env_preserves_windows_runtime_env() {
+        let config = AgentConfig::default();
+        let expected = [
+            "Path",
+            "SystemRoot",
+            "WINDIR",
+            "USERPROFILE",
+            "TEMP",
+            "TMP",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "ComSpec",
+            "PATHEXT",
+            "PSModulePath",
+        ];
+
+        let mut present = 0;
+        for key in expected {
+            if let Some((actual_key, actual_value)) =
+                std::env::vars().find(|(name, _)| name.eq_ignore_ascii_case(key))
+            {
+                present += 1;
+                assert_eq!(
+                    config
+                        .env
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(&actual_key))
+                        .map(|(_, value)| value.as_str()),
+                    Some(actual_value.as_str()),
+                    "missing preserved env var {actual_key}"
+                );
+            }
+        }
+        assert!(present > 0, "test expected at least one Windows runtime env var");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn platform_base_env_does_not_invent_unix_path_on_windows() {
+        let env = platform_base_env();
+        assert_ne!(
+            env.iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("PATH"))
+                .map(|(_, value)| value.as_str()),
+            Some("/usr/local/bin:/usr/bin:/bin")
+        );
     }
 
     #[test]

@@ -16,7 +16,7 @@ use crate::tool::{PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOut
 use super::{optional_usize_any, required_string};
 use crate::bash_security::{CommandSafety, analyze as analyze_command_safety};
 
-/// Built-in shell tool. Spawns `sh -c <command>` inside the workspace.
+/// Built-in shell tool. Spawns `bash -c <command>` inside the workspace.
 pub struct ShellTool;
 
 #[async_trait]
@@ -88,7 +88,7 @@ Avoid commands that require superuser privileges unless explicitly instructed.",
                 data: Some(json!({ "command": command, "timeout_ms": timeout_ms })),
             });
         }
-        let mut child = Command::new("sh");
+        let mut child = Command::new("bash");
         child
             .arg("-c")
             .arg(command)

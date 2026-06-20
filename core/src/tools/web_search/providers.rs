@@ -8,17 +8,17 @@ use crate::tools::web_search::parsers::{
     parse_ddg_lite, url_encode,
 };
 
-pub(super) fn bing_cn_search(
+pub(super) async fn bing_cn_search(
     query: &str,
     filters: &DomainFilters,
 ) -> Result<ToolOutput, AgentError> {
     let encoded = url_encode(query);
     let rss_url = format!("https://www.bing.com/search?q={encoded}&format=rss");
-    match bing_search_url(&rss_url, parse_bing_rss_results, "bing_rss", filters) {
+    match bing_search_url(&rss_url, parse_bing_rss_results, "bing_rss", filters).await {
         Ok(output) => Ok(output),
         Err(rss_err) => {
             let html_url = format!("https://cn.bing.com/search?q={encoded}");
-            bing_search_url(&html_url, parse_bing_results, "bing_cn_html", filters).map_err(
+            bing_search_url(&html_url, parse_bing_results, "bing_cn_html", filters).await.map_err(
                 |html_err| AgentError::ToolExecution {
                     tool: "WebSearch".into(),
                     message: format!("{rss_err}; HTML fallback failed: {html_err}"),
@@ -28,29 +28,13 @@ pub(super) fn bing_cn_search(
     }
 }
 
-fn bing_search_url(
+async fn bing_search_url(
     url: &str,
     parser: fn(&str) -> Vec<Value>,
     provider: &str,
     filters: &DomainFilters,
 ) -> Result<ToolOutput, AgentError> {
-    let output = std::process::Command::new("curl")
-        .args(["-sL", "--max-time", "15", "-H", "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8", url])
-        .output()
-        .map_err(|e| AgentError::ToolExecution {
-            tool: "WebSearch".into(),
-            message: format!("failed to spawn curl for Bing China search: {e}"),
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AgentError::ToolExecution {
-            tool: "WebSearch".into(),
-            message: format!("Bing China search exited with {}: {stderr}", output.status),
-        });
-    }
-
-    let body = String::from_utf8_lossy(&output.stdout);
+    let body = fetch_search_body(url, Some("zh-CN,zh;q=0.9,en;q=0.8")).await?;
     if body.trim().is_empty() {
         return Err(AgentError::ToolExecution {
             tool: "WebSearch".into(),
@@ -84,35 +68,19 @@ fn bing_search_url(
     })))
 }
 
-pub(super) fn duckduckgo_lite_search(
+pub(super) async fn duckduckgo_lite_search(
     query: &str,
     filters: &DomainFilters,
 ) -> Result<ToolOutput, AgentError> {
     let encoded = url_encode(query);
     let ddg_url = format!("https://lite.duckduckgo.com/lite/?q={encoded}");
 
-    let output = std::process::Command::new("curl")
-        .args(["-sL", "--max-time", "15", &ddg_url])
-        .output()
-        .map_err(|e| AgentError::ToolExecution {
-            tool: "WebSearch".into(),
-            message: format!("failed to spawn curl: {e}"),
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AgentError::ToolExecution {
-            tool: "WebSearch".into(),
-            message: format!("curl exited with {}: {stderr}", output.status),
-        });
-    }
-
-    let body = String::from_utf8_lossy(&output.stdout);
+    let body = fetch_search_body(&ddg_url, None).await?;
 
     if is_bot_challenge(&body) {
         return Err(AgentError::ToolExecution {
                 tool: "WebSearch".into(),
-                message: "curl returned DuckDuckGo bot challenge page; automated search is blocked. Do not retry WebSearch immediately; use WebFetch with known official/source URLs or ask the user for a source/search provider.".into(),
+                message: "DuckDuckGo returned a bot challenge page; automated search is blocked. Do not retry WebSearch immediately; use WebFetch with known official/source URLs or ask the user for a source/search provider.".into(),
             });
     }
 
@@ -126,4 +94,34 @@ pub(super) fn duckduckgo_lite_search(
         "allowed_domains": filters.allowed_domains,
         "blocked_domains": filters.blocked_domains,
     })))
+}
+
+async fn fetch_search_body(url: &str, accept_language: Option<&str>) -> Result<String, AgentError> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .user_agent("telos-agent/0.1")
+        .build()
+        .map_err(|err| AgentError::ToolExecution {
+            tool: "WebSearch".into(),
+            message: format!("failed to create HTTP client: {err}"),
+        })?;
+    let mut request = client.get(url);
+    if let Some(value) = accept_language {
+        request = request.header(reqwest::header::ACCEPT_LANGUAGE, value);
+    }
+    let response = request.send().await.map_err(|err| AgentError::ToolExecution {
+        tool: "WebSearch".into(),
+        message: format!("HTTP request failed: {err}"),
+    })?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(AgentError::ToolExecution {
+            tool: "WebSearch".into(),
+            message: format!("HTTP request returned status {status}"),
+        });
+    }
+    response.text().await.map_err(|err| AgentError::ToolExecution {
+        tool: "WebSearch".into(),
+        message: format!("failed to read HTTP response body: {err}"),
+    })
 }

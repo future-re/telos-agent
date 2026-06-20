@@ -70,7 +70,47 @@ mod tests {
         };
         let agent = build_agent_config(&options, &config, None).unwrap();
         assert_eq!(agent.env.get("CUSTOM_VAR").map(|s| s.as_str()), Some("value"));
-        assert!(agent.env.contains_key("PATH")); // base env preserved
+        assert!(agent.env.keys().any(|key| key.eq_ignore_ascii_case("PATH")));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn build_agent_config_preserves_windows_runtime_env() {
+        let options = SharedOptions::default();
+        let config = FileConfig::default();
+        let agent = build_agent_config(&options, &config, None).unwrap();
+        let expected = [
+            "Path",
+            "SystemRoot",
+            "WINDIR",
+            "USERPROFILE",
+            "TEMP",
+            "TMP",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "ComSpec",
+            "PATHEXT",
+            "PSModulePath",
+        ];
+
+        let mut present = 0;
+        for key in expected {
+            if let Some((actual_key, actual_value)) =
+                std::env::vars().find(|(name, _)| name.eq_ignore_ascii_case(key))
+            {
+                present += 1;
+                assert_eq!(
+                    agent
+                        .env
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(&actual_key))
+                        .map(|(_, value)| value.as_str()),
+                    Some(actual_value.as_str()),
+                    "missing preserved env var {actual_key}"
+                );
+            }
+        }
+        assert!(present > 0, "test expected at least one Windows runtime env var");
     }
 
     #[test]

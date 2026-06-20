@@ -102,7 +102,10 @@ impl CommandTool {
             .map(|(k, v)| (k, v.replace("${PLUGIN_ROOT}", &plugin_root_str)))
             .collect();
 
-        let command = spec.command.replace("${PLUGIN_ROOT}", &plugin_root_str);
+        let command = resolve_plugin_command(
+            &spec.command.replace("${PLUGIN_ROOT}", &plugin_root_str),
+            plugin_root,
+        );
 
         let definition = ToolDefinition {
             name: spec.name,
@@ -170,14 +173,16 @@ impl Tool for CommandTool {
     async fn invoke(
         &self,
         arguments: Value,
-        _context: ToolContext,
+        context: ToolContext,
     ) -> Result<ToolOutput, AgentError> {
         let args_json = serde_json::to_vec(&arguments)
             .map_err(|e| AgentError::Validation(format!("failed to serialize arguments: {e}")))?;
 
         let mut child = TokioCommand::new(&self.command)
             .args(&self.args)
+            .current_dir(&context.cwd)
             .env_clear()
+            .envs(context.env.iter())
             .envs(&self.env)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -226,6 +231,18 @@ impl Tool for CommandTool {
 
         Ok(ToolOutput::json(value))
     }
+}
+
+fn resolve_plugin_command(command: &str, plugin_root: &Path) -> String {
+    let path = Path::new(command);
+    if path.is_absolute() || is_bare_executable(command) {
+        return command.to_string();
+    }
+    plugin_root.join(path).to_string_lossy().into_owned()
+}
+
+fn is_bare_executable(command: &str) -> bool {
+    !command.starts_with('.') && !command.contains('/') && !command.contains('\\')
 }
 
 #[cfg(test)]
@@ -279,8 +296,9 @@ mod tests {
                     concat!(
                         "$null = [Console]::In.ReadToEnd(); ",
                         "$secret = if ($null -eq $env:TELOS_PLUGIN_SECRET) { '' } else { $env:TELOS_PLUGIN_SECRET }; ",
+                        "$context = if ($null -eq $env:TELOS_CONTEXT_VISIBLE) { '' } else { $env:TELOS_CONTEXT_VISIBLE }; ",
                         "$configured = if ($null -eq $env:PLUGIN_VISIBLE) { '' } else { $env:PLUGIN_VISIBLE }; ",
-                        "[Console]::Out.Write((@{secret=$secret; configured=$configured} | ConvertTo-Json -Compress))"
+                        "[Console]::Out.Write((@{secret=$secret; context=$context; configured=$configured} | ConvertTo-Json -Compress))"
                     )
                     .into(),
                 ],
@@ -292,9 +310,50 @@ mod tests {
                 "/bin/sh".into(),
                 vec![
                     "-c".into(),
-                    "cat >/dev/null; printf '{\"secret\":\"%s\",\"configured\":\"%s\"}' \"$TELOS_PLUGIN_SECRET\" \"$PLUGIN_VISIBLE\"".into(),
+                    "cat >/dev/null; printf '{\"secret\":\"%s\",\"context\":\"%s\",\"configured\":\"%s\"}' \"$TELOS_PLUGIN_SECRET\" \"$TELOS_CONTEXT_VISIBLE\" \"$PLUGIN_VISIBLE\"".into(),
                 ],
             )
+        }
+    }
+
+    fn cwd_probe_command() -> (String, Vec<String>) {
+        #[cfg(windows)]
+        {
+            (
+                powershell_test_executable(),
+                vec![
+                    "-NoProfile".into(),
+                    "-NonInteractive".into(),
+                    "-Command".into(),
+                    "$null = [Console]::In.ReadToEnd(); [Console]::Out.Write((@{cwd=(Get-Location).Path} | ConvertTo-Json -Compress))".into(),
+                ],
+            )
+        }
+        #[cfg(not(windows))]
+        {
+            (
+                "/bin/sh".into(),
+                vec!["-c".into(), "cat >/dev/null; printf '{\"cwd\":\"%s\"}' \"$PWD\"".into()],
+            )
+        }
+    }
+
+    fn failing_command() -> (String, Vec<String>) {
+        #[cfg(windows)]
+        {
+            (
+                powershell_test_executable(),
+                vec![
+                    "-NoProfile".into(),
+                    "-NonInteractive".into(),
+                    "-Command".into(),
+                    "exit 1".into(),
+                ],
+            )
+        }
+        #[cfg(not(windows))]
+        {
+            ("/bin/sh".into(), vec!["-c".into(), "exit 1".into()])
         }
     }
 
@@ -355,6 +414,30 @@ mod tests {
         assert_eq!(tool.env.get("TOOL_HOME").unwrap(), "/opt/plugin/home");
     }
 
+    #[test]
+    fn command_tool_from_spec_resolves_relative_plugin_command() {
+        let temp = TempDir::new().unwrap();
+        let relative_command = if cfg!(windows) { r"bin\tool.exe" } else { "bin/tool" };
+        let spec = ToolSpec {
+            name: "test".into(),
+            description: "test".into(),
+            input_schema: json!({}),
+            command: relative_command.into(),
+            args: vec![],
+            env: HashMap::new(),
+            timeout_ms: 5000,
+            is_concurrency_safe: false,
+            permission: ToolPermission::Ask,
+        };
+
+        let tool = CommandTool::from_spec(spec, temp.path());
+
+        assert_eq!(
+            std::path::PathBuf::from(&tool.command),
+            temp.path().join("bin").join(if cfg!(windows) { "tool.exe" } else { "tool" })
+        );
+    }
+
     #[tokio::test]
     async fn command_tool_invoke_echo() {
         let definition = ToolDefinition {
@@ -387,12 +470,12 @@ mod tests {
             description: "Fail test".into(),
             input_schema: json!({"type": "object"}),
         };
+        let (command, args) = failing_command();
 
-        // Using `false` which exits with code 1
         let tool = CommandTool::new(
             definition,
-            "false".into(),
-            vec![],
+            command,
+            args,
             HashMap::new(),
             std::time::Duration::from_secs(5),
             false,
@@ -400,7 +483,40 @@ mod tests {
         );
 
         let result = tool.invoke(json!({}), ToolContext::dummy()).await;
-        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("tool exited with status"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn command_tool_runs_in_context_cwd() {
+        let temp = TempDir::new().unwrap();
+        let cwd = temp.path().join("workspace");
+        std::fs::create_dir(&cwd).unwrap();
+        let definition = ToolDefinition {
+            name: "cwd_test".into(),
+            description: "Cwd test".into(),
+            input_schema: json!({"type": "object"}),
+        };
+        let (command, args) = cwd_probe_command();
+
+        let tool = CommandTool::new(
+            definition,
+            command,
+            args,
+            HashMap::new(),
+            std::time::Duration::from_secs(5),
+            true,
+            PermissionDecision::Allow,
+        );
+        let mut context = ToolContext::dummy();
+        context.cwd = cwd.clone();
+
+        let result = tool.invoke(json!({}), context).await.unwrap();
+
+        assert_eq!(
+            std::fs::canonicalize(result.content["cwd"].as_str().unwrap()).unwrap(),
+            std::fs::canonicalize(&cwd).unwrap()
+        );
     }
 
     #[tokio::test]
@@ -422,11 +538,14 @@ mod tests {
             true,
             PermissionDecision::Allow,
         );
+        let mut context = ToolContext::dummy();
+        context.env.insert("TELOS_CONTEXT_VISIBLE".into(), "context".into());
 
-        let result = tool.invoke(json!({}), ToolContext::dummy()).await.unwrap();
+        let result = tool.invoke(json!({}), context).await.unwrap();
         unsafe { std::env::remove_var("TELOS_PLUGIN_SECRET") };
 
         assert_eq!(result.content["secret"], "");
+        assert_eq!(result.content["context"], "context");
         assert_eq!(result.content["configured"], "yes");
     }
 

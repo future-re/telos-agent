@@ -1,5 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -132,6 +133,10 @@ pub struct App {
     tool_infos: Vec<ToolInfo>,
     /// Approval request currently being edited in a UserInputPopup.
     editing_approval: Option<PendingApproval>,
+    /// Approval request currently shown in the inline approval panel.
+    inline_approval: Option<PendingApproval>,
+    /// Pending approval requests waiting for the inline panel.
+    inline_approval_queue: VecDeque<PendingApproval>,
     /// Send commands to the background agent task.
     turn_tx: mpsc::UnboundedSender<BackgroundCommand>,
     /// Receive TurnEvents from the background agent task.
@@ -254,6 +259,8 @@ impl App {
             model_switch,
             tool_infos,
             editing_approval: None,
+            inline_approval: None,
+            inline_approval_queue: VecDeque::new(),
             spinner_frame: 0,
             token_budget_max,
             turn_tx: prompt_tx,
@@ -415,8 +422,22 @@ impl App {
 mod tests {
     use super::*;
     use crate::config::TuiDensity;
+    use serde_json::json;
+    use std::path::PathBuf;
     use std::sync::atomic::AtomicBool;
-    use telos_agent::TurnEvent;
+    use telos_agent::{ApprovalDecision, ApprovalRequest, Message, TurnEvent};
+    use tokio::sync::oneshot;
+
+    fn approval_request(command: &str) -> ApprovalRequest {
+        ApprovalRequest {
+            tool_name: "Bash".into(),
+            invocation_names: vec!["Bash".into(), "shell".into()],
+            arguments: json!({ "command": command }),
+            cwd: PathBuf::from("."),
+            messages: Arc::new(vec![Message::user("run a command")]),
+            reason: "command requires approval".into(),
+        }
+    }
 
     #[test]
     fn layout_settings_map_density_presets() {
@@ -585,5 +606,126 @@ mod tests {
         let compact_height = app.tool_activity.height(80);
         assert!(app.tool_activity.toggle_selected());
         assert!(app.tool_activity.height(80) > compact_height);
+    }
+
+    #[tokio::test]
+    async fn enqueue_pending_approval_sets_active_without_approving_mode() {
+        let config = telos_agent::AgentConfig::default();
+        let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
+        let tools = telos_agent::ToolRegistry::new();
+        let temp = tempfile::tempdir().unwrap();
+        let memory = Arc::new(Mutex::new(MemoryStore::new(temp.path().join("memory"))));
+        let mut app = App::new(
+            config,
+            provider,
+            tools,
+            "telos".into(),
+            Some(temp.path()),
+            temp.path(),
+            false,
+            memory,
+            ModelSwitchConfig::default(),
+        )
+        .unwrap();
+        let (tx, _rx) = oneshot::channel();
+
+        app.enqueue_inline_approval(PendingApproval {
+            request: approval_request("rm target"),
+            respond: Some(tx),
+        });
+
+        assert!(app.inline_approval.is_some());
+        assert_eq!(app.inline_approval_queue.len(), 0);
+        assert_ne!(app.mode, Mode::Approving);
+    }
+
+    #[tokio::test]
+    async fn inline_approval_shortcuts_resolve_allow_and_deny() {
+        let config = telos_agent::AgentConfig::default();
+        let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
+        let tools = telos_agent::ToolRegistry::new();
+        let temp = tempfile::tempdir().unwrap();
+        let memory = Arc::new(Mutex::new(MemoryStore::new(temp.path().join("memory"))));
+        let mut app = App::new(
+            config,
+            provider,
+            tools,
+            "telos".into(),
+            Some(temp.path()),
+            temp.path(),
+            false,
+            memory,
+            ModelSwitchConfig::default(),
+        )
+        .unwrap();
+        let (allow_tx, allow_rx) = oneshot::channel();
+        app.enqueue_inline_approval(PendingApproval {
+            request: approval_request("echo allow"),
+            respond: Some(allow_tx),
+        });
+
+        app.handle_event(Event::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('y'),
+            crossterm::event::KeyModifiers::NONE,
+        )))
+        .await
+        .unwrap();
+
+        assert_eq!(allow_rx.await.unwrap(), ApprovalDecision::Allow);
+        assert!(app.inline_approval.is_none());
+
+        let (deny_tx, deny_rx) = oneshot::channel();
+        app.enqueue_inline_approval(PendingApproval {
+            request: approval_request("echo deny"),
+            respond: Some(deny_tx),
+        });
+
+        app.handle_event(Event::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('n'),
+            crossterm::event::KeyModifiers::NONE,
+        )))
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            deny_rx.await.unwrap(),
+            ApprovalDecision::Deny { reason } if reason == "denied by user"
+        ));
+        assert!(app.inline_approval.is_none());
+    }
+
+    #[tokio::test]
+    async fn enqueue_pending_approvals_keeps_fifo_order() {
+        let config = telos_agent::AgentConfig::default();
+        let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
+        let tools = telos_agent::ToolRegistry::new();
+        let temp = tempfile::tempdir().unwrap();
+        let memory = Arc::new(Mutex::new(MemoryStore::new(temp.path().join("memory"))));
+        let mut app = App::new(
+            config,
+            provider,
+            tools,
+            "telos".into(),
+            Some(temp.path()),
+            temp.path(),
+            false,
+            memory,
+            ModelSwitchConfig::default(),
+        )
+        .unwrap();
+        let (first_tx, _first_rx) = oneshot::channel();
+        let (second_tx, _second_rx) = oneshot::channel();
+
+        app.enqueue_inline_approval(PendingApproval {
+            request: approval_request("first"),
+            respond: Some(first_tx),
+        });
+        app.enqueue_inline_approval(PendingApproval {
+            request: approval_request("second"),
+            respond: Some(second_tx),
+        });
+
+        assert_eq!(app.inline_approval.as_ref().unwrap().request.arguments["command"], "first");
+        assert_eq!(app.inline_approval_queue.len(), 1);
     }
 }

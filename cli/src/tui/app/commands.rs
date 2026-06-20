@@ -12,6 +12,7 @@ use crate::tui::user_input_popup::{Question, UserInputPopup};
 use super::background::BackgroundCommand;
 use super::config::save_deepseek_api_key;
 use super::{App, MODEL_OPTIONS, Mode};
+use telos_agent::ApprovalDecision;
 
 const DEEPSEEK_PRO_MODEL: &str = "deepseek-v4-pro";
 const DEEPSEEK_FLASH_MODEL: &str = "deepseek-v4-flash";
@@ -23,6 +24,30 @@ enum DeepSeekSwitch {
 }
 
 impl App {
+    pub(super) fn enqueue_inline_approval(&mut self, pending: PendingApproval) {
+        if self.inline_approval.is_none() {
+            self.inline_approval = Some(pending);
+        } else {
+            self.inline_approval_queue.push_back(pending);
+        }
+    }
+
+    pub(super) fn resolve_inline_approval(&mut self, decision: ApprovalDecision) {
+        if let Some(mut pending) = self.inline_approval.take()
+            && let Some(tx) = pending.respond.take()
+            && tx.send(decision).is_err()
+        {
+            self.status_text = "approval response channel closed".to_string();
+        }
+        self.inline_approval = self.inline_approval_queue.pop_front();
+    }
+
+    pub(super) fn open_inline_approval_edit_popup(&mut self) {
+        if let Some(pending) = self.inline_approval.take() {
+            self.open_approval_edit_popup(pending);
+        }
+    }
+
     pub(super) async fn handle_input_event(&mut self, event: InputEvent) {
         match event {
             InputEvent::Submit(prompt) => {

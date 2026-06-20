@@ -46,6 +46,26 @@ impl App {
                     _ => {}
                 }
 
+                if self.inline_approval.is_some() {
+                    match key.code {
+                        KeyCode::Char('a') | KeyCode::Char('y') => {
+                            self.resolve_inline_approval(telos_agent::ApprovalDecision::Allow);
+                            return Ok(());
+                        }
+                        KeyCode::Char('d') | KeyCode::Char('n') => {
+                            self.resolve_inline_approval(telos_agent::ApprovalDecision::Deny {
+                                reason: "denied by user".into(),
+                            });
+                            return Ok(());
+                        }
+                        KeyCode::Char('e') => {
+                            self.open_inline_approval_edit_popup();
+                            return Ok(());
+                        }
+                        _ => {}
+                    }
+                }
+
                 match self.mode {
                     Mode::Approving => {
                         if let Some(overlay) = self.overlays.last_mut() {

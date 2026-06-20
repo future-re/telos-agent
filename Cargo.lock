@@ -4274,7 +4274,6 @@ dependencies = [
  "dirs 5.0.1",
  "futures-util",
  "glob",
- "libc",
  "predicates",
  "ratatui",
  "ratatui-markdown",
@@ -4288,6 +4287,7 @@ dependencies = [
  "toml 0.8.2",
  "tracing",
  "tui-textarea",
+ "unicode-width 0.2.0",
  "wiremock",
 ]
 

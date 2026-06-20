@@ -5,11 +5,12 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use tui_textarea::TextArea;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::tui::command_popup::{CommandPopup, SlashCommand};
 use crate::tui::theme::Theme;
 
-const PROMPT_WIDTH: u16 = 1;
+const PROMPT_WIDTH: u16 = 2;
 
 /// What the input panel wants the app to do next.
 #[derive(Debug, Clone)]
@@ -106,7 +107,7 @@ impl InputPanel {
             .textarea
             .lines()
             .iter()
-            .map(|line| line.chars().count().max(1).div_ceil(usable_width))
+            .map(|line| wrap_line(line, usable_width).len())
             .sum::<usize>()
             .max(1);
         let wanted = text_lines.saturating_add(3) as u16;
@@ -138,6 +139,11 @@ impl InputPanel {
     }
 
     fn handle_normal_key(&mut self, key: KeyEvent) -> InputEvent {
+        if is_ctrl_char(key, 'a') {
+            self.textarea.select_all();
+            return InputEvent::None;
+        }
+
         match (key.code, key.modifiers) {
             // ── Submit ──────────────────────────────────────────────
             (KeyCode::Enter, KeyModifiers::NONE) => {
@@ -166,10 +172,6 @@ impl InputPanel {
                 }
                 InputEvent::None
             }
-            (KeyCode::Char('a'), KeyModifiers::CONTROL) => {
-                self.textarea.select_all();
-                InputEvent::None
-            }
             // ── Slash command detection ─────────────────────────────
             (KeyCode::Char('/'), KeyModifiers::NONE)
                 if self.textarea.lines().join("").is_empty() =>
@@ -180,11 +182,13 @@ impl InputPanel {
                 InputEvent::None
             }
             // ── History ─────────────────────────────────────────────
-            (KeyCode::Up, KeyModifiers::CONTROL) if !self.history.is_empty() => {
+            (KeyCode::Up, modifiers) if is_ctrl_modifier(modifiers) && !self.history.is_empty() => {
                 self.navigate_history(-1);
                 InputEvent::None
             }
-            (KeyCode::Down, KeyModifiers::CONTROL) if !self.history.is_empty() => {
+            (KeyCode::Down, modifiers)
+                if is_ctrl_modifier(modifiers) && !self.history.is_empty() =>
+            {
                 self.navigate_history(1);
                 InputEvent::None
             }
@@ -375,7 +379,7 @@ impl InputPanel {
 
         let prompt_area = Rect { x: inner.x, y: inner.y, width: PROMPT_WIDTH, height: 1 };
         let prompt = Paragraph::new(Line::from(Span::styled(
-            "›",
+            "› ",
             Style::default().fg(theme.user_fg).add_modifier(Modifier::BOLD),
         )));
         frame.render_widget(prompt, prompt_area);
@@ -469,6 +473,15 @@ fn composer_text_width(outer_width: u16) -> usize {
     usize::from(outer_width.saturating_sub(2).saturating_sub(PROMPT_WIDTH)).max(1)
 }
 
+fn is_ctrl_modifier(modifiers: KeyModifiers) -> bool {
+    modifiers.contains(KeyModifiers::CONTROL) && !modifiers.contains(KeyModifiers::ALT)
+}
+
+fn is_ctrl_char(key: KeyEvent, target: char) -> bool {
+    matches!(key.code, KeyCode::Char(c) if c.to_ascii_lowercase() == target)
+        && is_ctrl_modifier(key.modifiers)
+}
+
 fn wrap_lines(lines: &[String], width: usize) -> Vec<String> {
     lines.iter().flat_map(|line| wrap_line(line, width)).collect()
 }
@@ -479,27 +492,46 @@ fn wrap_line(line: &str, width: usize) -> Vec<String> {
     }
 
     let mut wrapped = Vec::new();
-    let mut current = String::new();
-    for ch in line.chars() {
-        if current.chars().count() >= width {
-            wrapped.push(current);
-            current = String::new();
+    let mut remaining = line;
+    while UnicodeWidthStr::width(remaining) > width {
+        let boundary = split_at_display_width(remaining, width);
+        let candidate = &remaining[..boundary];
+        if let Some(space_idx) = candidate.rfind(' ').filter(|idx| *idx > 0) {
+            wrapped.push(remaining[..space_idx].to_string());
+            remaining = remaining[space_idx + 1..].trim_start_matches(' ');
+        } else {
+            wrapped.push(candidate.to_string());
+            remaining = &remaining[boundary..];
         }
-        current.push(ch);
     }
-    wrapped.push(current);
+    wrapped.push(remaining.to_string());
     wrapped
+}
+
+fn split_at_display_width(input: &str, width: usize) -> usize {
+    let mut display_width = 0;
+    for (idx, ch) in input.char_indices() {
+        let next_width = display_width + UnicodeWidthChar::width(ch).unwrap_or(0);
+        if next_width > width {
+            return if idx == 0 { ch.len_utf8() } else { idx };
+        }
+        display_width = next_width;
+    }
+    input.len()
 }
 
 fn wrapped_cursor(lines: &[String], cursor: (usize, usize), width: usize) -> (usize, usize) {
     let (cursor_line, cursor_col) = cursor;
-    let rows_before = lines
-        .iter()
-        .take(cursor_line)
-        .map(|line| line.chars().count().max(1).div_ceil(width))
-        .sum::<usize>();
-    let cursor_row = rows_before + cursor_col / width;
-    let cursor_col = cursor_col % width;
+    let rows_before =
+        lines.iter().take(cursor_line).map(|line| wrap_line(line, width).len()).sum::<usize>();
+    let prefix = lines
+        .get(cursor_line)
+        .map(|line| line.chars().take(cursor_col).collect::<String>())
+        .unwrap_or_default();
+    let wrapped_prefix = wrap_line(&prefix, width);
+    let cursor_row = rows_before + wrapped_prefix.len().saturating_sub(1);
+    let cursor_col =
+        wrapped_prefix.last().map(|line| UnicodeWidthStr::width(line.as_str())).unwrap_or(0);
     (cursor_row, cursor_col)
 }
 
@@ -515,6 +547,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::layout::Position;
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -522,6 +555,10 @@ mod tests {
 
     fn ctrl_key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    fn ctrl_shift_key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL | KeyModifiers::SHIFT)
     }
 
     fn text(panel: &InputPanel) -> String {
@@ -595,13 +632,25 @@ mod tests {
         let first_input_row = rendered_row(&terminal, 1);
         let second_input_row = rendered_row(&terminal, 2);
         assert!(
-            first_input_row.contains("│›alpha"),
-            "first input row should keep text close to the prompt: {first_input_row:?}"
+            first_input_row.contains("│› alpha"),
+            "first input row should keep a compact two-column prompt: {first_input_row:?}"
         );
         assert!(
             second_input_row.contains("charlie") || second_input_row.contains("delta"),
             "long input should wrap onto the next row: {second_input_row:?}"
         );
+    }
+
+    #[test]
+    fn composer_cursor_uses_terminal_width_for_wide_characters() {
+        let mut panel = InputPanel::new();
+        set_text(&mut panel, "你a");
+        let backend = TestBackend::new(24, 6);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| panel.render(frame, frame.area(), true)).unwrap();
+
+        terminal.backend_mut().assert_cursor_position(Position::new(6, 1));
     }
 
     #[test]
@@ -706,6 +755,17 @@ mod tests {
         set_text(&mut panel, "delete all of this");
 
         panel.handle_key(ctrl_key(KeyCode::Char('a')));
+        panel.handle_key(key(KeyCode::Backspace));
+
+        assert_eq!(text(&panel), "");
+    }
+
+    #[test]
+    fn ctrl_a_with_extra_shift_modifier_still_clears_composer() {
+        let mut panel = InputPanel::new();
+        set_text(&mut panel, "delete all of this");
+
+        panel.handle_key(ctrl_shift_key(KeyCode::Char('A')));
         panel.handle_key(key(KeyCode::Backspace));
 
         assert_eq!(text(&panel), "");

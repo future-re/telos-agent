@@ -6,6 +6,14 @@
 
 Repository: <https://github.com/future-re/telos-agent>
 
+## 在线引导
+
+第一次使用 telos 时，推荐先打开在线引导页：
+
+<https://future-re.github.io/telos-agent/>
+
+该页面会引导你完成安装、配置 provider/API key，并启动 CLI 或 TUI。
+
 ## 快速开始
 
 ### CLI
@@ -151,17 +159,17 @@ async fn main() -> Result<(), AgentError> {
 
 ## 架构
 
-| 层 | 职责 |
-|---|---|
-| **Session** | `AgentSession` 持有消息历史、配置、文件读状态，暴露 `run_turn` / `run_turn_stream` |
-| **Runtime** | 单轮 turn 内的迭代循环、provider 调用、compaction、hook、工具编排、持久化 |
-| **Provider** | `ModelProvider` 统一封装不同 LLM 后端，流式输出统一为 `ProviderEvent` |
-| **Tool** | `Tool` trait + 执行器：参数校验、权限判定、审批、调用、结果格式化 |
-| **Prompt** | `PromptAssembly` 动态组装 system prompt，缓存静态 section |
-| **Permissions** | `PermissionEngine` 规则引擎 + bash AST 分析 + `ApprovalHandler` 审批 |
-| **MCP** | `McpManager` + `McpToolBridge`，stdio JSON-RPC 接入 MCP 生态 |
-| **Fork** | `Synapse` + `ForkLens`，轻量级上下文分叉，多视角并发执行 |
-| **Storage** | `Storage` trait → JSONL / Noop 后端，含回滚与恢复 |
+| 层              | 职责                                                                               |
+| --------------- | ---------------------------------------------------------------------------------- |
+| **Session**     | `AgentSession` 持有消息历史、配置、文件读状态，暴露 `run_turn` / `run_turn_stream` |
+| **Runtime**     | 单轮 turn 内的迭代循环、provider 调用、compaction、hook、工具编排、持久化          |
+| **Provider**    | `ModelProvider` 统一封装不同 LLM 后端，流式输出统一为 `ProviderEvent`              |
+| **Tool**        | `Tool` trait + 执行器：参数校验、权限判定、审批、调用、结果格式化                  |
+| **Prompt**      | `PromptAssembly` 动态组装 system prompt，缓存静态 section                          |
+| **Permissions** | `PermissionEngine` 规则引擎 + bash AST 分析 + `ApprovalHandler` 审批               |
+| **MCP**         | `McpManager` + `McpToolBridge`，stdio JSON-RPC 接入 MCP 生态                       |
+| **Fork**        | `Synapse` + `ForkLens`，轻量级上下文分叉，多视角并发执行                           |
+| **Storage**     | `Storage` trait → JSONL / Noop 后端，含回滚与恢复                                  |
 
 ## 配置
 

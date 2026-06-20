@@ -53,9 +53,9 @@ pub struct TuiLayoutSettings {
 impl TuiLayoutSettings {
     pub fn from_density(density: TuiDensity) -> Self {
         match density {
-            TuiDensity::Compact => Self { input_height: 3, tool_activity_max_lines: 6 },
-            TuiDensity::Default => Self { input_height: 4, tool_activity_max_lines: 10 },
-            TuiDensity::Spacious => Self { input_height: 7, tool_activity_max_lines: 14 },
+            TuiDensity::Compact => Self { input_height: 4, tool_activity_max_lines: 6 },
+            TuiDensity::Default => Self { input_height: 5, tool_activity_max_lines: 10 },
+            TuiDensity::Spacious => Self { input_height: 8, tool_activity_max_lines: 14 },
         }
     }
 }
@@ -464,6 +464,7 @@ impl App {
 mod tests {
     use super::*;
     use crate::config::TuiDensity;
+    use crate::tui::history_cell::SeparatorCell;
     use crossterm::event::{
         KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
@@ -510,15 +511,15 @@ mod tests {
     fn layout_settings_map_density_presets() {
         assert_eq!(
             TuiLayoutSettings::from_density(TuiDensity::Compact),
-            TuiLayoutSettings { input_height: 3, tool_activity_max_lines: 6 }
+            TuiLayoutSettings { input_height: 4, tool_activity_max_lines: 6 }
         );
         assert_eq!(
             TuiLayoutSettings::from_density(TuiDensity::Default),
-            TuiLayoutSettings { input_height: 4, tool_activity_max_lines: 10 }
+            TuiLayoutSettings { input_height: 5, tool_activity_max_lines: 10 }
         );
         assert_eq!(
             TuiLayoutSettings::from_density(TuiDensity::Spacious),
-            TuiLayoutSettings { input_height: 7, tool_activity_max_lines: 14 }
+            TuiLayoutSettings { input_height: 8, tool_activity_max_lines: 14 }
         );
     }
 
@@ -527,7 +528,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let mut app = test_app(&temp);
 
-        assert_eq!(app.input_panel_height(80), 4);
+        assert_eq!(app.input_panel_height(80), 5);
 
         app.input.restore_text("line one\nline two\nline three".into());
 
@@ -618,6 +619,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(app.tool_activity.height(80), before);
+    }
+
+    #[tokio::test]
+    async fn ctrl_l_with_extra_shift_modifier_clears_chat() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.chat.push_cell(Box::new(SeparatorCell));
+
+        app.handle_event(Event::Key(KeyEvent::new(
+            KeyCode::Char('L'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        )))
+        .await
+        .unwrap();
+
+        assert_eq!(app.chat.len(), 0);
     }
 
     #[tokio::test]

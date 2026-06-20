@@ -1,5 +1,7 @@
 use std::sync::atomic::Ordering;
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
 use crate::tui::event::{AppEvent, Event};
 use crate::tui::history_cell::{ErrorCell, SeparatorCell};
 use crate::tui::input_panel::InputMode;
@@ -12,38 +14,34 @@ impl App {
     pub async fn handle_event(&mut self, event: Event) -> anyhow::Result<()> {
         match event {
             Event::Key(key) => {
-                use crossterm::event::{KeyCode, KeyModifiers};
-
                 // Global shortcuts.
-                match (key.code, key.modifiers) {
-                    (KeyCode::Char('d'), KeyModifiers::CONTROL) if self.input.is_empty() => {
-                        self.should_quit = true;
-                        return Ok(());
-                    }
-                    (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                        self.cancellation.cancel();
-                        self.turn_active = false;
-                        self.turn_started = None;
-                        self.status_text = self.base_status.clone();
-                        return Ok(());
-                    }
-                    (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
-                        self.chat.clear();
-                        self.tool_activity.clear();
-                        self.chat.scroll_to_bottom();
-                        return Ok(());
-                    }
-                    (KeyCode::BackTab, _) => {
-                        let on = !self.auto_mode.load(Ordering::Relaxed);
-                        self.auto_mode.store(on, Ordering::Relaxed);
-                        self.update_auto_mode_status();
-                        return Ok(());
-                    }
-                    (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                        self.new_session();
-                        return Ok(());
-                    }
-                    _ => {}
+                if is_ctrl_char(key, 'd') && self.input.is_empty() {
+                    self.should_quit = true;
+                    return Ok(());
+                }
+                if is_ctrl_char(key, 'c') {
+                    self.cancellation.cancel();
+                    self.turn_active = false;
+                    self.turn_started = None;
+                    self.status_text = self.base_status.clone();
+                    return Ok(());
+                }
+                if is_ctrl_char(key, 'l') {
+                    self.chat.clear();
+                    self.tool_activity.clear();
+                    self.chat.scroll_to_bottom();
+                    return Ok(());
+                }
+                if is_ctrl_char(key, 'n') {
+                    self.new_session();
+                    return Ok(());
+                }
+
+                if key.code == KeyCode::BackTab {
+                    let on = !self.auto_mode.load(Ordering::Relaxed);
+                    self.auto_mode.store(on, Ordering::Relaxed);
+                    self.update_auto_mode_status();
+                    return Ok(());
                 }
 
                 if self.inline_approval.is_some() {
@@ -101,7 +99,6 @@ impl App {
                             return Ok(());
                         }
 
-                        // Scroll keys
                         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                         match (key.code, ctrl) {
                             (KeyCode::PageUp, _) => {
@@ -155,13 +152,10 @@ impl App {
                             _ => {}
                         }
 
-                        // Input handling with InputEvent
                         let input_event = self.input.handle_key(key);
                         self.handle_input_event(input_event).await;
                     }
                     Mode::Streaming => {
-                        // During streaming, navigation keys keep controlling the transcript and
-                        // tool activity; other keys keep the composer editable for drafts.
                         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                         match (key.code, ctrl) {
                             (KeyCode::PageUp, _) => {
@@ -245,7 +239,6 @@ impl App {
                 while let Ok(pending) = self.approval_rx.try_recv() {
                     self.enqueue_inline_approval(pending);
                 }
-                // ── Process internal event bus ────────────────────────
                 while let Ok(app_event) = self.app_event_rx.try_recv() {
                     match app_event {
                         AppEvent::StatusChanged(text) => {
@@ -278,11 +271,17 @@ impl App {
                     _ => {}
                 }
             }
-            // Turn, TurnComplete, and SessionError are only received via
-            // turn_rx.try_recv() inside the Tick handler above and never
-            // arrive at the outer match from the main event loop.
             _ => {}
         }
         Ok(())
     }
+}
+
+fn is_ctrl_modifier(modifiers: KeyModifiers) -> bool {
+    modifiers.contains(KeyModifiers::CONTROL) && !modifiers.contains(KeyModifiers::ALT)
+}
+
+fn is_ctrl_char(key: KeyEvent, target: char) -> bool {
+    matches!(key.code, KeyCode::Char(c) if c.to_ascii_lowercase() == target)
+        && is_ctrl_modifier(key.modifiers)
 }

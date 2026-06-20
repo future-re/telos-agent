@@ -728,4 +728,40 @@ mod tests {
         assert_eq!(app.inline_approval.as_ref().unwrap().request.arguments["command"], "first");
         assert_eq!(app.inline_approval_queue.len(), 1);
     }
+
+    #[tokio::test]
+    async fn approval_channel_tick_uses_inline_state_instead_of_overlay() {
+        let config = telos_agent::AgentConfig::default();
+        let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
+        let tools = telos_agent::ToolRegistry::new();
+        let temp = tempfile::tempdir().unwrap();
+        let memory = Arc::new(Mutex::new(MemoryStore::new(temp.path().join("memory"))));
+        let mut app = App::new(
+            config,
+            provider,
+            tools,
+            "telos".into(),
+            Some(temp.path()),
+            temp.path(),
+            false,
+            memory,
+            ModelSwitchConfig::default(),
+        )
+        .unwrap();
+        let (tx, _rx) = oneshot::channel();
+        let (approval_tx, approval_rx) = tokio::sync::mpsc::unbounded_channel();
+        approval_tx
+            .send(PendingApproval {
+                request: approval_request("echo inline"),
+                respond: Some(tx),
+            })
+            .unwrap();
+        app.approval_rx = approval_rx;
+
+        app.handle_event(Event::Tick).await.unwrap();
+
+        assert!(app.inline_approval.is_some());
+        assert!(app.overlays.is_empty());
+        assert_ne!(app.mode, Mode::Approving);
+    }
 }

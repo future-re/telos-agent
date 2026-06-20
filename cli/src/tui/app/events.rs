@@ -222,8 +222,7 @@ impl App {
                     }
                 }
                 while let Ok(pending) = self.approval_rx.try_recv() {
-                    self.overlays.push(Box::new(ApprovalOverlay::new(pending)));
-                    self.mode = Mode::Approving;
+                    self.enqueue_inline_approval(pending);
                 }
                 // ── Process internal event bus ────────────────────────
                 while let Ok(app_event) = self.app_event_rx.try_recv() {

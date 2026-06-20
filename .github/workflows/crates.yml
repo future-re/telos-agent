@@ -1,0 +1,80 @@
+name: Crates
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+
+jobs:
+  publish:
+    name: Publish crates.io packages
+    runs-on: ubuntu-latest
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/telos-cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Read crate versions
+        id: versions
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib
+          from pathlib import Path
+
+          core = tomllib.loads(Path("core/Cargo.toml").read_text())
+          cli = tomllib.loads(Path("cli/Cargo.toml").read_text())
+          print(f"core={core['package']['version']}")
+          print(f"cli={cli['package']['version']}")
+          PY
+
+      - name: Verify publish packages
+        run: |
+          cargo publish -p telos_agent --locked --dry-run
+          cargo publish -p telos-cli --locked --dry-run
+
+      - name: Publish telos_agent
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ steps.versions.outputs.core }}
+        run: |
+          if python3 .github/workflows/scripts/crate-published.py telos_agent "$VERSION"; then
+            echo "telos_agent $VERSION is already published; skipping"
+          else
+            cargo publish -p telos_agent --locked --token "$CARGO_REGISTRY_TOKEN"
+          fi
+
+      - name: Wait for telos_agent index
+        env:
+          VERSION: ${{ steps.versions.outputs.core }}
+        run: |
+          for attempt in {1..30}; do
+            if python3 .github/workflows/scripts/crate-published.py telos_agent "$VERSION"; then
+              echo "telos_agent $VERSION is visible on crates.io"
+              exit 0
+            fi
+            echo "Waiting for telos_agent $VERSION to appear on crates.io ($attempt/30)"
+            sleep 10
+          done
+          echo "telos_agent $VERSION did not appear on crates.io in time" >&2
+          exit 1
+
+      - name: Publish telos-cli
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ steps.versions.outputs.cli }}
+        run: |
+          if python3 .github/workflows/scripts/crate-published.py telos-cli "$VERSION"; then
+            echo "telos-cli $VERSION is already published; skipping"
+          else
+            cargo publish -p telos-cli --locked --token "$CARGO_REGISTRY_TOKEN"
+          fi

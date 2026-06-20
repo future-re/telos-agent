@@ -16,11 +16,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            cflags: "-D_DEFAULT_SOURCE -D_BSD_SOURCE"
+          - os: macos-latest
+            cflags: ""
+          - os: windows-latest
+            cflags: ""
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: PyO3/maturin-action@v1
+        env:
+          CFLAGS: ${{ matrix.cflags }}
         with:
           command: build
           args: --release --out dist --compatibility pypi

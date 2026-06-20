@@ -51,6 +51,10 @@ impl App {
     pub(super) async fn handle_input_event(&mut self, event: InputEvent) {
         match event {
             InputEvent::Submit(prompt) => {
+                if self.turn_active {
+                    self.input.restore_text(prompt);
+                    return;
+                }
                 self.send_prompt(prompt).await;
             }
             InputEvent::SlashCommand(cmd) => {

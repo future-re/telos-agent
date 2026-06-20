@@ -310,6 +310,10 @@ impl InputPanel {
         self.textarea.insert_str(text);
     }
 
+    pub fn restore_text(&mut self, text: String) {
+        self.set_text(&text);
+    }
+
     pub fn render(&self, frame: &mut Frame, area: Rect, active: bool) {
         let theme = Theme::default();
         let border_style = if active {

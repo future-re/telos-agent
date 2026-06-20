@@ -156,19 +156,33 @@ impl App {
                         self.handle_input_event(input_event).await;
                     }
                     Mode::Streaming => {
-                        // During streaming, only scroll keys are handled.
+                        // During streaming, navigation keys keep controlling the transcript and
+                        // tool activity; other keys keep the composer editable for drafts.
                         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                         match (key.code, ctrl) {
-                            (KeyCode::PageUp, _) => self.chat.scroll_up(10),
-                            (KeyCode::PageDown, _) => self.chat.scroll_down(10),
-                            (KeyCode::Up, false) => self.chat.scroll_up(1),
-                            (KeyCode::Down, false) => self.chat.scroll_down(1),
+                            (KeyCode::PageUp, _) => {
+                                self.chat.scroll_up(10);
+                                return Ok(());
+                            }
+                            (KeyCode::PageDown, _) => {
+                                self.chat.scroll_down(10);
+                                return Ok(());
+                            }
+                            (KeyCode::Up, false) => {
+                                self.chat.scroll_up(1);
+                                return Ok(());
+                            }
+                            (KeyCode::Down, false) => {
+                                self.chat.scroll_down(1);
+                                return Ok(());
+                            }
                             (KeyCode::Tab, _) => {
                                 if self.tool_activity.is_empty() {
                                     self.chat.select_next_tool();
                                 } else {
                                     self.tool_activity.select_next();
                                 }
+                                return Ok(());
                             }
                             (KeyCode::BackTab, _) => {
                                 if self.tool_activity.is_empty() {
@@ -176,15 +190,18 @@ impl App {
                                 } else {
                                     self.tool_activity.select_prev();
                                 }
+                                return Ok(());
                             }
-                            (KeyCode::Enter, _)
-                            | (KeyCode::Char(' '), _)
-                            | (KeyCode::Char('t'), true) => {
+                            (KeyCode::Char(' '), _) | (KeyCode::Char('t'), true) => {
                                 let _ = self.tool_activity.toggle_selected()
                                     || self.chat.toggle_selected_tool();
+                                return Ok(());
                             }
                             _ => {}
                         }
+
+                        let input_event = self.input.handle_key(key);
+                        self.handle_input_event(input_event).await;
                     }
                 }
             }

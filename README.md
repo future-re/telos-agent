@@ -95,9 +95,15 @@ async fn main() -> Result<(), AgentError> {
 
 ### Provider
 - 统一的 `ModelProvider` trait，内置 DeepSeek、双模型 `RoutedProvider`、Mock 实现
-- DeepSeek 走 OpenAI-compatible Chat Completions / SSE streaming，支持指数退避重试
-- `ModelHint` 将请求标记为 thinking、execution、recovery 或 summarization，路由 provider 可据此选择模型
+- DeepSeek 使用原生 Chat Completions / SSE streaming 请求层，支持 DeepSeek `thinking`、准确 usage 明细和指数退避重试
+- `ModelHint` 将请求标记为 thinking、execution、recovery 或 summarization；DeepSeek 仅在 `Thinking` / `Recovery` 请求中开启 thinking，并把 `reasoning_content` 作为 thinking 输出流式展示
+- Provider 返回的 `usage` 是准确用量语义，包含输入/输出 token、总 token、prompt cache hit/miss 和 reasoning token（如 API 返回）
 - `ErasedProvider` 辅助类型擦除
+
+### DeepSeek API 支持范围
+- 已支持：Chat Completions、SSE streaming、tool calls、JSON Output、Beta Prefix Completion、Beta FIM Completion、模型列表、余额查询、`thinking`、`reasoning_content`、`stream_options.include_usage`、usage 明细、400/401/402/422/429/500/503 错误语义和 retry 判断
+- Context Caching 在 DeepSeek API 侧默认生效；当前通过 provider usage 暴露 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`，不额外伪造管理接口
+- 当前中文 API 文档未看到 Batch 端点，因此未封装 Batch
 
 ### 工具系统
 - `Tool` trait + `ToolRegistry`，支持别名、JSON Schema 自动校验

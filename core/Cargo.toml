@@ -11,9 +11,6 @@ categories = ["development-tools", "api-bindings", "asynchronous"]
 rust-version = "1.96"
 
 [dependencies]
-async-openai = { version = "0.41", default-features = true, features = [
-    "chat-completion",
-] }
 async-stream = "0.3"
 async-trait = "0.1"
 base64 = "0.22"
@@ -22,7 +19,7 @@ futures-util = "0.3"
 glob = "0.3"
 jsonschema = "0.29"
 libc = "0.2"
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

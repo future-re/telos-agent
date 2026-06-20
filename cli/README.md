@@ -124,6 +124,18 @@ fast = "deepseek-v4-flash"
 
 Without explicit model settings, DeepSeek defaults to `deepseek-v4-pro` for thinking and `deepseek-v4-flash` for fast execution.
 
+DeepSeek support is implemented with a native request/response layer. Requests routed with `ModelHint::Thinking` or `ModelHint::Recovery` enable DeepSeek `thinking`; execution and summarization requests do not. When DeepSeek returns `reasoning_content`, the TUI shows it as thinking output before the final answer.
+
+Provider `usage` is treated as authoritative after it arrives. The status bar may show estimated budget progress while a turn is running, but the turn summary uses DeepSeek-reported prompt/completion/total tokens plus prompt cache hit/miss and reasoning token details when available.
+
+The core DeepSeek provider also exposes JSON Output, Beta Prefix Completion, Beta FIM Completion, model listing, and balance query helpers for library callers. Context caching is automatic on DeepSeek's side and is surfaced through usage cache hit/miss fields. Batch is not wrapped because it is not present in the current Chinese API reference.
+
+Real DeepSeek smoke tests only read `DEEPSEEK_TEST_KEY`:
+
+```bash
+DEEPSEEK_TEST_KEY=sk-... cargo test -p telos_agent provider::test --lib -- --nocapture
+```
+
 ### CodeIndex
 
 The CLI registers `CodeSearch`, `CodeContext`, and `CodeIndexRefresh` by default. The index is stored under `.telos/index/code_index.json` and is created lazily on first search or explicitly refreshed with `CodeIndexRefresh`.

@@ -20,6 +20,7 @@ mod file_write;
 mod glob;
 mod grep;
 mod memory;
+mod powershell;
 mod shared;
 mod shell;
 mod skill;
@@ -43,6 +44,7 @@ pub use memory::{
     MemoryEditTool, MemoryGrepTool, MemoryMaintenanceTool, MemoryReadTool, MemoryStatusTool,
     MemoryWriteTool,
 };
+pub use powershell::PowerShellTool;
 pub use shell::ShellTool;
 pub use skill::SkillTool;
 pub use tasks::{TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool};

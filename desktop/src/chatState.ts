@@ -60,7 +60,7 @@ export function reduceTelosEvent(state: ChatState, event: TelosEvent): ChatState
     case "tool_call":
       return {
         ...state,
-        status: event.detail || event.toolName || "running tool",
+        status: event.detail || event.toolName || "运行工具",
         tools: upsertTool(state.tools, {
           id: event.toolCallId ?? `tool-${state.tools.length + 1}`,
           name: event.toolName ?? "Tool",

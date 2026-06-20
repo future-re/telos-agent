@@ -4279,6 +4279,7 @@ dependencies = [
  "ratatui-markdown",
  "reqwest 0.12.28",
  "rpassword",
+ "semver",
  "serde",
  "serde_json",
  "telos_agent",

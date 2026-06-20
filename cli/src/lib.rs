@@ -12,6 +12,7 @@ pub mod runner;
 #[path = "interaction/terminal/mod.rs"]
 pub mod terminal;
 pub mod tui;
+pub mod update_check;
 
 #[path = "interaction/approval.rs"]
 pub mod approval;
@@ -33,6 +34,9 @@ use cli::{Cli, Command};
 /// Entry point shared between the binary and integration tests.
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+    if !matches!(cli.command, Some(Command::Completion { .. })) {
+        update_check::maybe_print_update_notice(env!("CARGO_PKG_VERSION"), cli.shared.quiet).await;
+    }
 
     // ── Load and merge config layers ──────────────────────────────────────
     let user_config = config::load_user_config(cli.shared.config.as_deref())?;

@@ -1,18 +1,24 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 
+fn telos_command() -> Command {
+    let mut cmd = Command::cargo_bin("telos").unwrap();
+    cmd.env("TELOS_DISABLE_UPDATE_CHECK", "1");
+    cmd
+}
+
 // ── Task 15: TUI smoke tests ────────────────────────────────────────────────
 
 #[test]
 fn telos_help_still_works() {
-    let mut cmd = Command::cargo_bin("telos").unwrap();
+    let mut cmd = telos_command();
     cmd.arg("--help");
     cmd.assert().success().stdout(predicates::str::contains("Terminal interface for telos-agent"));
 }
 
 #[test]
 fn telos_completion_subcommand_exists() {
-    let mut cmd = Command::cargo_bin("telos").unwrap();
+    let mut cmd = telos_command();
     cmd.arg("completion").arg("bash");
     cmd.assert().success();
 }
@@ -34,14 +40,14 @@ fn new_dependencies_compile() {
 
 #[test]
 fn runs_single_mock_prompt() {
-    let mut cmd = Command::cargo_bin("telos").unwrap();
+    let mut cmd = telos_command();
     cmd.args(["--provider", "mock", "hello"]);
     cmd.assert().success().stdout(predicate::str::contains("Mock provider"));
 }
 
 #[test]
 fn completion_subcommand_works() {
-    let mut cmd = Command::cargo_bin("telos").unwrap();
+    let mut cmd = telos_command();
     cmd.args(["completion", "bash"]);
     cmd.assert().success();
 }
@@ -242,7 +248,7 @@ fn no_provider_non_interactive_shows_error() {
     let config_path = dir.path().join("nonexistent.toml");
     // Use a temp config path to avoid picking up the user's real config
     // from ~/.config/telos/config.toml.
-    let mut cmd = Command::cargo_bin("telos").unwrap();
+    let mut cmd = telos_command();
     cmd.arg("hello").arg("--config").arg(config_path);
     cmd.assert().failure().stderr(predicates::str::contains("No provider configured"));
 }
@@ -263,7 +269,7 @@ model = "deepseek-v4-flash"
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("telos").unwrap();
+    let mut cmd = telos_command();
     cmd.args(["--config", config_path.to_str().unwrap(), "--api-key", "sk-test", "hello"]);
     // Should NOT print the "No provider configured" error — it should
     // attempt to use DeepSeek (and fail with an API error, not a config error).

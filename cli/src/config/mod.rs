@@ -16,7 +16,7 @@ pub use types::{
 };
 
 #[cfg(test)]
-use provider::provider_from_config;
+use provider::{DeepSeekModelSelection, provider_from_config, resolve_deepseek_model_selection};
 
 #[cfg(test)]
 mod tests {
@@ -285,5 +285,42 @@ density = "cozy"
         let result = build_provider(&options, &config).unwrap();
         // --model overrides both → same model → plain DeepSeek
         assert!(matches!(result, ResolvedProvider::DeepSeek(_)));
+    }
+
+    #[test]
+    fn model_auto_selects_routed_deepseek_models() {
+        let options = SharedOptions { model: Some("auto".into()), ..Default::default() };
+        let config = FileConfig {
+            agent: Some(AgentSection { provider: Some("deepseek".into()), ..Default::default() }),
+            ..FileConfig::default()
+        };
+
+        let selection = resolve_deepseek_model_selection(&options, &config);
+
+        assert_eq!(
+            selection,
+            DeepSeekModelSelection::Routed {
+                thinking: "deepseek-v4-pro".into(),
+                fast: "deepseek-v4-flash".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn model_pro_selects_single_pro_model() {
+        let options = SharedOptions {
+            model: Some("pro".into()),
+            thinking_model: Some("deepseek-v4-flash".into()),
+            fast_model: Some("deepseek-v4-flash".into()),
+            ..Default::default()
+        };
+        let config = FileConfig {
+            agent: Some(AgentSection { provider: Some("deepseek".into()), ..Default::default() }),
+            ..FileConfig::default()
+        };
+
+        let selection = resolve_deepseek_model_selection(&options, &config);
+
+        assert_eq!(selection, DeepSeekModelSelection::Single("deepseek-v4-pro".into()));
     }
 }

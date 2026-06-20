@@ -12,10 +12,22 @@ use super::FileConfig;
 use crate::cli::{ProviderArg, SharedOptions};
 use crate::onboarding::OnboardingResult;
 
+const DEEPSEEK_AUTO_MODE: &str = "auto";
+const DEEPSEEK_PRO_ALIAS: &str = "pro";
+const DEEPSEEK_FLASH_ALIAS: &str = "flash";
+const DEEPSEEK_PRO_MODEL: &str = "deepseek-v4-pro";
+const DEEPSEEK_FLASH_MODEL: &str = "deepseek-v4-flash";
+
 pub enum ResolvedProvider {
     DeepSeek(DeepSeekProvider),
     Routed(RoutedProvider),
     Mock(MockProvider),
+}
+
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
+pub(super) enum DeepSeekModelSelection {
+    Routed { thinking: String, fast: String },
+    Single(String),
 }
 
 pub fn build_agent_config(
@@ -61,36 +73,69 @@ pub fn build_provider(options: &SharedOptions, config: &FileConfig) -> Result<Re
 
     match provider {
         ProviderArg::Deepseek => {
-            let explicit_model =
-                options.model.clone().or_else(|| config.agent.as_ref()?.model.clone());
-
-            let thinking_model = options
-                .thinking_model
-                .clone()
-                .or_else(|| config.agent.as_ref()?.models.as_ref()?.thinking.clone())
-                .or_else(|| explicit_model.clone())
-                .unwrap_or_else(|| "deepseek-v4-pro".into());
-
-            let fast_model = options
-                .fast_model
-                .clone()
-                .or_else(|| config.agent.as_ref()?.models.as_ref()?.fast.clone())
-                .or(explicit_model)
-                .unwrap_or_else(|| "deepseek-v4-flash".into());
-
             let api_key =
                 resolve_api_key(provider, options.api_key.clone(), config_env, "DEEPSEEK_API_KEY")?;
 
-            if thinking_model != fast_model {
-                let routed_config = RoutedModelConfig::dual(api_key, thinking_model, fast_model);
-                Ok(ResolvedProvider::Routed(RoutedProvider::new(routed_config)))
-            } else {
-                let cfg = DeepSeekConfig::new(api_key, thinking_model);
-                Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
+            match resolve_deepseek_model_selection(options, config) {
+                DeepSeekModelSelection::Routed { thinking, fast } if thinking != fast => {
+                    let routed_config = RoutedModelConfig::dual(api_key, thinking, fast);
+                    Ok(ResolvedProvider::Routed(RoutedProvider::new(routed_config)))
+                }
+                DeepSeekModelSelection::Routed { thinking, .. } => {
+                    let cfg = DeepSeekConfig::new(api_key, thinking);
+                    Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
+                }
+                DeepSeekModelSelection::Single(model) => {
+                    let cfg = DeepSeekConfig::new(api_key, model);
+                    Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
+                }
             }
         }
         ProviderArg::Mock => Ok(ResolvedProvider::Mock(MockProvider::new(vec![]))),
     }
+}
+
+pub(super) fn resolve_deepseek_model_selection(
+    options: &SharedOptions,
+    config: &FileConfig,
+) -> DeepSeekModelSelection {
+    let explicit_model = options.model.clone().or_else(|| config.agent.as_ref()?.model.clone());
+
+    match explicit_model.as_deref().map(str::trim).filter(|model| !model.is_empty()) {
+        Some(model) if model.eq_ignore_ascii_case(DEEPSEEK_AUTO_MODE) => {
+            DeepSeekModelSelection::Routed {
+                thinking: configured_thinking_model(options, config),
+                fast: configured_fast_model(options, config),
+            }
+        }
+        Some(model) if model.eq_ignore_ascii_case(DEEPSEEK_PRO_ALIAS) => {
+            DeepSeekModelSelection::Single(DEEPSEEK_PRO_MODEL.into())
+        }
+        Some(model) if model.eq_ignore_ascii_case(DEEPSEEK_FLASH_ALIAS) => {
+            DeepSeekModelSelection::Single(DEEPSEEK_FLASH_MODEL.into())
+        }
+        Some(model) => DeepSeekModelSelection::Single(model.to_string()),
+        None => DeepSeekModelSelection::Routed {
+            thinking: configured_thinking_model(options, config),
+            fast: configured_fast_model(options, config),
+        },
+    }
+}
+
+fn configured_thinking_model(options: &SharedOptions, config: &FileConfig) -> String {
+    options
+        .thinking_model
+        .clone()
+        .or_else(|| config.agent.as_ref()?.models.as_ref()?.thinking.clone())
+        .unwrap_or_else(|| DEEPSEEK_PRO_MODEL.into())
+}
+
+fn configured_fast_model(options: &SharedOptions, config: &FileConfig) -> String {
+    options
+        .fast_model
+        .clone()
+        .or_else(|| config.agent.as_ref()?.models.as_ref()?.fast.clone())
+        .unwrap_or_else(|| DEEPSEEK_FLASH_MODEL.into())
 }
 
 /// Parse a provider string from FileConfig into a ProviderArg.

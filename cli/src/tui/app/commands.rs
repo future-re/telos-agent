@@ -13,6 +13,15 @@ use super::background::BackgroundCommand;
 use super::config::save_deepseek_api_key;
 use super::{App, MODEL_OPTIONS, Mode};
 
+const DEEPSEEK_PRO_MODEL: &str = "deepseek-v4-pro";
+const DEEPSEEK_FLASH_MODEL: &str = "deepseek-v4-flash";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DeepSeekSwitch {
+    Auto { label: String },
+    Single { model: String, label: String },
+}
+
 impl App {
     pub(super) async fn handle_input_event(&mut self, event: InputEvent) {
         match event {
@@ -233,14 +242,13 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
     fn switch_to_default_deepseek_provider(&mut self, key: &str) {
         let config = telos_agent::RoutedModelConfig::dual(
             key.to_string(),
-            "deepseek-v4-pro".to_string(),
-            "deepseek-v4-flash".to_string(),
+            DEEPSEEK_PRO_MODEL.to_string(),
+            DEEPSEEK_FLASH_MODEL.to_string(),
         );
         let provider = Arc::new(telos_agent::RoutedProvider::new(config));
-        let _ = self.turn_tx.send(BackgroundCommand::SetProvider {
-            provider,
-            label: "deepseek-v4-pro/deepseek-v4-flash".to_string(),
-        });
+        let _ = self
+            .turn_tx
+            .send(BackgroundCommand::SetProvider { provider, label: "auto".to_string() });
     }
 
     fn switch_model(&mut self, model: &str) {
@@ -250,18 +258,76 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
             }));
             return;
         };
-        let provider = Arc::new(telos_agent::DeepSeekProvider::new(
-            telos_agent::DeepSeekConfig::new(api_key, model.to_string()),
-        ));
-        let _ = self
-            .turn_tx
-            .send(BackgroundCommand::SetProvider { provider, label: model.to_string() });
-        self.status_text = format!("telos · model {model}");
+
+        let selected = deepseek_switch_for_model_choice(model);
+        let label = match selected {
+            DeepSeekSwitch::Auto { ref label } => {
+                let config = telos_agent::RoutedModelConfig::dual(
+                    api_key,
+                    DEEPSEEK_PRO_MODEL.to_string(),
+                    DEEPSEEK_FLASH_MODEL.to_string(),
+                );
+                let provider = Arc::new(telos_agent::RoutedProvider::new(config));
+                let _ = self
+                    .turn_tx
+                    .send(BackgroundCommand::SetProvider { provider, label: label.clone() });
+                label.clone()
+            }
+            DeepSeekSwitch::Single { ref model, ref label } => {
+                let provider = Arc::new(telos_agent::DeepSeekProvider::new(
+                    telos_agent::DeepSeekConfig::new(api_key, model.clone()),
+                ));
+                let _ = self
+                    .turn_tx
+                    .send(BackgroundCommand::SetProvider { provider, label: label.clone() });
+                label.clone()
+            }
+        };
+
+        self.status_text = format!("telos · model {label}");
         self.base_status = self.status_text.clone();
-        self.chat.push_cell(Box::new(UserCell { content: format!("/model {model}") }));
+        self.chat.push_cell(Box::new(UserCell { content: format!("/model {label}") }));
         self.chat.push_cell(Box::new(AgentCell {
-            buffer: format!("Switched model to: {model}"),
+            buffer: format!("Switched model to: {label}"),
             is_streaming: false,
         }));
+    }
+}
+
+fn deepseek_switch_for_model_choice(choice: &str) -> DeepSeekSwitch {
+    let choice = choice.trim();
+    if choice.eq_ignore_ascii_case("auto") {
+        return DeepSeekSwitch::Auto { label: "auto".into() };
+    }
+    if choice.eq_ignore_ascii_case("pro") {
+        return DeepSeekSwitch::Single { model: DEEPSEEK_PRO_MODEL.into(), label: "pro".into() };
+    }
+    if choice.eq_ignore_ascii_case("flash") {
+        return DeepSeekSwitch::Single {
+            model: DEEPSEEK_FLASH_MODEL.into(),
+            label: "flash".into(),
+        };
+    }
+    DeepSeekSwitch::Single { model: choice.to_string(), label: choice.to_string() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_choice_auto_keeps_routed_mode() {
+        assert_eq!(
+            deepseek_switch_for_model_choice("auto"),
+            DeepSeekSwitch::Auto { label: "auto".into() }
+        );
+    }
+
+    #[test]
+    fn model_choice_pro_uses_full_pro_model() {
+        assert_eq!(
+            deepseek_switch_for_model_choice("pro"),
+            DeepSeekSwitch::Single { model: DEEPSEEK_PRO_MODEL.into(), label: "pro".into() }
+        );
     }
 }

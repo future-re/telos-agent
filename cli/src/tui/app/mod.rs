@@ -35,7 +35,7 @@ use tasks::task_dir_for_root;
 use tools::{ToolInfo, collect_tool_infos};
 use turn_summary::{format_duration_ms, format_turn_tokens};
 
-const MODEL_OPTIONS: [&str; 2] = ["deepseek-v4-flash", "deepseek-v4-pro"];
+const MODEL_OPTIONS: [&str; 3] = ["auto", "pro", "flash"];
 
 #[derive(Debug, Clone, Default)]
 pub struct ModelSwitchConfig {

@@ -10,13 +10,9 @@ export default defineConfig({
       description: 'Rust agent runtime for tool execution, CLI workflows, MCP, plugins, and product clients.',
       favicon: '/telos-agent/favicon.svg',
       customCss: ['./src/styles/global.css'],
-      social: [
-        {
-          icon: 'github',
-          label: 'GitHub',
-          href: 'https://github.com/future-re/telos-agent',
-        },
-      ],
+      social: {
+        github: 'https://github.com/future-re/telos-agent',
+      },
       sidebar: [
         {
           label: 'Start',

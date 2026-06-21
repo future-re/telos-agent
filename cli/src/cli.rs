@@ -35,6 +35,8 @@ pub enum Command {
         #[clap(value_enum)]
         shell: clap_complete::Shell,
     },
+    /// JSON-line daemon mode: read commands from stdin, emit events on stdout.
+    Serve,
 }
 
 #[derive(Debug, Parser, Clone, Default)]

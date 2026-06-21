@@ -146,6 +146,8 @@ pub mod storage;
 pub mod subagent;
 /// Persistent task tracking.
 pub mod tasks;
+/// Multi-agent team collaboration.
+pub mod team;
 /// Token-counting helpers.
 pub mod tokens;
 /// Tool trait, registry, validation, and execution context.
@@ -216,6 +218,10 @@ pub use subagent::{
 };
 // Tasks — task management system with tracking, persistence, and tool integration.
 pub use tasks::{Task, TaskManager, TaskStatus};
+pub use team::{
+    TeamConfig, TeamMember, cleanup_team, has_active_members, lead_agent_id, load_team_config,
+    save_team_config, team_config_path, team_tasks_dir, teams_root,
+};
 // MCP — stdio-based Model Context Protocol client + manager + bridge.
 pub use mcp::{McpClient, McpManager, McpTool, McpToolBridge};
 // Plugin — marketplace-based plugin system for extensibility.
@@ -238,9 +244,10 @@ pub use tools::{
     AskUserQuestionTool, BrowserBackTool, BrowserClickTool, BrowserCloseTool, BrowserFindUrlTool,
     BrowserManager, BrowserNavigateTool, BrowserScreenshotTool, BrowserScrollTool,
     BrowserSelectTool, BrowserStartTool, BrowserStateTool, BrowserTypeTool, CodeContextTool,
-    CodeIndexRefreshTool, CodeSearchTool, DefaultShell, FileEditTool, FileReadTool, FileWriteTool,
-    GlobTool, GrepTool, PowerShellTool, ShellTool, SkillTool, TaskCreateTool, TaskGetTool,
-    TaskListTool, TaskOutputTool, TaskStopTool, TaskUpdateTool, WebFetchTool, WebSearchTool,
-    register_core_tools, register_core_tools_with_shell, register_memory_tools,
-    register_task_tools,
+    CodeIndexRefreshTool, CodeSearchTool, DefaultShell, EnterPlanModeTool, ExitPlanModeTool,
+    FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, PowerShellTool,
+    SendUserMessageTool, ShellTool, SkillTool, TaskCreateTool, TaskGetTool, TaskListTool,
+    TaskOutputTool, TaskStopTool, TaskUpdateTool, TeamCreateTool, TeamDeleteTool, TodoWriteTool,
+    WebFetchTool, WebSearchTool, register_core_tools, register_core_tools_with_shell,
+    register_memory_tools, register_task_tools,
 };

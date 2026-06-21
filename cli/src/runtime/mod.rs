@@ -15,7 +15,6 @@ pub(crate) struct PreparedRuntime {
     pub agent_config: AgentConfig,
     pub tools: ToolRegistry,
     pub project_root: Option<PathBuf>,
-    pub project_root_or_cwd: PathBuf,
     pub context: ProjectContext,
     pub memory_store: Arc<Mutex<MemoryStore>>,
     pub diagnostics: Option<DiagnosticsRuntime>,
@@ -59,15 +58,7 @@ pub(crate) fn prepare_runtime(
         memory_store.clone(),
     )));
 
-    Ok(PreparedRuntime {
-        agent_config,
-        tools,
-        project_root,
-        project_root_or_cwd,
-        context,
-        memory_store,
-        diagnostics,
-    })
+    Ok(PreparedRuntime { agent_config, tools, project_root, context, memory_store, diagnostics })
 }
 
 pub(crate) fn register_cli_subagent_tool(

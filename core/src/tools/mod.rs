@@ -16,6 +16,8 @@ mod ask_user_question;
 mod browser;
 mod code_index;
 mod domain_filter;
+mod enter_plan_mode;
+mod exit_plan_mode;
 mod file_edit;
 mod file_read;
 mod file_write;
@@ -23,10 +25,14 @@ mod glob;
 mod grep;
 mod memory;
 mod powershell;
+mod send_user_message;
 mod shared;
 mod shell;
 mod skill;
 mod tasks;
+mod team_create;
+mod team_delete;
+mod todo_write;
 mod web_fetch;
 mod web_search;
 
@@ -37,6 +43,8 @@ pub use browser::{
     BrowserStartTool, BrowserStateTool, BrowserTypeTool,
 };
 pub use code_index::{CodeContextTool, CodeIndexRefreshTool, CodeSearchTool};
+pub use enter_plan_mode::EnterPlanModeTool;
+pub use exit_plan_mode::ExitPlanModeTool;
 pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
 pub use file_write::FileWriteTool;
@@ -47,11 +55,15 @@ pub use memory::{
     MemoryWriteTool,
 };
 pub use powershell::PowerShellTool;
+pub use send_user_message::SendUserMessageTool;
 pub use shell::ShellTool;
 pub use skill::SkillTool;
 pub use tasks::{
     TaskCreateTool, TaskGetTool, TaskListTool, TaskOutputTool, TaskStopTool, TaskUpdateTool,
 };
+pub use team_create::TeamCreateTool;
+pub use team_delete::TeamDeleteTool;
+pub use todo_write::TodoWriteTool;
 pub use web_fetch::WebFetchTool;
 pub use web_search::WebSearchTool;
 

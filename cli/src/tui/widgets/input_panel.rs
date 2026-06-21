@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::{Position, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use tui_textarea::TextArea;
@@ -12,6 +12,9 @@ use crate::tui::keymap::is_ctrl_modifier;
 use crate::tui::theme::Theme;
 
 const PROMPT_WIDTH: u16 = 2;
+
+/// Braille spinner animation frames (same as status bar).
+const SPINNER_CHARS: &[char] = &['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'];
 
 /// What the input panel wants the app to do next.
 #[derive(Debug, Clone)]
@@ -375,23 +378,48 @@ impl InputPanel {
         self.set_text(&text);
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect, active: bool) {
+    /// Render the input panel.
+    ///
+    /// - `turn_active` — when true, the border animates (pulse + spinner) to
+    ///   visually indicate the agent is processing.
+    /// - `active` — when true, keyboard input is accepted (false during overlays).
+    /// - `spinner_frame` — animation frame counter for the pulse effect.
+    pub fn render(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        active: bool,
+        turn_active: bool,
+        spinner_frame: usize,
+    ) {
         let theme = Theme::default();
-        let border_style = if active {
-            Style::default().fg(theme.border_active).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme.border_inactive)
-        };
 
-        let title = if active {
-            match self.mode {
+        // ── Border style: pulse when agent is running ──────────────────
+        let (border_style, title) = if turn_active {
+            // Alternate between two brightness levels for a pulse effect
+            let pulse = spinner_frame % 8;
+            let bright = pulse < 4;
+            let border_color = if bright {
+                Color::Rgb(140, 220, 255) // brighter
+            } else {
+                Color::Rgb(60, 160, 220) // dimmer
+            };
+            let style = Style::default().fg(border_color).add_modifier(Modifier::BOLD);
+            let spinner = SPINNER_CHARS[spinner_frame % SPINNER_CHARS.len()];
+            (style, Span::styled(format!(" {spinner} Running… "), style))
+        } else if active {
+            let style = Style::default().fg(theme.border_active).add_modifier(Modifier::BOLD);
+            let title = match self.mode {
                 InputMode::Pasting { line_count } => {
-                    Span::styled(format!(" Pasted {line_count} lines — y(es)/n(o)? "), border_style)
+                    Span::styled(format!(" Pasted {line_count} lines — y(es)/n(o)? "), style)
                 }
-                _ => Span::styled(" Compose ", border_style),
-            }
+                _ => Span::styled(" Compose ", style),
+            };
+            (style, title)
         } else {
-            Span::styled(" Streaming… ", Style::default().fg(theme.thinking_fg))
+            let style = Style::default().fg(theme.border_inactive);
+            let title = Span::styled(" Streaming… ", Style::default().fg(theme.thinking_fg));
+            (style, title)
         };
 
         let mut block = Block::default()
@@ -630,7 +658,7 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(60, 4);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
 
-        terminal.draw(|frame| panel.render(frame, frame.area(), true)).unwrap();
+        terminal.draw(|frame| panel.render(frame, frame.area(), true, false, 0)).unwrap();
 
         let rendered = terminal
             .backend()
@@ -650,7 +678,7 @@ mod tests {
         let backend = TestBackend::new(24, 6);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        terminal.draw(|frame| panel.render(frame, frame.area(), true)).unwrap();
+        terminal.draw(|frame| panel.render(frame, frame.area(), true, false, 0)).unwrap();
 
         let first_input_row = rendered_row(&terminal, 1);
         let second_input_row = rendered_row(&terminal, 2);
@@ -671,7 +699,7 @@ mod tests {
         let backend = TestBackend::new(24, 6);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        terminal.draw(|frame| panel.render(frame, frame.area(), true)).unwrap();
+        terminal.draw(|frame| panel.render(frame, frame.area(), true, false, 0)).unwrap();
 
         terminal.backend_mut().assert_cursor_position(Position::new(6, 1));
     }

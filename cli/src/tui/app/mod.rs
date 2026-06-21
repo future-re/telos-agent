@@ -483,7 +483,13 @@ impl App {
         } else {
             self.inline_approval_area = None;
         }
-        self.input.render(frame, layout[3], self.mode != Mode::Approving);
+        self.input.render(
+            frame,
+            layout[3],
+            self.mode != Mode::Approving,
+            self.mode == Mode::Streaming,
+            self.spinner_frame,
+        );
 
         // ── Status bar at the bottom ─────────────────────────────────
         let status = if self.turn_active {

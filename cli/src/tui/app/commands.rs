@@ -307,7 +307,7 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
         let provider = Arc::new(telos_agent::RoutedProvider::new(config));
         let _ = self
             .turn_tx
-            .send(BackgroundCommand::SetProvider { provider, label: "auto".to_string() });
+            .send(BackgroundCommand::SetProvider { provider, label: "hybrid".to_string() });
     }
 
     fn switch_model(&mut self, model: &str) {
@@ -355,8 +355,8 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
 
 fn deepseek_switch_for_model_choice(choice: &str) -> DeepSeekSwitch {
     let choice = choice.trim();
-    if choice.eq_ignore_ascii_case("auto") {
-        return DeepSeekSwitch::Auto { label: "auto".into() };
+    if choice.eq_ignore_ascii_case("hybrid") || choice.eq_ignore_ascii_case("auto") {
+        return DeepSeekSwitch::Auto { label: "hybrid".into() };
     }
     if choice.eq_ignore_ascii_case("pro") {
         return DeepSeekSwitch::Single { model: DEEPSEEK_PRO_MODEL.into(), label: "pro".into() };
@@ -375,10 +375,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn model_choice_auto_keeps_routed_mode() {
+    fn model_choice_hybrid_keeps_routed_mode() {
+        assert_eq!(
+            deepseek_switch_for_model_choice("hybrid"),
+            DeepSeekSwitch::Auto { label: "hybrid".into() }
+        );
+    }
+
+    #[test]
+    fn model_choice_auto_fallback_still_works() {
         assert_eq!(
             deepseek_switch_for_model_choice("auto"),
-            DeepSeekSwitch::Auto { label: "auto".into() }
+            DeepSeekSwitch::Auto { label: "hybrid".into() }
         );
     }
 

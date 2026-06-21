@@ -12,7 +12,8 @@ use super::FileConfig;
 use crate::cli::{ProviderArg, SharedOptions};
 use crate::onboarding::OnboardingResult;
 
-const DEEPSEEK_AUTO_MODE: &str = "auto";
+const DEEPSEEK_AUTO_MODE: &str = "hybrid";
+const DEEPSEEK_AUTO_MODE_OLD: &str = "auto";
 const DEEPSEEK_PRO_ALIAS: &str = "pro";
 const DEEPSEEK_FLASH_ALIAS: &str = "flash";
 const DEEPSEEK_PRO_MODEL: &str = "deepseek-v4-pro";
@@ -97,7 +98,10 @@ pub(super) fn resolve_deepseek_model_selection(
     let explicit_model = options.model.clone().or_else(|| config.agent.as_ref()?.model.clone());
 
     match explicit_model.as_deref().map(str::trim).filter(|model| !model.is_empty()) {
-        Some(model) if model.eq_ignore_ascii_case(DEEPSEEK_AUTO_MODE) => {
+        Some(model)
+            if model.eq_ignore_ascii_case(DEEPSEEK_AUTO_MODE)
+                || model.eq_ignore_ascii_case(DEEPSEEK_AUTO_MODE_OLD) =>
+        {
             DeepSeekModelSelection::Routed {
                 thinking: configured_thinking_model(options, config),
                 fast: configured_fast_model(options, config),

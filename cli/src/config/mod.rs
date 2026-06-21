@@ -429,7 +429,26 @@ density = "cozy"
     }
 
     #[test]
-    fn model_auto_selects_routed_deepseek_models() {
+    fn model_hybrid_selects_routed_deepseek_models() {
+        let options = SharedOptions { model: Some("hybrid".into()), ..Default::default() };
+        let config = FileConfig {
+            agent: Some(AgentSection { provider: Some("deepseek".into()), ..Default::default() }),
+            ..FileConfig::default()
+        };
+
+        let selection = resolve_deepseek_model_selection(&options, &config);
+
+        assert_eq!(
+            selection,
+            DeepSeekModelSelection::Routed {
+                thinking: "deepseek-v4-pro".into(),
+                fast: "deepseek-v4-flash".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn model_auto_fallback_still_selects_routed_deepseek_models() {
         let options = SharedOptions { model: Some("auto".into()), ..Default::default() };
         let config = FileConfig {
             agent: Some(AgentSection { provider: Some("deepseek".into()), ..Default::default() }),

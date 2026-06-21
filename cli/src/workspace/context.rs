@@ -104,7 +104,7 @@ pub fn append_prompt_context(assembly: &mut PromptAssembly, ctx: &ProjectContext
 
 /// Build the status-bar text shown when the TUI launches.
 pub fn build_status_text(
-    _model: Option<&str>,
+    model: Option<&str>,
     project_root: Option<&Path>,
     ctx: &ProjectContext,
 ) -> String {
@@ -117,7 +117,7 @@ pub fn build_status_text(
         "telos · {} · {}",
         project_name,
         ctx.instructions_file.as_deref().unwrap_or("no project docs")
-    )
+    ) + &model.map(|m| format!(" · model {m}")).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -237,12 +237,13 @@ mod tests {
     }
 
     #[test]
-    fn status_text_shows_filename() {
+    fn status_text_shows_filename_and_model() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("CLAUDE.md"), "x").unwrap();
         let ctx = load_project_context(dir.path());
         let text = build_status_text(Some("deepseek"), Some(dir.path()), &ctx);
         assert!(text.contains("CLAUDE.md"));
+        assert!(text.contains("model deepseek"));
     }
 
     #[test]

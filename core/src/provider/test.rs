@@ -46,6 +46,7 @@ fn simple_request() -> CompletionRequest {
         messages: vec![Message::user("What is the capital of France?")],
         tools: vec![],
         model_hint: None,
+        max_tokens: None,
     }
 }
 
@@ -132,6 +133,7 @@ async fn deepseek_json_output_real_api() {
         messages: vec![Message::user("Return ok true.")],
         tools: vec![],
         model_hint: None,
+        max_tokens: None,
     };
     let response = provider
         .complete_with_options(
@@ -221,6 +223,7 @@ async fn deepseek_prefix_real_api() {
         messages: vec![Message::user("Complete this Rust return value.")],
         tools: vec![],
         model_hint: None,
+            max_tokens: None,
     };
 
     let response = provider

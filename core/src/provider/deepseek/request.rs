@@ -42,8 +42,16 @@ pub(super) fn build_chat_request(
         );
     }
 
+    if let Some(max_tokens) = request.max_tokens {
+        body.insert("max_tokens".into(), json!(max_tokens));
+    }
+
     if matches!(request.model_hint, Some(ModelHint::Thinking | ModelHint::Recovery)) {
-        body.insert("thinking".into(), json!({ "type": "enabled" }));
+        let budget_tokens = request.max_tokens.map(|m| m.saturating_sub(1)).unwrap_or(127_999);
+        body.insert(
+            "thinking".into(),
+            json!({ "type": "enabled", "budget_tokens": budget_tokens }),
+        );
     }
 
     if let Some(format) = options.response_format {

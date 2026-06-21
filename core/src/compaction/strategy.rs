@@ -104,6 +104,7 @@ impl CompactionStrategy for SummaryCompaction {
             messages: to_summarize,
             tools: vec![],
             model_hint: Some(ModelHint::Summarization),
+            max_tokens: None,
         };
 
         let response = provider.complete(summary_request).await?;

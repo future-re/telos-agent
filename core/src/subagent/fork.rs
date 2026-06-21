@@ -170,6 +170,7 @@ async fn execute_lens(shared: &ForkShared, lens: &ForkLens) -> Option<ForkResult
         messages: fork_messages,
         tools,
         model_hint: None,
+        max_tokens: None,
     };
 
     let response = match shared.provider.complete(request).await {

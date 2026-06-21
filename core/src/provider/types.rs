@@ -37,6 +37,8 @@ pub struct CompletionRequest {
     /// Optional model routing hint. When `None`, the provider uses its default model.
     /// When `Some`, a routing-aware provider may select a different model.
     pub model_hint: Option<ModelHint>,
+    /// Maximum output tokens. When `None`, the provider uses its default.
+    pub max_tokens: Option<u32>,
 }
 
 /// Why the model stopped emitting tokens.
@@ -114,6 +116,7 @@ mod tests {
             messages: vec![],
             tools: vec![],
             model_hint: None,
+            max_tokens: None,
         };
         assert!(req.model_hint.is_none());
     }
@@ -126,6 +129,7 @@ mod tests {
             messages: vec![],
             tools: vec![],
             model_hint: Some(ModelHint::Thinking),
+            max_tokens: None,
         };
         assert_eq!(req.model_hint, Some(ModelHint::Thinking));
     }

@@ -52,6 +52,7 @@ async fn completes_chat_request() {
         messages: vec![Message::user("Hi")],
         tools: vec![],
         model_hint: None,
+        max_tokens: None,
     };
 
     let response = provider.complete(request).await.unwrap();
@@ -105,6 +106,7 @@ async fn thinking_hint_enables_deepseek_thinking_request() {
         messages: vec![Message::user("Hi")],
         tools: vec![],
         model_hint: Some(ModelHint::Thinking),
+        max_tokens: None,
     };
 
     let response = provider.complete(request).await.unwrap();
@@ -139,6 +141,7 @@ async fn execution_hint_does_not_enable_deepseek_thinking_request() {
         messages: vec![Message::user("Hi")],
         tools: vec![],
         model_hint: Some(ModelHint::Execution),
+        max_tokens: None,
     };
 
     provider.complete(request).await.unwrap();
@@ -183,6 +186,7 @@ async fn parses_deepseek_usage_details() {
         messages: vec![Message::user("Hi")],
         tools: vec![],
         model_hint: None,
+        max_tokens: None,
     };
 
     let response = provider.complete(request).await.unwrap();
@@ -228,6 +232,7 @@ async fn maps_deepseek_error_codes_to_actionable_messages_and_retryability() {
             messages: vec![Message::user("Hi")],
             tools: vec![],
             model_hint: None,
+            max_tokens: None,
         };
 
         let err = provider.complete(request).await.unwrap_err();
@@ -275,6 +280,7 @@ async fn complete_with_json_output_sets_response_format() {
         messages: vec![Message::user("Return {\"ok\": true} as json")],
         tools: vec![],
         model_hint: None,
+        max_tokens: None,
     };
 
     let response = provider
@@ -324,6 +330,7 @@ async fn complete_with_prefix_uses_beta_chat_and_prefix_message() {
         messages: vec![Message::user("Write quick sort")],
         tools: vec![],
         model_hint: None,
+        max_tokens: None,
     };
 
     let response = provider
@@ -466,6 +473,7 @@ async fn streams_chat_response() {
         messages: vec![Message::user("Hi")],
         tools: vec![],
         model_hint: None,
+        max_tokens: None,
     };
 
     let events: Vec<_> = provider.stream_complete(request).collect().await;
@@ -517,6 +525,7 @@ async fn streams_chat_response_ignores_null_usage_until_final_usage() {
         messages: vec![Message::user("Hi")],
         tools: vec![],
         model_hint: None,
+        max_tokens: None,
     };
 
     let events: Vec<_> = provider.stream_complete(request).collect().await;
@@ -572,6 +581,7 @@ async fn streams_chat_response_allows_null_usage_without_final_usage() {
         messages: vec![Message::user("Hi")],
         tools: vec![],
         model_hint: None,
+        max_tokens: None,
     };
 
     let events: Vec<_> = provider.stream_complete(request).collect().await;

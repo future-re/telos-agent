@@ -88,6 +88,7 @@ impl AgentSession {
                 messages: self.messages.clone(),
                 tools: tool_definitions.to_vec(),
                 model_hint: Some(hint),
+                max_tokens: Some(128_000),
             };
 
             let mut stream = Box::pin(provider.stream_complete(request));

@@ -465,6 +465,7 @@ impl App {
         let layout =
             Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
 
+        // Indices are fixed — the constraints array always has 5 slots.
         self.chat.render(frame, layout[0], &theme);
         if let Some(pending) = &self.inline_approval {
             self.inline_approval_area = Some(layout[1]);
@@ -481,7 +482,6 @@ impl App {
 
         // ── Turn activity line (above input) ─────────────────────────
         if show_activity {
-            let activity_idx = if self.inline_approval.is_some() { 2 } else { 1 };
             let elapsed = self.format_elapsed();
             let tokens = self.format_token_usage();
             let detail = if tokens.is_empty() {
@@ -495,19 +495,12 @@ impl App {
                 format!(" {} {}", spinner_char, detail),
                 ratatui::style::Style::default().fg(ratatui::style::Color::Rgb(138, 150, 170)),
             ));
-            frame.render_widget(ratatui::widgets::Paragraph::new(line), layout[activity_idx]);
+            frame.render_widget(ratatui::widgets::Paragraph::new(line), layout[2]);
         }
-
-        let input_idx = if show_activity {
-            if self.inline_approval.is_some() { 3 } else { 2 }
-        } else {
-            if self.inline_approval.is_some() { 2 } else { 1 }
-        };
-        let bar_idx = input_idx + 1;
 
         self.input.render(
             frame,
-            layout[input_idx],
+            layout[3],
             &theme,
             self.mode != Mode::Approving,
             self.mode == Mode::Streaming,
@@ -517,8 +510,8 @@ impl App {
         // ── Bottom bar (permanent info) ───────────────────────────────
         status_bar::render(
             frame,
-            layout[bar_idx],
-            &self.status_text,
+            layout[4],
+            &self.base_status,
             self.spinner_frame,
             self.turn_total_tokens.unwrap_or(self.turn_input_tokens + self.turn_output_tokens),
             self.token_budget_max,

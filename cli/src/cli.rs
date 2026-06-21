@@ -63,7 +63,7 @@ pub struct SharedOptions {
     #[clap(long, env = "TELOS_CWD")]
     pub cwd: Option<PathBuf>,
 
-    /// Maximum number of model-tool iterations per turn.
+    /// Optional maximum number of model-tool iterations per turn.
     #[clap(long)]
     pub max_iterations: Option<usize>,
 

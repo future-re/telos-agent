@@ -176,8 +176,10 @@ impl AgentSession {
             let mut consecutive_noop = 0usize;
             let mut force_thinking_next_iteration = false;
             loop {
-                if iterations >= self.config.max_iterations {
-                    Err(AgentError::MaxIterations(self.config.max_iterations))?;
+                if let Some(max_iterations) = self.config.max_iterations
+                    && iterations >= max_iterations
+                {
+                    Err(AgentError::MaxIterations(max_iterations))?;
                 }
                 iterations += 1;
                 self.metrics.add_iteration();
@@ -461,10 +463,12 @@ fn new_session_id() -> String {
 mod tests {
     use super::*;
     use crate::config::TaskPath;
+    use crate::message::{ContentBlock, Role, ToolCall};
     use crate::mock::MockProvider;
     use crate::provider::{CompletionResponse, ModelHint, StopReason, TokenUsage};
     use crate::storage::{JsonlStorage, Storage};
     use crate::tool::ToolRegistry;
+    use serde_json::json;
     use std::path::PathBuf;
     use std::sync::Arc;
 
@@ -546,6 +550,74 @@ mod tests {
         assert_eq!(resumed.messages.len(), 2); // user + assistant (no system prompt)
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn default_config_does_not_stop_at_thirty_iterations() {
+        let mut responses = (0..31)
+            .map(|idx| CompletionResponse {
+                message: Message {
+                    role: Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: format!("call-{idx}"),
+                        name: "missing".into(),
+                        arguments: json!({}),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+                model: None,
+            })
+            .collect::<Vec<_>>();
+        responses.push(CompletionResponse {
+            message: Message::assistant("done"),
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+            model: None,
+        });
+
+        let provider = MockProvider::new(responses);
+        let tools = ToolRegistry::new();
+        let mut session = AgentSession::new(AgentConfig::default()).unwrap();
+
+        let result = session.run_turn(&provider, &tools, "keep going").await.unwrap();
+
+        assert_eq!(result.final_message.text_content(), "done");
+        let iterations = result
+            .events
+            .iter()
+            .filter(|event| matches!(event, TurnEvent::IterationStarted { .. }))
+            .count();
+        assert_eq!(iterations, 32);
+    }
+
+    #[tokio::test]
+    async fn explicit_max_iterations_still_stops_the_turn() {
+        let responses = (0..2)
+            .map(|idx| CompletionResponse {
+                message: Message {
+                    role: Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: format!("call-{idx}"),
+                        name: "missing".into(),
+                        arguments: json!({}),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+                model: None,
+            })
+            .collect::<Vec<_>>();
+
+        let provider = MockProvider::new(responses);
+        let tools = ToolRegistry::new();
+        let mut session =
+            AgentSession::new(AgentConfig { max_iterations: Some(2), ..AgentConfig::default() })
+                .unwrap();
+
+        let err = session.run_turn(&provider, &tools, "cap this").await.unwrap_err();
+
+        assert!(matches!(err, AgentError::MaxIterations(2)));
     }
 
     #[test]

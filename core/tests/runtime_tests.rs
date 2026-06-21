@@ -42,7 +42,7 @@ fn multi_step_tool_loop_completes() {
 
         let mut session = AgentSession::new(AgentConfig {
             base_system_prompt: Some("You are a coding agent.".into()),
-            max_iterations: 4,
+            max_iterations: Some(4),
             ..AgentConfig::default()
         })
         .unwrap();

@@ -183,7 +183,7 @@ async fn run_child_agent(
     config.base_system_prompt = Some(system_prompt);
     config.prompt_assembly = None;
     if let Some(max_iterations) = max_iterations {
-        config.max_iterations = max_iterations;
+        config.max_iterations = Some(max_iterations);
     }
 
     let mut session = AgentSession::new(config)?;

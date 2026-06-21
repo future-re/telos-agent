@@ -41,9 +41,9 @@ pub fn build_agent_config(
         agent_config.cwd = cwd.clone();
     }
 
-    // Priority: CLI --max-iterations > config file > default 30.
+    // Priority: CLI --max-iterations > config file > unlimited.
     agent_config.max_iterations =
-        options.max_iterations.or_else(|| config.agent.as_ref()?.max_iterations).unwrap_or(30);
+        options.max_iterations.or_else(|| config.agent.as_ref()?.max_iterations);
 
     agent_config.auto_validate_schema = !options.no_validate_schema;
     agent_config.approval_handler = approval_handler;

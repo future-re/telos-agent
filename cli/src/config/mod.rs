@@ -122,7 +122,7 @@ mod tests {
             ..FileConfig::default()
         };
         let agent = build_agent_config(&options, &config, None).unwrap();
-        assert_eq!(agent.max_iterations, 5);
+        assert_eq!(agent.max_iterations, Some(5));
     }
 
     #[test]
@@ -133,15 +133,15 @@ mod tests {
             ..FileConfig::default()
         };
         let agent = build_agent_config(&options, &config, None).unwrap();
-        assert_eq!(agent.max_iterations, 12);
+        assert_eq!(agent.max_iterations, Some(12));
     }
 
     #[test]
-    fn build_agent_config_defaults_max_iterations_to_30() {
+    fn build_agent_config_defaults_to_unlimited_iterations() {
         let options = SharedOptions::default();
         let config = FileConfig::default();
         let agent = build_agent_config(&options, &config, None).unwrap();
-        assert_eq!(agent.max_iterations, 30);
+        assert_eq!(agent.max_iterations, None);
     }
 
     #[test]

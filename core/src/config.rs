@@ -1,7 +1,7 @@
 //! Configuration types for an [`AgentSession`](crate::AgentSession).
 //!
 //! [`AgentConfig`] aggregates everything a session needs: model behaviour
-//! (system prompt, iteration cap), execution environment (cwd, env), and the
+//! (system prompt, optional iteration cap), execution environment (cwd, env), and the
 //! pluggable extension points (hooks, storage, compaction, permissions).
 
 use std::collections::HashMap;
@@ -152,9 +152,12 @@ pub struct AgentConfig {
     /// Optional pre-built prompt assembly. When set, the runtime uses this
     /// instead of constructing the prompt from `base_system_prompt` alone.
     pub prompt_assembly: Option<std::sync::Arc<crate::prompt::PromptAssembly>>,
-    /// Maximum number of model ⇄ tool round-trips per turn before the loop aborts
-    /// with [`AgentError::MaxIterations`].
-    pub max_iterations: usize,
+    /// Optional maximum number of model ⇄ tool round-trips per turn before the
+    /// loop aborts with [`AgentError::MaxIterations`].
+    ///
+    /// `None` means the model/tool loop is allowed to continue until the model
+    /// finishes, the turn is cancelled, or another runtime limit is reached.
+    pub max_iterations: Option<usize>,
     /// Working directory used as the root for filesystem tools and shell commands.
     pub cwd: PathBuf,
     /// Environment variables exposed to shell-based tools.
@@ -244,7 +247,7 @@ impl Default for AgentConfig {
             path: TaskPath::default(),
             base_system_prompt: None,
             prompt_assembly: None,
-            max_iterations: 30,
+            max_iterations: None,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             // Start with a minimal platform environment for shell tools. Callers
             // that need specific variables can add them explicitly; inheriting
@@ -354,7 +357,7 @@ impl AgentConfig {
     /// Validate configuration values and return a structured error for any
     /// dangerous or nonsensical combination.
     pub fn validate(&self) -> Result<(), AgentError> {
-        if self.max_iterations == 0 {
+        if self.max_iterations == Some(0) {
             return Err(AgentError::Config("max_iterations must be greater than 0".into()));
         }
         if self.tool_concurrency_limit == 0 {
@@ -405,13 +408,13 @@ impl AgentConfig {
         Ok(self)
     }
 
-    /// Apply path-appropriate defaults for iteration budget, timeouts, and
+    /// Apply path-appropriate defaults for timeouts, token budgets, and
     /// concurrency. Call after setting custom values if you want the path to
     /// override them.
     ///
     /// | Knob                   | Fast      | Standard  | Heavy     |
     /// |------------------------|-----------|-----------|-----------|
-    /// | `max_iterations`       | 4         | 30        | 16        |
+    /// | `max_iterations`       | None      | None      | None      |
     /// | `tool_concurrency_limit`| 10       | 10        | 5         |
     /// | `token_budget`         | None      | None      | 308k      |
     /// | `tool_timeout_ms`      | 30_000    | None      | 60_000    |
@@ -419,18 +422,18 @@ impl AgentConfig {
         self.path = path;
         match path {
             TaskPath::Fast => {
-                self.max_iterations = 4;
+                self.max_iterations = None;
                 self.tool_timeout_ms = Some(30_000);
                 // Fast tasks shouldn't need compaction — keep budget off.
                 self.token_budget = None;
             }
             TaskPath::Standard => {
-                self.max_iterations = 30;
+                self.max_iterations = None;
                 self.tool_timeout_ms = None;
                 self.token_budget = None;
             }
             TaskPath::Heavy => {
-                self.max_iterations = 16;
+                self.max_iterations = None;
                 self.tool_timeout_ms = Some(60_000);
                 self.token_budget = Some(TokenBudget::new(308_000));
                 self.tool_concurrency_limit = 5;
@@ -564,7 +567,7 @@ mod tests {
 
     #[test]
     fn zero_max_iterations_invalid() {
-        let config = AgentConfig { max_iterations: 0, ..AgentConfig::default() };
+        let config = AgentConfig { max_iterations: Some(0), ..AgentConfig::default() };
         assert!(config.validate().is_err());
     }
 

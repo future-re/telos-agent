@@ -34,9 +34,9 @@ class ChatView(VerticalScroll):
         """Recreate all message bubbles. Textual handles diffing."""
         existing: list[Widget] = list(self.children)
         msgs = self.state.messages
+        count_changed = len(existing) != len(msgs)
 
-        # If count doesn't match, full rebuild
-        if len(existing) != len(msgs):
+        if count_changed:
             self.remove_children()
             for msg in msgs:
                 self.mount(MessageBubble(msg))
@@ -47,6 +47,6 @@ class ChatView(VerticalScroll):
                     child.message = msg
                     child.refresh()
 
-        # Auto-scroll to bottom
-        if msgs:
+        # Auto-scroll to bottom only when a new message is added
+        if count_changed and msgs:
             self.scroll_end(animate=False)

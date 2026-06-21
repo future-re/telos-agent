@@ -67,33 +67,40 @@ class ServeProtocol:
     async def receive_event(self) -> Optional[dict]:
         """Get the next event from the queue. Returns None if stopped."""
         try:
-            return await self._event_queue.get()
+            value = await self._event_queue.get()
+            if value is None:
+                return None
+            return value
         except asyncio.CancelledError:
             return None
 
     async def _read_events(self) -> None:
         """Read JSON lines from the subprocess stdout and enqueue them."""
-        while self._running and self.process and self.process.stdout:
-            try:
-                line = await self.process.stdout.readline()
-            except (BrokenPipeError, ConnectionResetError, OSError):
-                await self._event_queue.put(
-                    {"type": "_error", "message": "Backend connection lost"}
-                )
-                break
-            if not line:
-                # EOF — process exited
-                if self._running:
+        try:
+            while self._running and self.process and self.process.stdout:
+                try:
+                    line = await self.process.stdout.readline()
+                except (BrokenPipeError, ConnectionResetError, OSError):
                     await self._event_queue.put(
-                        {"type": "_error", "message": "Backend process exited"}
+                        {"type": "_error", "message": "Backend connection lost"}
                     )
-                break
-            line_str = line.decode().strip()
-            if not line_str:
-                continue
-            try:
-                event = json.loads(line_str)
-                await self._event_queue.put(event)
-            except json.JSONDecodeError:
-                # Skip malformed lines but don't crash
-                pass
+                    break
+                if not line:
+                    # EOF — process exited
+                    if self._running:
+                        await self._event_queue.put(
+                            {"type": "_error", "message": "Backend process exited"}
+                        )
+                    break
+                line_str = line.decode().strip()
+                if not line_str:
+                    continue
+                try:
+                    event = json.loads(line_str)
+                    await self._event_queue.put(event)
+                except json.JSONDecodeError:
+                    # Skip malformed lines but don't crash
+                    pass
+        finally:
+            self._running = False
+            await self._event_queue.put(None)

@@ -110,7 +110,9 @@ class TelosTuiApp(App):
         self.state.streaming = True
         self.state.status_text = "telos · sending…"
 
-        asyncio.create_task(self.protocol.send_command({"cmd": "run", "prompt": text}))
+        asyncio.create_task(
+            self._safe_send_command({"cmd": "run", "prompt": text})
+        )
 
     def _handle_slash(self, text: str) -> None:
         parts = text.split(maxsplit=1)
@@ -122,7 +124,7 @@ class TelosTuiApp(App):
             self.state.clear()
         elif cmd == "/new":
             asyncio.create_task(
-                self.protocol.send_command({"cmd": "new_session"})
+                self._safe_send_command({"cmd": "new_session"})
             )
         elif cmd == "/auto":
             self.state.auto_approve = not self.state.auto_approve
@@ -137,17 +139,28 @@ class TelosTuiApp(App):
 
     def action_approve_allow(self) -> None:
         if self.state.pending_approval is not None:
-            asyncio.create_task(
-                self.protocol.send_command({"cmd": "_approve", "decision": "allow"})
-            )
-            self.state.pending_approval = None
+            asyncio.create_task(self._do_approve("allow"))
 
     def action_approve_deny(self) -> None:
         if self.state.pending_approval is not None:
-            asyncio.create_task(
-                self.protocol.send_command({"cmd": "_approve", "decision": "deny"})
+            asyncio.create_task(self._do_approve("deny"))
+
+    async def _do_approve(self, decision: str) -> None:
+        """Send approval decision and clear pending state on success."""
+        try:
+            await self.protocol.send_command(
+                {"cmd": "_approve", "decision": decision}
             )
             self.state.pending_approval = None
+        except Exception:
+            pass  # Keep approval visible so user can retry
+
+    async def _safe_send_command(self, cmd: dict) -> None:
+        """Send a command and log errors instead of silently swallowing them."""
+        try:
+            await self.protocol.send_command(cmd)
+        except Exception as e:
+            self.state.add_message(Message(role="system", text=f"Send error: {e}"))
 
     def action_focus_input(self) -> None:
         try:

@@ -78,6 +78,13 @@ class AppState(DOMNode):
             msgs[-1] = Message(role="assistant", text=text)
             self.messages = msgs  # type: ignore[assignment]
 
+    def update_last_thinking(self, text: str) -> None:
+        """Update the text of the last thinking message (streaming)."""
+        msgs = list(self.messages)
+        if msgs and msgs[-1].role == "thinking":
+            msgs[-1] = Message(role="thinking", text=text)
+            self.messages = msgs  # type: ignore[assignment]
+
     def upsert_tool(self, call_id: str, name: str = "", detail: str = "",
                     status: str = "") -> None:
         """Insert or update a tool entry."""
@@ -113,3 +120,4 @@ class AppState(DOMNode):
         self.tool_entries = []  # type: ignore[assignment]
         self.pending_approval = None
         self.streaming = False
+        self.status_text = "telos · new session"

@@ -13,6 +13,7 @@ class EventLoop:
     def __init__(self, state: AppState) -> None:
         self.state = state
         self._assistant_buf = StreamBuffer()
+        self._thinking_buf = StreamBuffer()
 
     def handle_event(self, event: dict) -> None:
         event_type = event.get("type", "")
@@ -60,6 +61,7 @@ class EventLoop:
             self.state.streaming = False
             self.state.status_text = "telos · ready"
         elif event_type == "_error":
+            self._flush_thinking()
             msg = event.get("message", "unknown error")
             self.state.add_message(Message(role="system", text=f"Error: {msg}"))
         elif event_type == "_session_new":
@@ -75,6 +77,7 @@ class EventLoop:
 
     def _handle_turn_started(self, event: dict) -> None:
         self._assistant_buf.reset()
+        self._thinking_buf.reset()
         self.state.streaming = True
         self.state.status_text = "telos · thinking…"
         self.state.tool_entries = []  # type: ignore[assignment]
@@ -96,10 +99,16 @@ class EventLoop:
 
     def _handle_thinking_delta(self, event: dict) -> None:
         text = event.get("text", "")
-        short = text[:200] + "…" if len(text) > 200 else text
-        self.state.add_message(Message(role="thinking", text=short))
+        msgs = self.state.messages
+        if not msgs or msgs[-1].role != "thinking":
+            self._flush_thinking()
+            self.state.add_message(Message(role="thinking", text=""))
+        full = self._thinking_buf.feed(text)
+        if full is not None:
+            self.state.update_last_thinking(full)
 
     def _handle_assistant(self, event: dict) -> None:
+        self._flush_thinking()
         text = event.get("text", "")
         if text:
             self.state.add_message(Message(role="assistant", text=text))
@@ -165,7 +174,14 @@ class EventLoop:
         self.state.status_text = " · ".join(parts)
 
     def _flush_assistant(self) -> None:
+        self._flush_thinking()
         full = self._assistant_buf.flush()
         if full is not None:
             self.state.update_last_assistant(full)
         self._assistant_buf.reset()
+
+    def _flush_thinking(self) -> None:
+        full = self._thinking_buf.flush()
+        if full is not None:
+            self.state.update_last_thinking(full)
+        self._thinking_buf.reset()

@@ -3,13 +3,12 @@ pub mod app;
 pub mod approval;
 #[path = "widgets/approval_inline.rs"]
 pub mod approval_inline;
+pub mod chat_entry;
 #[path = "widgets/chat_widget.rs"]
 pub mod chat_widget;
 #[path = "overlays/command_popup.rs"]
 pub mod command_popup;
 pub mod event;
-#[path = "widgets/history_cell/mod.rs"]
-pub mod history_cell;
 #[path = "widgets/input_panel.rs"]
 pub mod input_panel;
 pub mod keymap;
@@ -21,8 +20,6 @@ pub mod selection_popup;
 #[path = "widgets/status_bar.rs"]
 pub mod status_bar;
 pub mod theme;
-#[path = "widgets/tool_activity/mod.rs"]
-pub mod tool_activity;
 #[path = "widgets/tool_rendering.rs"]
 mod tool_rendering;
 #[path = "overlays/user_input_popup.rs"]
@@ -80,9 +77,13 @@ pub async fn run(
     billing: Option<BillingSection>,
 ) -> Result<()> {
     crossterm::terminal::enable_raw_mode()?;
+    // Guard ensures raw mode is always disabled on drop, even if
+    // EnterAlternateScreen or keyboard enhancement fails.
+    let mut guard = TuiGuard { keyboard_enhancement_enabled: false };
+
     let mut stdout = stdout();
     crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
-    let keyboard_enhancement_enabled =
+    guard.keyboard_enhancement_enabled =
         matches!(crossterm::terminal::supports_keyboard_enhancement(), Ok(true))
             && crossterm::execute!(
                 stdout,
@@ -90,7 +91,6 @@ pub async fn run(
             )
             .is_ok();
     let _ = crossterm::execute!(stdout, crossterm::event::EnableBracketedPaste);
-    let _guard = TuiGuard { keyboard_enhancement_enabled };
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;

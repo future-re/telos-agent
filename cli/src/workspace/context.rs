@@ -108,13 +108,23 @@ pub fn build_status_text(
     project_root: Option<&Path>,
     ctx: &ProjectContext,
 ) -> String {
-    let project_name = project_root
-        .as_ref()
-        .and_then(|p| p.file_name())
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "?".to_string());
-    let tag = model.unwrap_or_else(|| ctx.instructions_file.as_deref().unwrap_or("?"));
-    format!("telos · {} · {}", project_name, tag)
+    let mut parts: Vec<String> = vec!["telos".to_string()];
+
+    if let Some(name) =
+        project_root.and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string())
+        && name != "?"
+    {
+        parts.push(name);
+    }
+
+    let tag = model.map(str::to_string).or_else(|| ctx.instructions_file.clone());
+    if let Some(tag) = tag
+        && tag != "?"
+    {
+        parts.push(tag);
+    }
+
+    parts.join(" · ")
 }
 
 #[cfg(test)]
@@ -253,9 +263,9 @@ mod tests {
     }
 
     #[test]
-    fn status_text_shows_question_mark_when_no_model_and_no_docs() {
+    fn status_text_shows_only_telos_when_no_model_or_project() {
         let ctx = ProjectContext::empty();
         let text = build_status_text(None, None, &ctx);
-        assert_eq!(text, "telos · ? · ?");
+        assert_eq!(text, "telos");
     }
 }

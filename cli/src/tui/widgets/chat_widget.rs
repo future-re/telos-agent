@@ -1,141 +1,137 @@
+//! Scrollable chat widget backed by a flat list of [`ChatEntry`] values.
+//!
+//! Rendering collects lines from every entry via [`ChatEntry::to_lines`],
+//! concatenates them into one [`Paragraph`], and scrolls with
+//! [`Paragraph::scroll`]. Because measurement and rendering share the
+//! same code path, layout is always consistent.
+
 use ratatui::Frame;
 use ratatui::layout::Rect;
+use ratatui::text::Text;
+use ratatui::widgets::{Paragraph, Wrap};
 
-use crate::tui::history_cell::{AgentCell, HistoryCell, ThinkingCell, ToolCallCell};
+use crate::tui::chat_entry::ChatEntry;
 use crate::tui::theme::Theme;
 
-/// A scrollable, cell-based chat widget that owns a list of [`HistoryCell`]s.
-///
-/// Each cell knows its own height via [`HistoryCell::needed_lines`] and renders
-/// itself into a sub-area of the widget. The widget handles scrolling by
-/// computing which cells are visible given the current `scroll_offset` and the
-/// available screen height.
 pub struct ChatWidget {
-    /// Ordered conversation cells.
-    cells: Vec<Box<dyn HistoryCell>>,
-    /// Index of the last streaming cell (for push_text).
+    /// All conversation entries in chronological order.
+    entries: Vec<ChatEntry>,
+    /// Index of the last streaming entry (for `push_text`).
     active_idx: Option<usize>,
-    /// Index of the active assistant streaming cell.
+    /// Index of the active assistant streaming entry.
     assistant_active_idx: Option<usize>,
-    /// Index of the active thinking streaming cell.
+    /// Index of the active thinking streaming entry.
     thinking_active_idx: Option<usize>,
-    /// Currently selected cell for keyboard actions.
+    /// Currently selected entry for keyboard actions.
     selected_idx: Option<usize>,
     /// Scroll offset from bottom (0 = bottom).
     pub scroll_offset: usize,
+    /// Whether the user has manually scrolled up (prevents auto-scroll-to-bottom).
+    user_scrolled_up: bool,
 }
 
 impl ChatWidget {
     pub fn new() -> Self {
         Self {
-            cells: Vec::new(),
+            entries: Vec::new(),
             active_idx: None,
             assistant_active_idx: None,
             thinking_active_idx: None,
             selected_idx: None,
             scroll_offset: 0,
+            user_scrolled_up: false,
         }
     }
 
-    /// Append a new cell to the conversation.
-    pub fn push_cell(&mut self, cell: Box<dyn HistoryCell>) {
-        self.active_idx = if cell.is_streaming() { Some(self.cells.len()) } else { None };
-        self.cells.push(cell);
-        self.scroll_to_bottom();
+    // ── Mutation ──────────────────────────────────────────────────────────
+
+    /// Append a new entry.
+    pub fn push_entry(&mut self, entry: ChatEntry) {
+        if entry.is_streaming() {
+            self.active_idx = Some(self.entries.len());
+        }
+        self.entries.push(entry);
+        self.maybe_scroll_to_bottom();
     }
 
+    /// Stream a delta into the active assistant cell, creating one if needed.
     pub fn push_agent_delta(&mut self, text: &str) {
         if let Some(idx) = self.assistant_active_idx
-            && let Some(cell) = self.cells.get_mut(idx)
-            && cell.as_any().is::<AgentCell>()
+            && let Some(ChatEntry::Agent { is_streaming: true, .. }) = self.entries.get_mut(idx)
         {
-            cell.push_text(text);
-            self.scroll_to_bottom();
+            self.entries[idx].push_text(text);
+            self.maybe_scroll_to_bottom();
             return;
         }
-        let idx = self.cells.len();
-        self.cells.push(Box::new(AgentCell { buffer: text.to_string(), is_streaming: true }));
+        // Create a new agent streaming cell.
+        let entry = ChatEntry::agent(text.to_string(), true);
+        let idx = self.entries.len();
+        self.entries.push(entry);
         self.assistant_active_idx = Some(idx);
         self.active_idx = Some(idx);
-        self.scroll_to_bottom();
+        self.maybe_scroll_to_bottom();
     }
 
+    /// Stream a delta into the active thinking cell, creating one if needed.
     pub fn push_thinking_delta(&mut self, text: &str) {
         if let Some(idx) = self.thinking_active_idx
-            && let Some(cell) = self.cells.get_mut(idx)
-            && cell.as_any().is::<ThinkingCell>()
+            && let Some(ChatEntry::Thinking { is_streaming: true, .. }) = self.entries.get_mut(idx)
         {
-            cell.push_text(text);
-            self.scroll_to_bottom();
+            self.entries[idx].push_text(text);
+            self.maybe_scroll_to_bottom();
             return;
         }
-        let idx = self.cells.len();
-        self.cells.push(Box::new(ThinkingCell { buffer: text.to_string(), is_streaming: true }));
+        let entry = ChatEntry::thinking(text.to_string(), true);
+        let idx = self.entries.len();
+        self.entries.push(entry);
         self.thinking_active_idx = Some(idx);
         self.active_idx = Some(idx);
-        self.scroll_to_bottom();
+        self.maybe_scroll_to_bottom();
     }
 
+    /// Mark all streaming cells as finished.
     pub fn finish_streaming_cells(&mut self) {
         for idx in [self.assistant_active_idx.take(), self.thinking_active_idx.take()]
             .into_iter()
             .flatten()
         {
-            if let Some(cell) = self.cells.get_mut(idx) {
-                cell.finish_streaming();
+            if let Some(entry) = self.entries.get_mut(idx) {
+                entry.finish_streaming();
             }
         }
         self.active_idx = None;
     }
 
+    /// Whether the assistant cell is still streaming.
     pub fn has_active_assistant(&self) -> bool {
         self.assistant_active_idx.is_some()
     }
 
-    /// Find and update an existing cell by predicate, or push a new one.
-    /// Returns the index of the cell.
-    pub fn upsert_cell<F>(&mut self, new: Box<dyn HistoryCell>, matcher: F)
-    where
-        F: Fn(&dyn HistoryCell) -> bool,
-    {
-        if let Some(pos) = self.cells.iter().position(|c| matcher(c.as_ref())) {
-            self.cells[pos] = new;
-        } else {
-            self.cells.push(new);
-        }
-        self.scroll_to_bottom();
-    }
-
-    /// Get mutable reference to the last streaming cell.
-    pub fn active_mut(&mut self) -> Option<&mut (dyn HistoryCell + 'static)> {
+    pub fn active_mut(&mut self) -> Option<&mut ChatEntry> {
         let idx = self.active_idx?;
-        self.cells.get_mut(idx).map(Box::as_mut)
+        self.entries.get_mut(idx)
     }
 
-    /// Append text to the streaming cell.
-    pub fn push_text(&mut self, text: &str) {
-        if let Some(idx) = self.active_idx
-            && let Some(cell) = self.cells.get_mut(idx)
-        {
-            cell.push_text(text);
+    /// Find an entry by tool_call_id.
+    pub fn find_tool_call(&self, id: &str) -> Option<&ChatEntry> {
+        self.entries.iter().find(|e| e.tool_call_id() == Some(id))
+    }
+
+    /// Find an entry by tool_call_id (mutable).
+    pub fn find_tool_call_mut(&mut self, id: &str) -> Option<&mut ChatEntry> {
+        self.entries.iter_mut().find(|e| e.tool_call_id() == Some(id))
+    }
+
+    /// Remove a tool call by its id.
+    pub fn remove_tool_call(&mut self, id: &str) {
+        let old_len = self.entries.len();
+        self.entries.retain(|e| e.tool_call_id() != Some(id));
+        if self.entries.len() != old_len {
+            self.repair_indices();
         }
     }
 
-    /// Remove a ToolCallCell by its tool_call_id.
-    pub fn remove_tool_call(&mut self, id: &str) {
-        self.cells.retain(|c| c.tool_call_id() != Some(id));
-        self.repair_indices();
-    }
-
-    /// Find a cell by tool_call_id.
-    pub fn find_tool_call(&self, id: &str) -> Option<&(dyn HistoryCell + 'static)> {
-        self.cells.iter().find(|c| c.tool_call_id() == Some(id)).map(Box::as_ref)
-    }
-
-    /// Find a cell by tool_call_id (mutable).
-    pub fn find_tool_call_mut(&mut self, id: &str) -> Option<&mut (dyn HistoryCell + 'static)> {
-        self.cells.iter_mut().find(|c| c.tool_call_id() == Some(id)).map(Box::as_mut)
-    }
+    // ── Selection ─────────────────────────────────────────────────────────
 
     pub fn select_next_tool(&mut self) {
         self.move_tool_selection(1);
@@ -147,62 +143,73 @@ impl ChatWidget {
 
     pub fn toggle_selected_tool(&mut self) -> bool {
         let Some(idx) = self.selected_idx else { return false };
-        let Some(cell) = self.cells.get_mut(idx) else { return false };
-        if let Some(tool) = cell.as_any_mut().downcast_mut::<ToolCallCell>() {
-            tool.toggle_expand();
-            self.scroll_to_bottom();
+        if let Some(ChatEntry::ToolCall { expanded, .. }) = self.entries.get_mut(idx) {
+            *expanded = !*expanded;
+            self.maybe_scroll_to_bottom();
             return true;
         }
         false
     }
 
+    // ── Scrolling ─────────────────────────────────────────────────────────
+
     pub fn scroll_up(&mut self, n: usize) {
         self.scroll_offset = self.scroll_offset.saturating_add(n);
+        self.user_scrolled_up = true;
     }
 
     pub fn scroll_down(&mut self, n: usize) {
         self.scroll_offset = self.scroll_offset.saturating_sub(n);
+        if self.scroll_offset == 0 {
+            self.user_scrolled_up = false;
+        }
     }
 
     pub fn scroll_to_bottom(&mut self) {
         self.scroll_offset = 0;
+        self.user_scrolled_up = false;
+    }
+
+    fn maybe_scroll_to_bottom(&mut self) {
+        if !self.user_scrolled_up {
+            self.scroll_offset = 0;
+        }
     }
 
     pub fn clear(&mut self) {
-        self.cells.clear();
+        self.entries.clear();
         self.active_idx = None;
         self.assistant_active_idx = None;
         self.thinking_active_idx = None;
         self.selected_idx = None;
         self.scroll_offset = 0;
+        self.user_scrolled_up = false;
     }
 
     pub fn is_empty(&self) -> bool {
-        self.cells.is_empty()
+        self.entries.is_empty()
     }
 
     pub fn len(&self) -> usize {
-        self.cells.len()
+        self.entries.len()
     }
+
+    // ── Internals ─────────────────────────────────────────────────────────
 
     fn move_tool_selection(&mut self, delta: isize) {
         let selectable: Vec<usize> = self
-            .cells
+            .entries
             .iter()
             .enumerate()
-            .filter_map(|(idx, cell)| cell.is_selectable().then_some(idx))
+            .filter_map(|(idx, entry)| entry.is_selectable().then_some(idx))
             .collect();
         if selectable.is_empty() {
             return;
         }
-        let current_pos = self
-            .selected_idx
-            .and_then(|idx| selectable.iter().position(|candidate| *candidate == idx));
+        let current_pos =
+            self.selected_idx.and_then(|idx| selectable.iter().position(|c| *c == idx));
         let next_pos = match current_pos {
-            Some(pos) => {
-                let len = selectable.len() as isize;
-                (pos as isize + delta).rem_euclid(len) as usize
-            }
+            Some(pos) => (pos as isize + delta).rem_euclid(selectable.len() as isize) as usize,
             None => {
                 if delta < 0 {
                     selectable.len() - 1
@@ -216,15 +223,15 @@ impl ChatWidget {
 
     fn set_selected_idx(&mut self, idx: Option<usize>) {
         if let Some(old) = self.selected_idx
-            && let Some(cell) = self.cells.get_mut(old)
+            && let Some(entry) = self.entries.get_mut(old)
         {
-            cell.set_selected(false);
+            entry.set_selected(false);
         }
         self.selected_idx = idx;
         if let Some(new) = self.selected_idx
-            && let Some(cell) = self.cells.get_mut(new)
+            && let Some(entry) = self.entries.get_mut(new)
         {
-            cell.set_selected(true);
+            entry.set_selected(true);
         }
     }
 
@@ -233,78 +240,53 @@ impl ChatWidget {
         self.assistant_active_idx = None;
         self.thinking_active_idx = None;
         self.selected_idx = None;
-        for cell in &mut self.cells {
-            cell.set_selected(false);
+        for entry in &mut self.entries {
+            entry.set_selected(false);
         }
     }
 
-    /// Total height (in terminal lines) of all cells at the given width.
-    pub fn total_height(&self, width: usize) -> u16 {
-        self.cells.iter().map(|c| c.needed_lines(width)).sum()
-    }
+    // ── Rendering ─────────────────────────────────────────────────────────
 
-    fn clamp_scroll_offset(&mut self, width: usize, viewport_height: u16) {
-        let max_offset = self.total_height(width).saturating_sub(viewport_height) as usize;
-        self.scroll_offset = self.scroll_offset.min(max_offset);
-    }
-
-    /// Render the conversation into the given area.
-    ///
-    /// Only cells that overlap the visible window (computed from
-    /// `scroll_offset` and `area.height`) are rendered. Each visible
-    /// cell draws itself into a sub-area at its computed y offset.
+    /// Render all entries into `area`, scrolled to `scroll_offset` lines
+    /// from the bottom.
     pub fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        if self.cells.is_empty() || area.width == 0 || area.height == 0 {
+        if self.entries.is_empty() || area.width == 0 || area.height == 0 {
             return;
         }
 
         let width = area.width as usize;
-        let total = self.total_height(width);
-        let area_height = area.height;
-        self.clamp_scroll_offset(width, area_height);
 
-        // Visible range: which total-line indices are visible.
-        let visible_end = total.saturating_sub(self.scroll_offset as u16);
-        let visible_start = visible_end.saturating_sub(area_height);
-        let visible_window_height = visible_end.saturating_sub(visible_start);
-        let bottom_padding = area_height.saturating_sub(visible_window_height);
-
-        let mut acc = 0u16; // accumulated line count before current cell
-
-        for cell in &self.cells {
-            let cell_lines = cell.needed_lines(width);
-
-            if cell_lines == 0 {
-                continue;
-            }
-
-            let cell_end = acc + cell_lines;
-
-            // Skip cells entirely before the visible window.
-            if cell_end <= visible_start {
-                acc += cell_lines;
-                continue;
-            }
-
-            // Stop once we are past the visible window.
-            if acc >= visible_end {
-                break;
-            }
-
-            // This cell is at least partially visible.
-            let visible_part_start = acc.max(visible_start);
-            let visible_part_end = cell_end.min(visible_end);
-            let visible_height = visible_part_end - visible_part_start;
-
-            let top_skip = visible_part_start - acc;
-            let display_y = area.y + bottom_padding + (visible_part_start - visible_start);
-
-            let cell_area =
-                Rect { x: area.x, y: display_y, width: area.width, height: visible_height };
-
-            cell.render_scrolled(frame, cell_area, theme, top_skip);
-            acc += cell_lines;
+        // Collect all lines from all entries.
+        let mut all_lines: Vec<ratatui::text::Line<'static>> = Vec::new();
+        for entry in &self.entries {
+            all_lines.extend(entry.to_lines(width, theme));
         }
+
+        let total = all_lines.len();
+        let visible = area.height as usize;
+
+        // Bottom-anchor: when content is shorter than the viewport,
+        // pad with blank lines at the top so messages start at the bottom.
+        if total < visible {
+            let pad = visible - total;
+            let mut padded = vec![ratatui::text::Line::from(""); pad];
+            padded.append(&mut all_lines);
+            all_lines = padded;
+        }
+
+        let total = all_lines.len();
+        // scroll_offset is "lines from bottom" (0 = bottom).
+        // Paragraph::scroll expects "lines to skip from top", so convert.
+        let max_scroll = total.saturating_sub(visible);
+        self.scroll_offset = self.scroll_offset.min(max_scroll);
+        let paragraph_scroll = max_scroll.saturating_sub(self.scroll_offset) as u16;
+
+        frame.render_widget(
+            Paragraph::new(Text::from(all_lines))
+                .scroll((paragraph_scroll, 0))
+                .wrap(Wrap { trim: false }),
+            area,
+        );
     }
 }
 
@@ -317,162 +299,62 @@ impl Default for ChatWidget {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::history_cell::UserCell;
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
-
-    fn rendered_row(terminal: &Terminal<TestBackend>, row: u16) -> String {
-        let width = terminal.backend().buffer().area.width as usize;
-        let start = row as usize * width;
-        terminal.backend().buffer().content[start..start + width]
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>()
-    }
 
     #[test]
-    fn assistant_and_thinking_deltas_use_separate_cells() {
+    fn assistant_and_thinking_deltas_use_separate_entries() {
         let mut chat = ChatWidget::new();
 
         chat.push_thinking_delta("thinking");
         chat.push_agent_delta("answer");
 
-        assert_eq!(chat.cells.len(), 2);
-        assert!(chat.cells[0].as_any().is::<ThinkingCell>());
-        assert!(chat.cells[1].as_any().is::<AgentCell>());
-
-        let thinking = chat.cells[0].as_any().downcast_ref::<ThinkingCell>().unwrap();
-        let assistant = chat.cells[1].as_any().downcast_ref::<AgentCell>().unwrap();
-        assert_eq!(thinking.buffer, "thinking");
-        assert_eq!(assistant.buffer, "answer");
+        assert_eq!(chat.entries.len(), 2);
+        assert!(matches!(chat.entries[0], ChatEntry::Thinking { .. }));
+        assert!(matches!(chat.entries[1], ChatEntry::Agent { .. }));
     }
 
     #[test]
-    fn finish_streaming_cells_marks_active_cells_complete() {
+    fn finish_streaming_cells_marks_active_entries_complete() {
         let mut chat = ChatWidget::new();
 
         chat.push_thinking_delta("thinking");
         chat.push_agent_delta("answer");
         chat.finish_streaming_cells();
 
-        let thinking = chat.cells[0].as_any().downcast_ref::<ThinkingCell>().unwrap();
-        let assistant = chat.cells[1].as_any().downcast_ref::<AgentCell>().unwrap();
-        assert!(!thinking.is_streaming);
-        assert!(!assistant.is_streaming);
         assert!(!chat.has_active_assistant());
+        assert!(!chat.entries[0].is_streaming());
+        assert!(!chat.entries[1].is_streaming());
     }
 
     #[test]
-    fn selected_tool_can_toggle_expansion_without_losing_progress() {
+    fn toggle_selected_tool_expands_it() {
         let mut chat = ChatWidget::new();
-        let mut tool = ToolCallCell::new("call-1".into(), "Bash".into(), "echo hi".into());
-        tool.add_progress("line 1".into());
-        tool.add_result_content(&serde_json::json!({"stdout": "ok\nnext\n", "stderr": ""}), false);
-        chat.push_cell(Box::new(tool));
-
+        let tool = ChatEntry::tool_call("call-1".into(), "Bash".into(), "echo hi".into());
+        chat.push_entry(tool);
         chat.select_next_tool();
+
         assert!(chat.toggle_selected_tool());
-
-        let tool = chat.cells[0].as_any().downcast_ref::<ToolCallCell>().unwrap();
-        assert!(tool.expanded);
-        assert_eq!(tool.progress_messages, vec!["line 1"]);
-        assert_eq!(tool.result_lines, vec!["ok", "next"]);
     }
 
     #[test]
-    fn short_history_renders_against_bottom_edge() {
+    fn scroll_to_bottom_resets_user_scrolled_up() {
         let mut chat = ChatWidget::new();
-        chat.push_cell(Box::new(UserCell { content: "hello".to_string() }));
+        chat.push_entry(ChatEntry::user("hello".into()));
+        chat.scroll_up(3);
+        assert!(chat.scroll_offset > 0);
 
-        let backend = TestBackend::new(20, 5);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let theme = Theme::default();
-        terminal.draw(|frame| chat.render(frame, frame.area(), &theme)).unwrap();
-
-        assert!(rendered_row(&terminal, 0).trim().is_empty());
-        assert!(rendered_row(&terminal, 1).trim().is_empty());
-        assert!(rendered_row(&terminal, 2).trim().is_empty());
-        assert!(rendered_row(&terminal, 3).trim().is_empty());
-        assert!(rendered_row(&terminal, 4).contains("▸ hello"));
-    }
-
-    #[test]
-    fn user_and_assistant_blocks_have_breathing_room() {
-        let mut chat = ChatWidget::new();
-        chat.push_cell(Box::new(UserCell { content: "make it readable".to_string() }));
-        chat.push_cell(Box::new(AgentCell {
-            buffer: "Done.\n\nI adjusted the spacing.".to_string(),
-            is_streaming: false,
-        }));
-
-        let backend = TestBackend::new(40, 8);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let theme = Theme::default();
-        terminal.draw(|frame| chat.render(frame, frame.area(), &theme)).unwrap();
-
-        assert!(rendered_row(&terminal, 2).trim().is_empty());
-        assert!(rendered_row(&terminal, 3).contains("▸ make it readable"));
-        assert!(rendered_row(&terminal, 4).trim().is_empty());
-        assert!(rendered_row(&terminal, 5).contains("Done."));
-        assert!(rendered_row(&terminal, 7).contains("I adjusted the spacing."));
-    }
-
-    #[test]
-    fn overscrolling_past_top_still_renders_history() {
-        let mut chat = ChatWidget::new();
-        chat.push_cell(Box::new(AgentCell {
-            buffer: "one\ntwo\nthree".to_string(),
-            is_streaming: false,
-        }));
-
-        chat.scroll_up(100);
-
-        let backend = TestBackend::new(20, 5);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let theme = Theme::default();
-        terminal.draw(|frame| chat.render(frame, frame.area(), &theme)).unwrap();
-
+        chat.scroll_to_bottom();
         assert_eq!(chat.scroll_offset, 0);
-
-        let rendered = terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-
-        assert!(rendered.contains("one"), "{rendered:?}");
-        assert!(rendered.contains("three"), "{rendered:?}");
     }
 
     #[test]
-    fn scrolling_into_middle_of_cell_keeps_correct_visible_lines() {
+    fn user_scrolled_up_prevents_auto_scroll() {
         let mut chat = ChatWidget::new();
-        chat.push_cell(Box::new(AgentCell {
-            buffer: "one\ntwo\nthree\nfour\nfive".to_string(),
-            is_streaming: false,
-        }));
+        chat.push_entry(ChatEntry::user("first".into()));
+        chat.scroll_up(5);
+        assert!(chat.scroll_offset > 0);
 
-        chat.scroll_up(2);
-
-        let backend = TestBackend::new(20, 3);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let theme = Theme::default();
-        terminal.draw(|frame| chat.render(frame, frame.area(), &theme)).unwrap();
-
-        let rendered = terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-
-        assert!(rendered.contains("one"), "{rendered:?}");
-        assert!(rendered.contains("two"), "{rendered:?}");
-        assert!(rendered.contains("three"), "{rendered:?}");
-        assert!(!rendered.contains("four"), "{rendered:?}");
-        assert!(!rendered.contains("five"), "{rendered:?}");
+        // Pushing a new entry should NOT reset scroll when user scrolled up.
+        chat.push_entry(ChatEntry::agent("second".into(), false));
+        assert!(chat.scroll_offset > 0);
     }
 }

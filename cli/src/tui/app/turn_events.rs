@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::tui::history_cell::{AgentCell, ErrorCell};
+use crate::tui::chat_entry::ChatEntry;
 use telos_agent::TurnEvent;
 
 use super::App;
@@ -26,40 +26,41 @@ impl App {
                 let label = if detail.is_empty() { name.clone() } else { detail.clone() };
                 self.status_text = label;
                 self.turn_tool_calls = self.turn_tool_calls.saturating_add(1);
-                self.tool_activity.push_call(tool_call_id, name, detail);
+                self.chat.push_entry(ChatEntry::tool_call(tool_call_id, name, detail));
             }
             TurnEvent::ToolProgress { tool_call_id, message, .. } => {
                 if !message.starts_with("running command with") {
                     self.status_text = message.to_string();
                 }
-                if let Some(ref id) = tool_call_id {
-                    self.tool_activity.set_progress(id, message);
+                if let Some(ref id) = tool_call_id
+                    && let Some(entry) = self.chat.find_tool_call_mut(id)
+                {
+                    entry.set_running();
+                    entry.add_progress(message);
                 }
             }
             TurnEvent::ToolCompleted { tool_call_id, name, is_error, .. } => {
-                let detail = self.tool_activity.complete(&tool_call_id, name.clone(), !is_error);
                 if is_error {
                     self.turn_tool_failures = self.turn_tool_failures.saturating_add(1);
-                }
-
-                if !is_error {
+                } else {
                     crate::memory_runtime::record_successful_tool(
                         &self.memory,
                         &name,
                         &tool_call_id,
-                        Some(&detail),
+                        None,
                     )
                     .await;
+                }
+                if let Some(entry) = self.chat.find_tool_call_mut(&tool_call_id) {
+                    entry.set_completed(!is_error);
                 }
             }
             TurnEvent::ToolResult(message) => {
                 for result in message.tool_results_iter() {
                     crate::memory_runtime::record_subagent_learning(&self.memory, result).await;
-                    self.tool_activity.add_result_content(
-                        &result.tool_call_id,
-                        &result.content,
-                        result.is_error,
-                    );
+                    if let Some(entry) = self.chat.find_tool_call_mut(&result.tool_call_id) {
+                        entry.add_result_content(&result.content, result.is_error);
+                    }
                     if result.is_error {
                         crate::memory_runtime::record_tool_error(&self.memory, result, None).await;
                     }
@@ -69,14 +70,13 @@ impl App {
                 let had_streamed_assistant = self.chat.has_active_assistant();
                 self.chat.finish_streaming_cells();
                 if !final_text.is_empty() && !had_streamed_assistant {
-                    self.chat
-                        .push_cell(Box::new(AgentCell { buffer: final_text, is_streaming: false }));
+                    self.chat.push_entry(ChatEntry::agent(final_text, false));
                 }
             }
             TurnEvent::TokenBudgetExceeded { used_tokens, max_tokens } => {
-                self.chat.push_cell(Box::new(ErrorCell {
-                    message: format!("token budget exceeded: {used_tokens}/{max_tokens}"),
-                }));
+                self.chat.push_entry(ChatEntry::error(format!(
+                    "token budget exceeded: {used_tokens}/{max_tokens}"
+                )));
             }
             TurnEvent::ProviderRetry { attempt, max_retries, delay_ms } => {
                 self.status_text = format!("retrying ({attempt}/{max_retries}, {delay_ms}ms)");
@@ -112,12 +112,8 @@ impl App {
                     self.turn_cost += estimate.total;
                 }
             }
-            TurnEvent::ApprovalRequested { tool_call_id, name, reason } => {
-                self.tool_activity.approval_requested(&tool_call_id, name, reason);
-            }
-            TurnEvent::ApprovalResolved { tool_call_id, name, decision } => {
-                self.tool_activity.approval_resolved(&tool_call_id, name, decision);
-            }
+            TurnEvent::ApprovalRequested { .. } => {}
+            TurnEvent::ApprovalResolved { .. } => {}
             _ => {}
         }
     }

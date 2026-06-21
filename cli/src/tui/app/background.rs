@@ -99,7 +99,11 @@ pub(super) fn spawn_background_session(
                             }
                         }
                     }
-                    let _ = session.save().await;
+                    if let Err(err) = session.save().await {
+                        let _ = event_tx.send(Event::SessionNotice {
+                            message: format!("session save failed: {err}"),
+                        });
+                    }
                     let _ = event_tx.send(Event::TurnComplete);
                     while let Some(command) = deferred_commands.pop_front() {
                         apply_command_after_turn(

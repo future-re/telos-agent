@@ -7,7 +7,7 @@ use ratatui::widgets::Paragraph;
 use crate::tui::theme::Theme;
 
 /// Braille spinner animation frames.
-const SPINNER_CHARS: &[char] = &['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'];
+pub const SPINNER_CHARS: &[char] = &['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'];
 const STATUS_RESERVE: usize = 20;
 
 /// Render the status bar with an animated spinner, status text, and an optional

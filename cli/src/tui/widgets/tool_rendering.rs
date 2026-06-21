@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::Instant;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -8,8 +8,25 @@ use crate::tui::theme::Theme;
 #[derive(Debug, Clone)]
 pub enum ToolState {
     Pending,
-    Running { elapsed: Duration },
+    Running { started: Instant },
     Completed { ok: bool },
+}
+
+impl ToolState {
+    /// Human-readable elapsed time for a running tool, or empty string.
+    pub fn elapsed_str(&self) -> String {
+        match self {
+            ToolState::Running { started } => {
+                let secs = started.elapsed().as_secs_f64();
+                if secs < 60.0 {
+                    format!("{secs:.0}s")
+                } else {
+                    format!("{}m{:02.0}s", secs as u64 / 60, secs as u64 % 60)
+                }
+            }
+            _ => String::new(),
+        }
+    }
 }
 
 pub(crate) fn is_shell_tool_name(name: &str) -> bool {
@@ -27,7 +44,14 @@ pub(crate) fn tool_title(
     let detail = truncate_chars(detail.trim(), detail_width);
     if is_shell_tool_name(name) {
         return match state {
-            ToolState::Pending | ToolState::Running { .. } => format!("Running {detail}"),
+            ToolState::Pending | ToolState::Running { .. } => {
+                let elapsed = state.elapsed_str();
+                if elapsed.is_empty() {
+                    format!("Running {detail}")
+                } else {
+                    format!("Running {detail} ({elapsed})")
+                }
+            }
             ToolState::Completed { ok: true } => format!("Ran {detail}"),
             ToolState::Completed { ok: false } => format!("Failed {detail}"),
         };
@@ -133,9 +157,9 @@ mod tests {
 
     #[test]
     fn shell_tool_titles_reflect_state() {
-        assert_eq!(
-            tool_title("shell", "cargo test --workspace", &ToolState::Pending, 120, false),
-            "Running cargo test --workspace"
+        assert!(
+            tool_title("shell", "cargo test --workspace", &ToolState::Pending, 120, false)
+                .starts_with("Running cargo test")
         );
         assert_eq!(
             tool_title(

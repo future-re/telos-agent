@@ -24,14 +24,13 @@ use crate::billing::CostCalculator;
 use crate::config::{BillingSection, TuiDensity};
 use crate::tui::approval::PendingApproval;
 use crate::tui::approval_inline;
+use crate::tui::chat_entry::ChatEntry;
 use crate::tui::chat_widget::ChatWidget;
 use crate::tui::event::{AppEvent, Event};
-use crate::tui::history_cell::{SeparatorCell, TurnSummaryCell, UserCell};
 use crate::tui::input_panel::InputPanel;
 use crate::tui::overlay::Overlay;
 use crate::tui::status_bar;
 use crate::tui::theme::Theme;
-use crate::tui::tool_activity::ToolActivityPanel;
 use background::{BackgroundCommand, spawn_background_session};
 use config::save_auto_mode;
 use tasks::task_dir_for_root;
@@ -48,15 +47,14 @@ pub struct ModelSwitchConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TuiLayoutSettings {
     pub input_height: u16,
-    pub tool_activity_max_lines: usize,
 }
 
 impl TuiLayoutSettings {
     pub fn from_density(density: TuiDensity) -> Self {
         match density {
-            TuiDensity::Compact => Self { input_height: 4, tool_activity_max_lines: 6 },
-            TuiDensity::Default => Self { input_height: 5, tool_activity_max_lines: 10 },
-            TuiDensity::Spacious => Self { input_height: 8, tool_activity_max_lines: 14 },
+            TuiDensity::Compact => Self { input_height: 4 },
+            TuiDensity::Default => Self { input_height: 5 },
+            TuiDensity::Spacious => Self { input_height: 8 },
         }
     }
 }
@@ -90,8 +88,6 @@ pub struct App {
     pub chat: ChatWidget,
     /// Input panel at the bottom.
     pub input: InputPanel,
-    /// Compact tool/command activity shown above the input panel.
-    pub tool_activity: ToolActivityPanel,
     /// Density-derived vertical layout settings.
     layout_settings: TuiLayoutSettings,
     /// Active overlay stack (topmost overlay rendered last).
@@ -250,9 +246,6 @@ impl App {
             base_status: base,
             chat: ChatWidget::new(),
             input: InputPanel::new(),
-            tool_activity: ToolActivityPanel::with_max_visible_lines(
-                layout_settings.tool_activity_max_lines,
-            ),
             layout_settings,
             overlays: Vec::new(),
             turn_active: false,
@@ -342,7 +335,7 @@ impl App {
 
     fn push_turn_summary(&mut self) {
         let Some(summary) = self.format_turn_summary() else { return };
-        self.chat.push_cell(Box::new(TurnSummaryCell { content: summary }));
+        self.chat.push_entry(ChatEntry::turn_summary(summary));
     }
 
     fn has_visible_turn_activity(&self) -> bool {
@@ -357,11 +350,13 @@ impl App {
     fn finalize_turn_ui(&mut self) {
         self.chat.finish_streaming_cells();
         self.push_turn_summary();
-        self.chat.push_cell(Box::new(SeparatorCell));
+        self.chat.push_entry(ChatEntry::separator());
     }
 
     fn reset_turn_state(&mut self) {
-        self.mode = Mode::Normal;
+        // Keep Approving mode if an overlay is still open (e.g. /session
+        // popup was opened during streaming).
+        self.mode = if self.overlays.is_empty() { Mode::Normal } else { Mode::Approving };
         self.turn_active = false;
         self.turn_started = None;
         self.reset_turn_usage();
@@ -429,13 +424,12 @@ impl App {
         }
         crate::memory_runtime::record_user_preference(&self.memory, &prompt).await;
         self.input.record_history(prompt.clone());
-        self.chat.push_cell(Box::new(UserCell { content: prompt.clone() }));
+        self.chat.push_entry(ChatEntry::user(prompt.clone()));
         let _ = self.turn_tx.send(BackgroundCommand::Prompt(prompt));
         if self.turn_active {
             self.status_text = "input queued for rethink".to_string();
         } else {
             self.cancellation.reset();
-            self.tool_activity.clear();
             self.base_status = self.status_text.trim_end_matches(" · auto").to_string();
             self.mode = Mode::Streaming;
             self.turn_active = true;
@@ -447,8 +441,7 @@ impl App {
         let area = frame.area();
         let theme = Theme::default();
 
-        // Layout: chat | compact tool activity | inline approval | input | status
-        let activity_height = self.tool_activity.height(area.width as usize);
+        // Layout: chat | approval | activity-line | input | bottom-bar
         let approval_height = if let Some(pending) = &self.inline_approval {
             approval_inline::inline_approval_height(
                 pending,
@@ -459,24 +452,25 @@ impl App {
             0
         };
         let input_height = self.input_panel_height(area.width as usize);
+        let show_activity = self.turn_active;
+        let activity_height = if show_activity { 1 } else { 0 };
         let constraints = vec![
             Constraint::Min(0),                  // chat
-            Constraint::Length(activity_height), // recent tool/command activity
             Constraint::Length(approval_height), // pending approval
+            Constraint::Length(activity_height), // turn activity line
             Constraint::Length(input_height),    // input panel
-            Constraint::Length(1),               // status bar
+            Constraint::Length(1),               // bottom bar
         ];
 
         let layout =
             Layout::default().direction(Direction::Vertical).constraints(constraints).split(area);
 
         self.chat.render(frame, layout[0], &theme);
-        self.tool_activity.render(frame, layout[1], &theme);
         if let Some(pending) = &self.inline_approval {
-            self.inline_approval_area = Some(layout[2]);
+            self.inline_approval_area = Some(layout[1]);
             approval_inline::render(
                 frame,
-                layout[2],
+                layout[1],
                 &theme,
                 pending,
                 self.inline_approval_expanded,
@@ -484,31 +478,47 @@ impl App {
         } else {
             self.inline_approval_area = None;
         }
+
+        // ── Turn activity line (above input) ─────────────────────────
+        if show_activity {
+            let activity_idx = if self.inline_approval.is_some() { 2 } else { 1 };
+            let elapsed = self.format_elapsed();
+            let tokens = self.format_token_usage();
+            let detail = if tokens.is_empty() {
+                format!("{} ({})", self.status_text, elapsed)
+            } else {
+                format!("{} ({} · {})", self.status_text, elapsed, tokens)
+            };
+            let spinner_char =
+                status_bar::SPINNER_CHARS[self.spinner_frame % status_bar::SPINNER_CHARS.len()];
+            let line = ratatui::text::Line::from(ratatui::text::Span::styled(
+                format!(" {} {}", spinner_char, detail),
+                ratatui::style::Style::default().fg(ratatui::style::Color::Rgb(138, 150, 170)),
+            ));
+            frame.render_widget(ratatui::widgets::Paragraph::new(line), layout[activity_idx]);
+        }
+
+        let input_idx = if show_activity {
+            if self.inline_approval.is_some() { 3 } else { 2 }
+        } else {
+            if self.inline_approval.is_some() { 2 } else { 1 }
+        };
+        let bar_idx = input_idx + 1;
+
         self.input.render(
             frame,
-            layout[3],
+            layout[input_idx],
+            &theme,
             self.mode != Mode::Approving,
             self.mode == Mode::Streaming,
             self.spinner_frame,
         );
 
-        // ── Status bar at the bottom ─────────────────────────────────
-        let status = if self.turn_active {
-            let elapsed = self.format_elapsed();
-            let tokens = self.format_token_usage();
-            if tokens.is_empty() {
-                format!("{} ({})", self.status_text, elapsed)
-            } else {
-                format!("{} ({} | {})", self.status_text, elapsed, tokens)
-            }
-        } else {
-            self.status_text.clone()
-        };
-
+        // ── Bottom bar (permanent info) ───────────────────────────────
         status_bar::render(
             frame,
-            layout[4],
-            &status,
+            layout[bar_idx],
+            &self.status_text,
             self.spinner_frame,
             self.turn_total_tokens.unwrap_or(self.turn_input_tokens + self.turn_output_tokens),
             self.token_budget_max,
@@ -525,7 +535,7 @@ impl App {
 mod tests {
     use super::*;
     use crate::config::TuiDensity;
-    use crate::tui::history_cell::SeparatorCell;
+    use crate::tui::chat_entry::ChatEntry;
     use crossterm::event::{
         KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
@@ -573,15 +583,15 @@ mod tests {
     fn layout_settings_map_density_presets() {
         assert_eq!(
             TuiLayoutSettings::from_density(TuiDensity::Compact),
-            TuiLayoutSettings { input_height: 4, tool_activity_max_lines: 6 }
+            TuiLayoutSettings { input_height: 4 }
         );
         assert_eq!(
             TuiLayoutSettings::from_density(TuiDensity::Default),
-            TuiLayoutSettings { input_height: 5, tool_activity_max_lines: 10 }
+            TuiLayoutSettings { input_height: 5 }
         );
         assert_eq!(
             TuiLayoutSettings::from_density(TuiDensity::Spacious),
-            TuiLayoutSettings { input_height: 8, tool_activity_max_lines: 14 }
+            TuiLayoutSettings { input_height: 8 }
         );
     }
 
@@ -805,50 +815,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn normal_enter_does_not_toggle_activity() {
-        let config = telos_agent::AgentConfig::default();
-        let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
-        let tools = telos_agent::ToolRegistry::new();
-        let temp = tempfile::tempdir().unwrap();
-        let memory = Arc::new(Mutex::new(MemoryStore::new(temp.path().join("memory"))));
-
-        let mut app = App::new(
-            config,
-            provider,
-            tools,
-            "telos".into(),
-            Some(temp.path()),
-            temp.path(),
-            false,
-            memory,
-            ModelSwitchConfig::default(),
-            None,
-        )
-        .unwrap();
-        app.tool_activity.push_call("call-1".into(), "Bash".into(), "cargo test".into());
-        app.tool_activity.complete("call-1", "Bash".into(), true);
-        app.tool_activity.add_result_content(
-            "call-1",
-            &serde_json::json!({"stdout": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n", "stderr": ""}),
-            false,
-        );
-
-        let before = app.tool_activity.height(80);
-        app.handle_event(Event::Key(crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        )))
-        .await
-        .unwrap();
-
-        assert_eq!(app.tool_activity.height(80), before);
-    }
-
-    #[tokio::test]
     async fn ctrl_l_with_extra_shift_modifier_clears_chat() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = test_app(&temp);
-        app.chat.push_cell(Box::new(SeparatorCell));
+        app.chat.push_entry(ChatEntry::separator());
 
         app.handle_event(Event::Key(KeyEvent::new(
             KeyCode::Char('L'),
@@ -911,52 +881,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(app.chat.scroll_offset, 2);
-    }
-
-    #[tokio::test]
-    async fn approval_events_update_live_tool_activity() {
-        let config = telos_agent::AgentConfig::default();
-        let provider = Arc::new(telos_agent::MockProvider::new(vec![]));
-        let tools = telos_agent::ToolRegistry::new();
-        let temp = tempfile::tempdir().unwrap();
-        let memory = Arc::new(Mutex::new(MemoryStore::new(temp.path().join("memory"))));
-
-        let mut app = App::new(
-            config,
-            provider,
-            tools,
-            "telos".into(),
-            Some(temp.path()),
-            temp.path(),
-            false,
-            memory,
-            ModelSwitchConfig::default(),
-            None,
-        )
-        .unwrap();
-
-        app.handle_turn_event(TurnEvent::ToolCall {
-            tool_call_id: "call-1".into(),
-            name: "Bash".into(),
-            detail: "rm important-file".into(),
-        })
-        .await;
-        app.handle_turn_event(TurnEvent::ApprovalRequested {
-            tool_call_id: "call-1".into(),
-            name: "Bash".into(),
-            reason: "requires approval".into(),
-        })
-        .await;
-        app.handle_turn_event(TurnEvent::ApprovalResolved {
-            tool_call_id: "call-1".into(),
-            name: "Bash".into(),
-            decision: "approved".into(),
-        })
-        .await;
-
-        let compact_height = app.tool_activity.height(80);
-        assert!(app.tool_activity.toggle_selected());
-        assert!(app.tool_activity.height(80) > compact_height);
     }
 
     #[tokio::test]

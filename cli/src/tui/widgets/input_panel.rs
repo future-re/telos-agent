@@ -162,11 +162,20 @@ impl InputPanel {
             return true;
         }
 
+        // Claim Up/Down when:
+        // - multiline text (textarea consumes them for cursor movement)
+        // - history browsing is active
+        // - history exists and input is empty (Up can start browsing)
         match (key.code, key.modifiers) {
             (KeyCode::Up, KeyModifiers::NONE) => {
-                self.history_pos.is_some() || !self.is_empty() || !self.history.is_empty()
+                !self.is_empty() // multiline cursor movement
+                    || self.history_pos.is_some() // already browsing
+                    || !self.history.is_empty() // can initiate browsing
             }
-            (KeyCode::Down, KeyModifiers::NONE) => self.history_pos.is_some() || !self.is_empty(),
+            (KeyCode::Down, KeyModifiers::NONE) => {
+                !self.is_empty() // multiline cursor movement
+                    || self.history_pos.is_some() // browsing
+            }
             (KeyCode::Up | KeyCode::Down, modifiers) if is_ctrl_modifier(modifiers) => {
                 !self.history.is_empty()
             }
@@ -203,13 +212,6 @@ impl InputPanel {
             // ── Newline ─────────────────────────────────────────────
             (KeyCode::Enter, KeyModifiers::ALT) => {
                 self.textarea.insert_newline();
-                // Check if first char on first line is '/'
-                let first_line = self.textarea.lines().first().cloned().unwrap_or_default();
-                if first_line == "/" && self.textarea.lines().len() == 1 {
-                    self.mode = InputMode::SlashCommand;
-                    self.popup.show();
-                    self.textarea.move_cursor(tui_textarea::CursorMove::End);
-                }
                 InputEvent::None
             }
             // ── Slash command detection ─────────────────────────────
@@ -388,12 +390,11 @@ impl InputPanel {
         &self,
         frame: &mut Frame,
         area: Rect,
+        theme: &Theme,
         active: bool,
         turn_active: bool,
         spinner_frame: usize,
     ) {
-        let theme = Theme::default();
-
         // ── Border style ─────────────────
         let (border_style, title) = if turn_active {
             let style = Style::default().fg(Color::Rgb(100, 200, 245)).add_modifier(Modifier::BOLD);
@@ -417,10 +418,12 @@ impl InputPanel {
         let mut block = Block::default()
             .borders(Borders::ALL)
             .border_style(border_style)
-            .title_top(Line::from(title).left_aligned());
+            .title(Line::from(title).left_aligned());
 
+        // Add "/ commands" hint as a second title (right-aligned) so it
+        // doesn't overwrite the primary "Compose" / "Running…" title.
         if active && !matches!(self.mode, InputMode::Pasting { .. }) {
-            block = block.title_top(
+            block = block.title(
                 Line::from(Span::styled(
                     " / commands ",
                     Style::default().fg(theme.thinking_fg).add_modifier(Modifier::DIM),
@@ -471,11 +474,11 @@ impl InputPanel {
             width: inner.width.saturating_sub(PROMPT_WIDTH),
             height: inner.height.saturating_sub(1),
         };
-        self.render_composer_text(frame, input_area, active, &theme);
+        self.render_composer_text(frame, input_area, active, theme);
 
         // Render command popup above the input area
         if self.popup.visible {
-            self.popup.render(frame, input_area, &theme);
+            self.popup.render(frame, input_area, theme);
         }
     }
 
@@ -510,14 +513,17 @@ impl InputPanel {
             .take(height)
             .map(|line| Line::from(Span::styled(line, style)))
             .collect::<Vec<_>>();
+        let vis_line_count = lines.len().max(1) as u16;
 
         frame.render_widget(Paragraph::new(Text::from(lines)), area);
 
         if active && !self.is_empty() {
+            // Clamp cursor Y to actual rendered text, not just the area.
             frame.set_cursor_position(Position {
                 x: area.x + (cursor_col as u16).min(area.width.saturating_sub(1)),
                 y: area.y
                     + (cursor_row.saturating_sub(top_row) as u16)
+                        .min(vis_line_count.saturating_sub(1))
                         .min(area.height.saturating_sub(1)),
             });
         }
@@ -590,6 +596,7 @@ impl Default for InputPanel {
 #[cfg(test)]
 mod tests {
     use super::{ComposerHints, InputMode, InputPanel, SlashCommand};
+    use crate::tui::theme::Theme;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -650,7 +657,9 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(60, 4);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
 
-        terminal.draw(|frame| panel.render(frame, frame.area(), true, false, 0)).unwrap();
+        terminal
+            .draw(|frame| panel.render(frame, frame.area(), &Theme::default(), true, false, 0))
+            .unwrap();
 
         let rendered = terminal
             .backend()
@@ -670,7 +679,9 @@ mod tests {
         let backend = TestBackend::new(24, 6);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        terminal.draw(|frame| panel.render(frame, frame.area(), true, false, 0)).unwrap();
+        terminal
+            .draw(|frame| panel.render(frame, frame.area(), &Theme::default(), true, false, 0))
+            .unwrap();
 
         let first_input_row = rendered_row(&terminal, 1);
         let second_input_row = rendered_row(&terminal, 2);
@@ -691,7 +702,9 @@ mod tests {
         let backend = TestBackend::new(24, 6);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        terminal.draw(|frame| panel.render(frame, frame.area(), true, false, 0)).unwrap();
+        terminal
+            .draw(|frame| panel.render(frame, frame.area(), &Theme::default(), true, false, 0))
+            .unwrap();
 
         terminal.backend_mut().assert_cursor_position(Position::new(6, 1));
     }

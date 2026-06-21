@@ -28,7 +28,10 @@ fn load_toml_config(path: &Path) -> toml::Value {
     if contents.is_empty() {
         toml::Value::Table(toml::Table::new())
     } else {
-        toml::from_str(&contents).unwrap_or(toml::Value::Table(toml::Table::new()))
+        toml::from_str(&contents).unwrap_or_else(|err| {
+            tracing::warn!("failed to parse config at {}: {err}", path.display());
+            toml::Value::Table(toml::Table::new())
+        })
     }
 }
 

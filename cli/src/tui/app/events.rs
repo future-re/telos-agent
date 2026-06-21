@@ -2,8 +2,8 @@ use std::sync::atomic::Ordering;
 
 use crossterm::event::{KeyCode, KeyModifiers};
 
+use crate::tui::chat_entry::ChatEntry;
 use crate::tui::event::{AppEvent, Event};
-use crate::tui::history_cell::{ErrorCell, SeparatorCell};
 use crate::tui::input_panel::InputMode;
 use crate::tui::keymap::{is_ctrl_char, is_shift_tab};
 use crate::tui::overlay::{ApprovalOverlay, OverlayAction};
@@ -15,7 +15,7 @@ impl App {
     pub async fn handle_event(&mut self, event: Event) -> anyhow::Result<()> {
         match event {
             Event::Key(key) => {
-                // Global shortcuts.
+                // ── Global shortcuts ───────────────────────────────────
                 if is_ctrl_char(key, 'd') && self.input.is_empty() {
                     self.should_quit = true;
                     return Ok(());
@@ -24,15 +24,22 @@ impl App {
                     if self.turn_active {
                         self.cancellation.cancel();
                         self.chat.finish_streaming_cells();
-                        self.mode = Mode::Normal;
-                        self.input.clear();
-                        self.status_text = "cancelling…".to_string();
                     }
+                    // Clean up any open overlays and pending approvals.
+                    self.clear_pending_approvals();
+                    self.overlays.clear();
+                    self.editing_approval = None;
+                    self.mode = Mode::Normal;
+                    self.input.clear();
+                    self.status_text = if self.turn_active {
+                        "cancelling…".to_string()
+                    } else {
+                        self.base_status.clone()
+                    };
                     return Ok(());
                 }
                 if is_ctrl_char(key, 'l') {
                     self.chat.clear();
-                    self.tool_activity.clear();
                     self.chat.scroll_to_bottom();
                     return Ok(());
                 }
@@ -41,6 +48,7 @@ impl App {
                     return Ok(());
                 }
 
+                // Shift+Tab toggles auto-approve mode.
                 if is_shift_tab(key) {
                     let on = !self.auto_mode.load(Ordering::Relaxed);
                     self.auto_mode.store(on, Ordering::Relaxed);
@@ -48,23 +56,26 @@ impl App {
                     return Ok(());
                 }
 
+                // ── Inline approval shortcuts ─────────────────────────
+                // Match on key code only, ignoring modifiers so Caps Lock
+                // and Shift don't break the shortcuts.
                 if self.inline_approval.is_some() {
-                    match (key.code, key.modifiers) {
-                        (KeyCode::Char('a') | KeyCode::Char('y'), KeyModifiers::NONE) => {
+                    match key.code {
+                        KeyCode::Char(c) if matches!(c.to_ascii_lowercase(), 'a' | 'y') => {
                             self.resolve_inline_approval(telos_agent::ApprovalDecision::Allow);
                             return Ok(());
                         }
-                        (KeyCode::Char('d') | KeyCode::Char('n'), KeyModifiers::NONE) => {
+                        KeyCode::Char(c) if matches!(c.to_ascii_lowercase(), 'd' | 'n') => {
                             self.resolve_inline_approval(telos_agent::ApprovalDecision::Deny {
                                 reason: "denied by user".into(),
                             });
                             return Ok(());
                         }
-                        (KeyCode::Char('e'), KeyModifiers::NONE) => {
+                        KeyCode::Char(c) if c.eq_ignore_ascii_case(&'e') => {
                             self.open_inline_approval_edit_popup();
                             return Ok(());
                         }
-                        (KeyCode::Char('t') | KeyCode::Char(' '), KeyModifiers::NONE) => {
+                        KeyCode::Char(c) if c == 't' || c == 'T' || c == ' ' => {
                             self.toggle_inline_approval_expanded();
                             return Ok(());
                         }
@@ -72,6 +83,7 @@ impl App {
                     }
                 }
 
+                // ── Mode-specific handling ─────────────────────────────
                 match self.mode {
                     Mode::Approving => {
                         if let Some(overlay) = self.overlays.last_mut() {
@@ -132,25 +144,13 @@ impl App {
                                 return Ok(());
                             }
                             (KeyCode::Tab, _) => {
-                                if self.tool_activity.is_empty() {
-                                    self.chat.select_next_tool();
-                                } else {
-                                    self.tool_activity.select_next();
-                                }
+                                self.chat.select_next_tool();
                                 return Ok(());
                             }
-                            (KeyCode::BackTab, _) => {
-                                if self.tool_activity.is_empty() {
-                                    self.chat.select_prev_tool();
-                                } else {
-                                    self.tool_activity.select_prev();
-                                }
-                                return Ok(());
-                            }
-                            (KeyCode::Char('t'), true)
-                                if self.tool_activity.toggle_selected()
-                                    || self.chat.toggle_selected_tool() =>
-                            {
+                            // Shift+Tab is reserved for auto-mode toggle;
+                            // no reverse-tab navigation is wired here.
+                            (KeyCode::Char('t'), true) => {
+                                self.chat.toggle_selected_tool();
                                 return Ok(());
                             }
                             _ => {}
@@ -179,24 +179,11 @@ impl App {
                                 return Ok(());
                             }
                             (KeyCode::Tab, _) => {
-                                if self.tool_activity.is_empty() {
-                                    self.chat.select_next_tool();
-                                } else {
-                                    self.tool_activity.select_next();
-                                }
-                                return Ok(());
-                            }
-                            (KeyCode::BackTab, _) => {
-                                if self.tool_activity.is_empty() {
-                                    self.chat.select_prev_tool();
-                                } else {
-                                    self.tool_activity.select_prev();
-                                }
+                                self.chat.select_next_tool();
                                 return Ok(());
                             }
                             (KeyCode::Char(' '), _) | (KeyCode::Char('t'), true) => {
-                                let _ = self.tool_activity.toggle_selected()
-                                    || self.chat.toggle_selected_tool();
+                                self.chat.toggle_selected_tool();
                                 return Ok(());
                             }
                             _ => {}
@@ -209,7 +196,21 @@ impl App {
             }
             Event::Tick => {
                 self.spinner_frame = self.spinner_frame.wrapping_add(1);
-                while let Ok(event) = self.turn_rx.try_recv() {
+                // Drain approvals *before* turn events so a TurnComplete
+                // on turn_rx doesn't leave an approval from the same turn
+                // stranded on approval_rx.
+                while let Ok(pending) = self.approval_rx.try_recv() {
+                    self.enqueue_inline_approval(pending);
+                }
+                // Process at most 8 turn events per tick to avoid
+                // blocking the render loop when the background agent
+                // produces many results at once.
+                const MAX_TURN_EVENTS_PER_TICK: usize = 8;
+                let mut processed = 0;
+                while processed < MAX_TURN_EVENTS_PER_TICK
+                    && let Ok(event) = self.turn_rx.try_recv()
+                {
+                    processed += 1;
                     match event {
                         Event::Turn(turn_event) => self.handle_turn_event(turn_event).await,
                         Event::TurnComplete => {
@@ -221,11 +222,11 @@ impl App {
                         Event::SessionError { message } => {
                             self.chat.finish_streaming_cells();
                             if message != "cancelled" {
-                                self.chat.push_cell(Box::new(ErrorCell { message }));
+                                self.chat.push_entry(ChatEntry::error(message));
                             }
                             if self.has_visible_turn_activity() {
                                 self.push_turn_summary();
-                                self.chat.push_cell(Box::new(SeparatorCell));
+                                self.chat.push_entry(ChatEntry::separator());
                             }
                             self.reset_turn_state();
                         }
@@ -235,9 +236,6 @@ impl App {
                         }
                         _ => {}
                     }
-                }
-                while let Ok(pending) = self.approval_rx.try_recv() {
-                    self.enqueue_inline_approval(pending);
                 }
                 while let Ok(app_event) = self.app_event_rx.try_recv() {
                     match app_event {

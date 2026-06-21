@@ -50,10 +50,15 @@ impl ApprovalOverlay {
     }
 
     pub fn take_edit_request(&mut self) -> Option<PendingApproval> {
-        self.edit_requested.then(|| PendingApproval {
-            request: self.pending.request.clone(),
-            respond: self.pending.respond.take(),
-        })
+        if self.edit_requested {
+            self.edit_requested = false;
+            Some(PendingApproval {
+                request: self.pending.request.clone(),
+                respond: self.pending.respond.take(),
+            })
+        } else {
+            None
+        }
     }
 
     pub fn remember(&self) -> bool {
@@ -153,7 +158,7 @@ impl Overlay for ApprovalOverlay {
         }
 
         let text = Text::from(text_lines);
-        let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
+        let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: false });
 
         frame.render_widget(Clear, popup_area(area));
         frame.render_widget(paragraph, popup_area(area));
@@ -181,7 +186,7 @@ impl Overlay for ApprovalOverlay {
             }
             KeyCode::Char('r') => {
                 self.remember = !self.remember;
-                OverlayAction::Handled
+                OverlayAction::None // stay visible, no external action needed
             }
             _ => OverlayAction::None,
         }
@@ -210,10 +215,11 @@ fn popup_area(area: Rect) -> Rect {
 
 /// Count how many lines `text` will occupy when wrapped at `width` columns.
 pub fn count_wrapped_lines(text: &str, width: usize) -> usize {
+    let width = width.max(1); // guard against division by zero
     text.lines()
         .map(|line| {
             let chars = line.chars().count();
-            if chars == 0 { 1 } else { (chars + width.saturating_sub(1)) / width }
+            if chars == 0 { 1 } else { chars.div_ceil(width) }
         })
         .sum::<usize>()
         .max(1)
@@ -257,7 +263,7 @@ pub fn approval_content_lines(tool_name: &str, args: &serde_json::Value, width: 
             lines += count_wrapped_lines(&format!("  {}", aline), width);
         }
     }
-    lines + 1 // hint line
+    lines + 2 // blank line before hint + hint line
 }
 
 /// Truncate a string for display in a popup, adding an ellipsis if truncated.

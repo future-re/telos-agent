@@ -101,22 +101,28 @@ fn take_display_chunk(input: &str, max_chars: usize) -> (&str, &str) {
         return (input, "");
     }
 
-    let mut boundary = input.len();
+    let mut hard_boundary = input.len();
+    let mut soft_boundary = 0usize; // last whitespace before hard_boundary
     for (count, (idx, ch)) in input.char_indices().enumerate() {
         if count == max_chars {
-            boundary = idx;
+            hard_boundary = idx;
             break;
         }
         if ch.is_whitespace() && count > 0 {
-            boundary = idx;
+            soft_boundary = idx;
         }
     }
 
-    if boundary == input.len() || boundary == 0 {
-        boundary = input.char_indices().nth(max_chars).map(|(idx, _)| idx).unwrap_or(input.len());
-    }
+    // Prefer whitespace break if one was found.
+    let boundary = if soft_boundary > 0 { soft_boundary } else { hard_boundary };
 
-    input.split_at(boundary)
+    if boundary == input.len() || boundary == 0 {
+        let fallback =
+            input.char_indices().nth(max_chars).map(|(idx, _)| idx).unwrap_or(input.len());
+        input.split_at(fallback)
+    } else {
+        input.split_at(boundary)
+    }
 }
 
 fn clean_review_reason(reason: &str) -> String {

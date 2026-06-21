@@ -155,9 +155,7 @@ impl Overlay for UserInputPopup {
             KeyCode::Enter => {
                 let mut map = HashMap::new();
                 for q in &self.questions {
-                    let val =
-                        if q.value.is_empty() { q.placeholder.clone() } else { q.value.clone() };
-                    map.insert(q.key.clone(), val);
+                    map.insert(q.key.clone(), q.value.clone());
                 }
                 self.result = Some(Some(map));
                 OverlayAction::Pop

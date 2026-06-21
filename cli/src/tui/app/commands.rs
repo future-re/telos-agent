@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use crate::tui::approval::PendingApproval;
+use crate::tui::chat_entry::ChatEntry;
 use crate::tui::command_popup::SlashCommand;
-use crate::tui::history_cell::{AgentCell, ErrorCell, UserCell};
 use crate::tui::input_panel::InputEvent;
 use crate::tui::overlay::Overlay;
 use crate::tui::selection_popup::SelectionPopup;
@@ -42,6 +42,27 @@ impl App {
         }
         self.inline_approval = self.inline_approval_queue.pop_front();
         self.inline_approval_expanded = false;
+    }
+
+    /// Deny all pending approvals (inline + queued + editing) to unblock
+    /// the background agent. Called on Ctrl+C.
+    pub(super) fn clear_pending_approvals(&mut self) {
+        let deny = telos_agent::ApprovalDecision::Deny { reason: "cancelled".into() };
+        if let Some(mut pending) = self.inline_approval.take()
+            && let Some(tx) = pending.respond.take()
+        {
+            let _ = tx.send(deny.clone());
+        }
+        while let Some(mut pending) = self.inline_approval_queue.pop_front() {
+            if let Some(tx) = pending.respond.take() {
+                let _ = tx.send(deny.clone());
+            }
+        }
+        if let Some(mut pending) = self.editing_approval.take()
+            && let Some(tx) = pending.respond.take()
+        {
+            let _ = tx.send(deny);
+        }
     }
 
     pub(super) fn open_inline_approval_edit_popup(&mut self) {
@@ -107,16 +128,11 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
   /auto    — toggle auto-approve mode\n\
   Ctrl+D   — quit when input is empty\n\
   /help    — show this help";
-                self.chat.push_cell(Box::new(UserCell { content: format!("/{cmd:?}") }));
-                self.chat.push_cell(Box::new(AgentCell {
-                    buffer: help_text.to_string(),
-                    is_streaming: false,
-                }));
+                self.chat.push_entry(ChatEntry::user(format!("/{cmd:?}")));
+                self.chat.push_entry(ChatEntry::agent(help_text.to_string(), false));
             }
             SlashCommand::Clear => {
-                // App already has Ctrl+L for clear; /clear does the same
                 self.chat.clear();
-                self.tool_activity.clear();
                 self.chat.scroll_to_bottom();
             }
             SlashCommand::Auto => {
@@ -274,28 +290,25 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
     fn set_deepseek_api_key(&mut self, key: String) {
         let key = key.trim().to_string();
         if key.is_empty() {
-            self.chat.push_cell(Box::new(ErrorCell {
-                message: "API key was empty; no changes saved".to_string(),
-            }));
+            self.chat
+                .push_entry(ChatEntry::error("API key was empty; no changes saved".to_string()));
             return;
         }
         self.model_switch.deepseek_api_key = Some(key.clone());
         if let Some(base) = dirs::config_dir() {
             let path = base.join("telos").join("config.toml");
             if let Err(err) = save_deepseek_api_key(&path, &key) {
-                self.chat.push_cell(Box::new(ErrorCell {
-                    message: format!("failed to save API key: {err}"),
-                }));
+                self.chat.push_entry(ChatEntry::error(format!("failed to save API key: {err}")));
                 return;
             }
         }
         self.switch_to_default_deepseek_provider(&key);
         self.status_text = "telos · API key configured".to_string();
         self.base_status = self.status_text.clone();
-        self.chat.push_cell(Box::new(AgentCell {
-            buffer: "DeepSeek API key configured and applied to the current session.".to_string(),
-            is_streaming: false,
-        }));
+        self.chat.push_entry(ChatEntry::agent(
+            "DeepSeek API key configured and applied to the current session.".to_string(),
+            false,
+        ));
     }
 
     fn switch_to_default_deepseek_provider(&mut self, key: &str) {
@@ -312,9 +325,9 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
 
     fn switch_model(&mut self, model: &str) {
         let Some(api_key) = self.model_switch.deepseek_api_key.clone() else {
-            self.chat.push_cell(Box::new(ErrorCell {
-                message: "cannot switch model: missing DeepSeek API key".to_string(),
-            }));
+            self.chat.push_entry(ChatEntry::error(
+                "cannot switch model: missing DeepSeek API key".to_string(),
+            ));
             return;
         };
 
@@ -351,11 +364,8 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
         }
         self.base_status = self.status_text.clone();
         self.update_auto_mode_status();
-        self.chat.push_cell(Box::new(UserCell { content: format!("/model {label}") }));
-        self.chat.push_cell(Box::new(AgentCell {
-            buffer: format!("Switched model to: {label}"),
-            is_streaming: false,
-        }));
+        self.chat.push_entry(ChatEntry::user(format!("/model {label}")));
+        self.chat.push_entry(ChatEntry::agent(format!("Switched model to: {label}"), false));
     }
 }
 

@@ -182,6 +182,12 @@ async fn run_child_agent(
     config.storage = None;
     config.base_system_prompt = Some(system_prompt);
     config.prompt_assembly = None;
+    // Subagent internal tool calls should NOT inherit the parent's approval
+    // handler or permission engine. The parent already approved the subagent
+    // call itself, and gating every child tool call (Bash, Read, Write, etc.)
+    // with interactive prompts would make the subagent unusable.
+    config.approval_handler = None;
+    config.permission_engine = None;
     if let Some(max_iterations) = max_iterations {
         config.max_iterations = Some(max_iterations);
     }

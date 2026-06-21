@@ -48,12 +48,17 @@ class ToolCard(Widget):
         if not self._expanded or not e.result_lines:
             return header
 
-        result_lines = [str(header)]
+        result = Text()
+        result.append_text(header)
         for line in e.result_lines[:6]:
-            result_lines.append(f"    {line}")
+            result.append("\n    ")
+            if isinstance(line, Text):
+                result.append_text(line)
+            else:
+                result.append(str(line))
 
         return Panel(
-            "\n".join(result_lines),
+            result,
             border_style="blue",
             padding=(0, 1),
         )

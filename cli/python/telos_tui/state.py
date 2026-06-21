@@ -89,14 +89,15 @@ class AppState(DOMNode):
                     status: str = "") -> None:
         """Insert or update a tool entry."""
         entries = list(self.tool_entries)
-        for e in entries:
+        for i, e in enumerate(entries):
             if e.call_id == call_id:
-                if name:
-                    e.name = name
-                if detail:
-                    e.detail = detail
-                if status:
-                    e.status = status
+                new_name = name if name else e.name
+                new_detail = detail if detail else e.detail
+                new_status = status if status else e.status
+                entries[i] = ToolEntry(
+                    call_id=e.call_id, name=new_name, detail=new_detail,
+                    status=new_status, result_lines=list(e.result_lines)
+                )
                 self.tool_entries = entries  # type: ignore[assignment]
                 return
         entries.append(ToolEntry(call_id=call_id, name=name, detail=detail,
@@ -106,11 +107,14 @@ class AppState(DOMNode):
     def tool_result(self, call_id: str, result: str, is_error: bool = False) -> None:
         """Append result lines to a tool entry."""
         entries = list(self.tool_entries)
-        for e in entries:
+        for i, e in enumerate(entries):
             if e.call_id == call_id:
-                e.result_lines = result.splitlines()[:8]
-                if is_error:
-                    e.status = "error"
+                new_status = "error" if is_error else e.status
+                entries[i] = ToolEntry(
+                    call_id=e.call_id, name=e.name, detail=e.detail,
+                    status=new_status,
+                    result_lines=result.splitlines()[:8]
+                )
                 self.tool_entries = entries  # type: ignore[assignment]
                 return
 
@@ -121,3 +125,7 @@ class AppState(DOMNode):
         self.pending_approval = None
         self.streaming = False
         self.status_text = "telos · new session"
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self.cost = 0.0
+        self.turn_elapsed = 0.0

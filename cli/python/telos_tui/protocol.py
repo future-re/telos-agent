@@ -61,8 +61,13 @@ class ServeProtocol:
         if not self.process or not self.process.stdin:
             return
         line = json.dumps(cmd) + "\n"
-        self.process.stdin.write(line.encode())
-        await self.process.stdin.drain()
+        try:
+            self.process.stdin.write(line.encode())
+            await asyncio.wait_for(self.process.stdin.drain(), timeout=5.0)
+        except asyncio.TimeoutError:
+            pass  # drain timeout, process may be stuck
+        except Exception:
+            pass
 
     async def receive_event(self) -> Optional[dict]:
         """Get the next event from the queue. Returns None if stopped."""

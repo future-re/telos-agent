@@ -58,8 +58,6 @@ class TelosTuiApp(App):
     BINDINGS = [
         ("ctrl+c", "quit", "Quit"),
         ("escape", "focus_input", "Focus Input"),
-        ("y", "approve_allow", "Allow"),
-        ("n", "approve_deny", "Deny"),
     ]
 
     def __init__(self) -> None:
@@ -92,7 +90,7 @@ class TelosTuiApp(App):
             event = await self.protocol.receive_event()
             if event is None:
                 break
-            self.call_from_thread(self.event_loop.handle_event, event)
+            self.event_loop.handle_event(event)
 
     # ── input ──────────────────────────────────────────────────────
 
@@ -127,13 +125,26 @@ class TelosTuiApp(App):
                 self._safe_send_command({"cmd": "new_session"})
             )
         elif cmd == "/auto":
+            # TODO: wire to backend serve.rs once it supports auto-approve
             self.state.auto_approve = not self.state.auto_approve
             s = "ON" if self.state.auto_approve else "OFF"
-            self.state.add_message(Message(role="system", text=f"Auto-approve: {s}"))
+            self.state.add_message(Message(role="system", text=f"Auto-approve: {s} (client-side only)"))
         else:
             self.state.add_message(
                 Message(role="system", text=f"Unknown command: {cmd}")
             )
+
+    # ── key events ─────────────────────────────────────────────────
+
+    def on_key(self, event) -> None:
+        """Handle y/n for approval only when pending, otherwise let key propagate."""
+        if self.state.pending_approval is not None:
+            if event.key == "y":
+                event.stop()
+                self.action_approve_allow()
+            elif event.key == "n":
+                event.stop()
+                self.action_approve_deny()
 
     # ── approval ───────────────────────────────────────────────────
 

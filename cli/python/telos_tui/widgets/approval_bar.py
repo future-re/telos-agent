@@ -86,4 +86,12 @@ class ApprovalBar(Widget):
             )
         )
 
-        return Panel("\n".join(str(s) for s in lines), border_style="yellow")
+        result = Text()
+        for i, s in enumerate(lines):
+            if i > 0:
+                result.append("\n")
+            if isinstance(s, Text):
+                result.append_text(s)
+            else:
+                result.append(str(s))
+        return Panel(result, border_style="yellow")

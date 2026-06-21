@@ -1,6 +1,6 @@
 """Event dispatch — translates telos serve events into AppState updates."""
 
-from .state import AppState, Message
+from .state import AppState, Message, ToolEntry
 from .streaming import StreamBuffer
 
 
@@ -61,6 +61,7 @@ class EventLoop:
             self.state.streaming = False
             self.state.status_text = "telos · ready"
         elif event_type == "_error":
+            self._flush_assistant()
             self._flush_thinking()
             msg = event.get("message", "unknown error")
             self.state.add_message(Message(role="system", text=f"Error: {msg}"))
@@ -72,6 +73,26 @@ class EventLoop:
             self.state.status_text = "telos · compacting…"
         elif event_type == "CompactionCompleted":
             self.state.status_text = "telos · ready"
+        elif event_type == "TokenBudgetExceeded":
+            limit = event.get("limit", "?")
+            self.state.add_message(Message(
+                role="system",
+                text=f"Token budget exceeded: {limit}"
+            ))
+        elif event_type == "ProviderRetry":
+            self.state.status_text = (
+                f"telos · retrying (attempt {event.get('attempt', '?')})..."
+            )
+        elif event_type == "IterationStarted":
+            self._flush_assistant()
+            self.state.status_text = "telos · next iteration..."
+        elif event_type == "HookStarted":
+            self.state.status_text = f"telos · hook: {event.get('name', '?')}..."
+        elif event_type == "HookCompleted":
+            self.state.status_text = "telos · ready"
+        else:
+            import sys
+            print(f"[telos-tui] unknown event: {event_type}", file=sys.stderr)
 
     # ── handlers ─────────────────────────────────────────────────
 
@@ -129,9 +150,13 @@ class EventLoop:
         msg = event.get("message", "")
         if msg and call_id:
             entries = list(self.state.tool_entries)
-            for e in entries:
+            for i, e in enumerate(entries):
                 if e.call_id == call_id:
-                    e.result_lines.append(msg)
+                    new_lines = list(e.result_lines) + [msg]
+                    entries[i] = ToolEntry(
+                        call_id=e.call_id, name=e.name, detail=e.detail,
+                        status=e.status, result_lines=new_lines
+                    )
                     self.state.tool_entries = entries  # type: ignore[assignment]
                     break
 
@@ -161,17 +186,10 @@ class EventLoop:
     def _handle_provider_usage(self, event: dict) -> None:
         self.state.input_tokens = event.get("input_tokens", 0)
         self.state.output_tokens = event.get("output_tokens", 0)
-        total = event.get("total_tokens") or (
-            self.state.input_tokens + self.state.output_tokens
-        )
-        self.state.cost = event.get("cost", 0.0)
         self.state.token_budget_max = event.get("token_budget_max", 0)
         up_k = self.state.input_tokens / 1000
         down_k = self.state.output_tokens / 1000
-        parts = [f"telos · up {up_k:.1f}k down {down_k:.1f}k"]
-        if self.state.cost > 0:
-            parts.append(f"${self.state.cost:.4f}")
-        self.state.status_text = " · ".join(parts)
+        self.state.status_text = f"telos · up {up_k:.1f}k down {down_k:.1f}k"
 
     def _flush_assistant(self) -> None:
         self._flush_thinking()

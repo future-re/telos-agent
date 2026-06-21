@@ -13,6 +13,7 @@ class StreamBuffer:
 
     def __init__(self, throttle_ms: int = 50) -> None:
         self._buffer: list[str] = []
+        self._full_text: str = ""
         self._throttle_ms = throttle_ms
         self._last_render = time.monotonic()
         self._rendered_len = 0
@@ -20,10 +21,11 @@ class StreamBuffer:
     def feed(self, delta: str) -> str | None:
         """Feed a delta. Returns the full text if it's time to render, else None."""
         self._buffer.append(delta)
+        self._full_text += delta
         now = time.monotonic()
         elapsed_ms = (now - self._last_render) * 1000
 
-        full = "".join(self._buffer)
+        full = self._full_text
         # Always render on a paragraph boundary
         if "\n\n" in full[self._rendered_len:]:
             self._rendered_len = len(full)
@@ -38,7 +40,7 @@ class StreamBuffer:
 
     def flush(self) -> str | None:
         """Force-render whatever remains. Returns None if nothing new."""
-        full = "".join(self._buffer)
+        full = self._full_text
         if len(full) > self._rendered_len:
             self._rendered_len = len(full)
             return full
@@ -47,5 +49,6 @@ class StreamBuffer:
     def reset(self) -> None:
         """Reset for a new streaming message."""
         self._buffer = []
+        self._full_text = ""
         self._rendered_len = 0
         self._last_render = time.monotonic()

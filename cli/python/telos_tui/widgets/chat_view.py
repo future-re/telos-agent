@@ -22,13 +22,21 @@ class ChatView(VerticalScroll):
     }
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._last_msg_count = 0
+        self.set_interval(0.1, self._poll_messages)
+
     @property
     def state(self) -> "AppState":
         return self.app.state  # type: ignore[attr-defined]
 
-    def watch_state_messages(self) -> None:
-        """Rebuild children when messages list changes."""
-        self._rebuild()
+    def _poll_messages(self) -> None:
+        """Poll messages list and rebuild when it changes."""
+        current = len(self.state.messages)
+        if current != self._last_msg_count:
+            self._last_msg_count = current
+            self._rebuild()
 
     def _rebuild(self) -> None:
         """Recreate all message bubbles. Textual handles diffing."""

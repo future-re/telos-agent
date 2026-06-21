@@ -46,8 +46,8 @@ pub fn approval_lines(pending: &PendingApproval, width: usize, expanded: bool) -
 
     let mut lines = vec![format!("Approval · {tool}")];
     lines.append(&mut detail_lines);
-    lines.push(format!("Review  {reason}"));
-    lines.push("[Y] Approve    [N] Deny    [E] Edit".to_string());
+    lines.push(format!("Review · {reason}"));
+    lines.push("Y · Approve    N · Deny    E · Edit".to_string());
     lines
 }
 
@@ -215,8 +215,8 @@ mod tests {
         assert!(text.contains("$ rm target"));
         assert!(text.contains("Bash"));
         assert!(text.contains("rm target"));
-        assert!(text.contains("[Y] Approve"));
-        assert!(text.contains("[N] Deny"));
+        assert!(text.contains("Y · Approve"));
+        assert!(text.contains("N · Deny"));
     }
 
     #[test]
@@ -302,7 +302,7 @@ mod tests {
         let lines = approval_lines(&pending, 100, false);
         let text = lines.join("\n");
 
-        assert!(text.contains("Review  multiple simple commands"));
+        assert!(text.contains("Review · multiple simple commands"));
         assert!(!text.contains("shell command needs review"));
     }
 }

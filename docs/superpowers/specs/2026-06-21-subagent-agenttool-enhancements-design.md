@@ -29,33 +29,59 @@ The gaps are:
 
 ## Architecture
 
-Add a shared subagent runtime handle to `AgentConfig`, backed by the existing `TaskManager`. `SubagentTool` will use it when `run_in_background` is requested. Background subagents run in a Tokio task, update their task record as they progress, and write their final text or failure into the task output.
+Add a shared subagent runtime handle to `AgentConfig`, backed by the existing `TaskManager`. `SubagentTool` will use it when `run_in_background` is requested. Background subagents run in a Tokio task, update their `BackgroundTask` record as they progress, and write their final text or failure into the background task output.
 
-Expose two lifecycle tools:
+Expose two lifecycle tools operating on `BackgroundTask`:
 
-- `task_output`: fetch one task's status and output.
-- `task_stop`: request cancellation for a running task.
+- `task_output`: fetch one background task's status and output.
+- `task_stop`: request cancellation for a running background task.
 
-These tools intentionally operate on generic tasks, but the first implementation targets background subagent tasks. The existing task create/list/get/update tools stay compatible.
+These tools use the `BackgroundTask` model — they are independent of the todo-list `Task`. The existing task create/list/get/update tools stay compatible.
 
-Worktree isolation is implemented inside subagent execution. When `isolation: "worktree"` is requested, the subagent creates a git worktree under `.worktrees/subagents/<agent-id>`, runs with that directory as `cwd`, and records the worktree path in task output/metadata. If the current directory is not in a git repository or worktree creation fails, the tool returns a clear validation/runtime error.
+Worktree isolation is implemented inside subagent execution. When `isolation: "worktree"` is requested, the subagent creates a git worktree under `.worktrees/subagents/<agent-id>`, runs with that directory as `cwd`, and records the worktree path on the `BackgroundTask`. If the current directory is not in a git repository or worktree creation fails, the tool returns a clear validation/runtime error.
 
 ## Data Model
 
-Extend `TaskStatus` with:
+learn-claude-code separates two concerns: **Plan/Todo tasks** (the work-tracking checklist: `pending → in_progress → completed`) and **Background execution tasks** (runtime lifecycle for async shells/agents: `pending → running → completed/failed/killed`). This design mirrors that separation instead of conflating the two.
 
-- `Failed`
-- `Cancelled`
+### Plan Task Enhancements
 
-Extend `Task` with optional metadata:
+The existing `Task` (used by `TaskCreate/TaskGet/TaskList/TaskUpdate`) is the todo-list model. Its statuses stay as-is: `Pending, InProgress, Completed, Deleted`.
 
-- `kind`: string, for example `subagent`.
-- `agent_id`
-- `agent_type`
-- `worktree_path`
-- `error`
+Add optional fields to `Task` matching learn-claude-code V2:
 
-The existing `output: Option<String>` remains the canonical human-readable output. Metadata should be optional and backward compatible with existing task JSON.
+- `owner: Option<String>` — who is assigned (used in teammate scenarios).
+- `active_form: Option<String>` — present-continuous label shown in spinners (e.g. `"Running tests"`).
+- `metadata: Option<HashMap<String, Value>>` — arbitrary key-value store for hooks/extensions.
+
+`TaskUpdateTool` gains the ability to update `subject`, `description`, `owner`, `active_form`, merge `metadata`, and manage `add_blocks`/`add_blocked_by` dependencies (matching learn-claude-code's `TaskUpdateTool`). Status transitions stay the same.
+
+### Background Task Model — new, separate from Plan Task
+
+Background execution tasks represent running async work (subagents, background shells). They have their own struct, status enum, and persistence — independent of the todo-list `Task`.
+
+**`BackgroundTaskStatus`** (new):
+- `Pending` — created, not yet started.
+- `Running` — executing in a Tokio task.
+- `Completed` — finished successfully.
+- `Failed` — terminated with error.
+- `Killed` — cancelled via `task_stop`.
+
+This matches learn-claude-code's `TaskStatus` (`pending, running, completed, failed, killed`) from `Task.ts`, not the todo-list status.
+
+**`BackgroundTask`** (new):
+- `id: String`
+- `kind: String` — e.g. `"subagent"`, `"local_bash"`.
+- `agent_id: Option<String>`
+- `agent_type: Option<String>`
+- `description: String`
+- `status: BackgroundTaskStatus`
+- `output: Option<String>` — final text (assistant response for agents, stdout+stderr for shells).
+- `error: Option<String>`
+- `worktree_path: Option<String>`
+- `exit_code: Option<i32>` — for shell tasks.
+
+`TaskOutputTool` and `TaskStopTool` operate on `BackgroundTask`, not on the todo-list `Task`. The existing todo-list tools (`TaskCreate` etc.) are unaffected.
 
 ## Subagent Definition Enhancements
 
@@ -73,7 +99,7 @@ Fields not yet consumed by the runtime must be parsed, persisted in `AgentDefini
 `SubagentTool` behavior:
 
 - Synchronous calls remain the default.
-- `run_in_background: true` creates a task, starts a child `AgentSession` in a Tokio task, and immediately returns:
+- `run_in_background: true` creates a `BackgroundTask` (not a todo-list `Task`), starts a child `AgentSession` in a Tokio task, and immediately returns:
 
 ```json
 {
@@ -85,30 +111,38 @@ Fields not yet consumed by the runtime must be parsed, persisted in `AgentDefini
 }
 ```
 
-The background task:
+The background Tokio task:
 
-- Uses a child cancellation state registered under the task id.
+- Uses a child cancellation state registered under the background task id.
 - Emits progress to the parent progress channel when available.
-- Updates task status to `Completed`, `Failed`, or `Cancelled`.
-- Stores final assistant text in `task.output`.
+- Updates `BackgroundTask` status to `Completed`, `Failed`, or `Killed`.
+- Stores final assistant text in `BackgroundTask.output`.
 
 ## Stop And Output Tools
 
-`task_output` input:
+`task_output` input (matching learn-claude-code's `TaskOutputTool`):
 
 ```json
-{ "task_id": "agent_x" }
+{
+  "task_id": "agent_x",
+  "block": true,
+  "timeout": 30000
+}
 ```
 
-Output includes status, description, output, error, agent metadata, and worktree path when present.
+- `task_id`: the background task ID.
+- `block` (default `true`): wait for completion when `true`, return current status immediately when `false`.
+- `timeout` (default 30000ms, max 600000ms): max wait time when blocking.
+
+Output includes `retrieval_status` (`success`, `timeout`, `not_ready`) plus the full `BackgroundTask` data: status, description, output, error, agent metadata, and worktree path when present.
 
 `task_stop` input:
 
 ```json
-{ "task_id": "agent_x" }
+{ "task_id": "agent_x", "shell_id": "deprecated_alias" }
 ```
 
-It cancels the registered cancellation state. If the task has already finished, it returns the current status without error.
+Cancels the registered cancellation state. If the task has already finished, it returns the current status without error. Accepts `shell_id` as a deprecated alias for backward compatibility with `KillShell` tool references. Returns `message`, `task_id`, `task_type`, and optional `command` (description of stopped task).
 
 ## Delegation Prompt Guidance
 
@@ -125,20 +159,24 @@ Update subagent prompt guidance to teach:
 
 Use TDD for each behavior:
 
-- Task model persists new statuses and metadata.
-- `task_output` returns persisted output and metadata.
-- `task_stop` marks or requests cancellation for a running task.
-- `run_in_background` returns immediately and later records completed output.
-- Cancelled background subagent records `Cancelled`.
-- `isolation: "worktree"` changes child `cwd` and records path.
-- Agent frontmatter parses new metadata fields.
+- Plan `Task` persists new fields: `owner`, `active_form`, `metadata`.
+- `TaskUpdateTool` updates subject, description, owner, active_form, add_blocks/add_blocked_by.
+- `BackgroundTask` model persists the full lifecycle: `pending → running → completed/failed/killed`.
+- `task_output` returns persisted output, metadata, and respects `block`/`timeout` params.
+- `task_stop` cancels a running background task; no-op if already terminal.
+- `run_in_background` returns immediately and later records completed output in a `BackgroundTask`.
+- Killed background subagent records `Killed`.
+- `isolation: "worktree"` changes child `cwd` and records `worktree_path` on `BackgroundTask`.
+- Agent frontmatter parses new metadata fields: `initialPrompt`, `permissionMode`, `skills`, `effort`.
 - Prompt text includes concrete delegation rules.
 
 ## Acceptance Criteria
 
 - Existing synchronous subagent and fork tests still pass.
+- Plan `Task` supports `owner`, `active_form`, `metadata` fields and `TaskUpdateTool` can update subject/description/blocks.
+- `BackgroundTask` model is independent from plan `Task` with its own status lifecycle.
 - Background subagent execution works with mock providers.
-- Task output and stop tools are registered/exported and covered by tests.
+- `task_output` and `task_stop` tools are registered/exported and covered by tests.
 - Worktree isolation is implemented and tested with a temporary git repository.
 - Agent definitions parse the new metadata fields.
 - Prompt guidance no longer advertises unsupported capabilities.

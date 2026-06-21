@@ -220,8 +220,7 @@ impl App {
         let auto_mode_bg = Arc::clone(&auto_mode);
 
         // Seed status text with auto tag if starting in auto mode.
-        let status_text =
-            if auto_mode_on { format!("{status_text} ⏵⏵ auto") } else { status_text };
+        let status_text = if auto_mode_on { format!("{status_text} · auto") } else { status_text };
 
         let tool_infos = collect_tool_infos(&tools);
 
@@ -241,11 +240,14 @@ impl App {
             prompt_rx,
         );
 
+        // Strip auto tag from base_status so update_auto_mode_status can re-add it cleanly.
+        let base = status_text.trim_end_matches(" · auto").to_string();
+
         Ok(Self {
             mode: Mode::Normal,
             should_quit: false,
             status_text: status_text.clone(),
-            base_status: status_text,
+            base_status: base,
             chat: ChatWidget::new(),
             input: InputPanel::new(),
             tool_activity: ToolActivityPanel::with_max_visible_lines(
@@ -366,6 +368,7 @@ impl App {
         self.turn_tool_calls = 0;
         self.turn_tool_failures = 0;
         self.status_text = self.base_status.clone();
+        self.update_auto_mode_status();
     }
 
     fn format_turn_summary(&self) -> Option<String> {
@@ -407,10 +410,8 @@ impl App {
     /// Update status bar to reflect auto-mode state.
     fn update_auto_mode_status(&mut self) {
         let on = self.auto_mode.load(Ordering::Relaxed);
-        let tag = " ⏵⏵ auto";
-        let base = self.status_text.trim_end_matches(tag).trim_end();
-        let new = if on { format!("{base}{tag}") } else { base.to_string() };
-        self.status_text = new;
+        self.status_text =
+            if on { format!("{} · auto", self.base_status) } else { self.base_status.clone() };
 
         // Persist to config.
         if let Some(base) = dirs::config_dir() {
@@ -435,7 +436,7 @@ impl App {
         } else {
             self.cancellation.reset();
             self.tool_activity.clear();
-            self.base_status = self.status_text.clone();
+            self.base_status = self.status_text.trim_end_matches(" · auto").to_string();
             self.mode = Mode::Streaming;
             self.turn_active = true;
         }

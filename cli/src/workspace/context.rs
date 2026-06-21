@@ -113,11 +113,8 @@ pub fn build_status_text(
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "?".to_string());
-    format!(
-        "telos · {} · {}",
-        project_name,
-        ctx.instructions_file.as_deref().unwrap_or("no project docs")
-    ) + &model.map(|m| format!(" · model {m}")).unwrap_or_default()
+    let tag = model.unwrap_or_else(|| ctx.instructions_file.as_deref().unwrap_or("?"));
+    format!("telos · {} · {}", project_name, tag)
 }
 
 #[cfg(test)]
@@ -237,19 +234,28 @@ mod tests {
     }
 
     #[test]
-    fn status_text_shows_filename_and_model() {
+    fn status_text_shows_model_when_provided() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("CLAUDE.md"), "x").unwrap();
         let ctx = load_project_context(dir.path());
         let text = build_status_text(Some("deepseek"), Some(dir.path()), &ctx);
-        assert!(text.contains("CLAUDE.md"));
-        assert!(text.contains("model deepseek"));
+        assert!(text.contains("deepseek"));
+        assert!(!text.contains("no project docs"));
     }
 
     #[test]
-    fn status_text_fallback_no_project_docs() {
+    fn status_text_shows_filename_when_no_model() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "x").unwrap();
+        let ctx = load_project_context(dir.path());
+        let text = build_status_text(None, Some(dir.path()), &ctx);
+        assert!(text.contains("CLAUDE.md"));
+    }
+
+    #[test]
+    fn status_text_shows_question_mark_when_no_model_and_no_docs() {
         let ctx = ProjectContext::empty();
         let text = build_status_text(None, None, &ctx);
-        assert!(text.contains("no project docs"));
+        assert_eq!(text, "telos · ? · ?");
     }
 }

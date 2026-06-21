@@ -343,8 +343,14 @@ Available commands:\n\n  /tool    — show registered tools and aliases\n\
             }
         };
 
-        self.status_text = format!("telos · model {label}");
+        // Update status bar: replace last separator segment with new model label
+        if let Some(prefix) = self.base_status.rsplit_once(" · ") {
+            self.status_text = format!("{} · {}", prefix.0, label);
+        } else {
+            self.status_text = format!("telos · {}", label);
+        }
         self.base_status = self.status_text.clone();
+        self.update_auto_mode_status();
         self.chat.push_cell(Box::new(UserCell { content: format!("/model {label}") }));
         self.chat.push_cell(Box::new(AgentCell {
             buffer: format!("Switched model to: {label}"),

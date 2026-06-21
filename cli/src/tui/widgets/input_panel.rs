@@ -380,10 +380,10 @@ impl InputPanel {
 
     /// Render the input panel.
     ///
-    /// - `turn_active` — when true, the border animates (pulse + spinner) to
-    ///   visually indicate the agent is processing.
+    /// - `turn_active` — when true, the border shows a "Running…" state
+    ///   to visually indicate the agent is processing.
     /// - `active` — when true, keyboard input is accepted (false during overlays).
-    /// - `spinner_frame` — animation frame counter for the pulse effect.
+    /// - `spinner_frame` — animation frame counter for the spinner.
     pub fn render(
         &self,
         frame: &mut Frame,
@@ -394,17 +394,9 @@ impl InputPanel {
     ) {
         let theme = Theme::default();
 
-        // ── Border style: pulse when agent is running ──────────────────
+        // ── Border style ─────────────────
         let (border_style, title) = if turn_active {
-            // Alternate between two brightness levels for a pulse effect
-            let pulse = spinner_frame % 8;
-            let bright = pulse < 4;
-            let border_color = if bright {
-                Color::Rgb(140, 220, 255) // brighter
-            } else {
-                Color::Rgb(60, 160, 220) // dimmer
-            };
-            let style = Style::default().fg(border_color).add_modifier(Modifier::BOLD);
+            let style = Style::default().fg(Color::Rgb(100, 200, 245)).add_modifier(Modifier::BOLD);
             let spinner = SPINNER_CHARS[spinner_frame % SPINNER_CHARS.len()];
             (style, Span::styled(format!(" {spinner} Running… "), style))
         } else if active {

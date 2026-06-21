@@ -77,7 +77,9 @@ impl CostCalculator {
             },
         );
 
-        if let Some(section) = section && let Some(user_models) = &section.models {
+        if let Some(section) = section
+            && let Some(user_models) = &section.models
+        {
             for (name, pricing) in user_models {
                 let existing = models.get(name).cloned().unwrap_or_default();
                 models.insert(

@@ -25,11 +25,13 @@ fn builtin_file_read_tool_returns_file_contents() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -70,11 +72,13 @@ fn builtin_file_read_accepts_absolute_path_under_cwd() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -119,11 +123,13 @@ fn builtin_file_read_rejects_absolute_path_outside_cwd() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -175,11 +181,13 @@ fn file_read_rejects_symlink_escape() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -237,11 +245,13 @@ fn file_read_rejects_windows_symlink_escape() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -290,11 +300,13 @@ fn file_write_accepts_windows_backslash_relative_path() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -349,11 +361,13 @@ fn edit_requires_prior_full_read() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -408,6 +422,7 @@ fn edit_rejects_stale_file_after_read() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message {
@@ -424,11 +439,13 @@ fn edit_rejects_stale_file_after_read() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();

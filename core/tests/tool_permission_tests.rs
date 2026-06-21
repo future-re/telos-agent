@@ -26,11 +26,13 @@ fn permission_engine_denies_tool() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -68,11 +70,13 @@ fn permission_engine_allows_tool() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -110,11 +114,13 @@ fn permission_engine_matches_tool_aliases_with_last_rule_wins() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -152,11 +158,13 @@ fn permission_engine_allows_shell_by_command_prefix() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -193,11 +201,13 @@ fn permission_engine_allows_powershell_by_command_prefix() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -235,11 +245,13 @@ fn shell_requires_approval_by_default() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -272,11 +284,13 @@ fn approval_modify_reruns_shell_safety_checks() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -318,11 +332,13 @@ fn approval_modify_reruns_powershell_safety_checks() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -362,11 +378,13 @@ fn tool_progress_streams_before_tool_result() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+        model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+        model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -418,11 +436,13 @@ fn schema_validation_rejects_invalid_tool_arguments() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("Schema error."),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
 
@@ -454,11 +474,13 @@ fn schema_validation_can_be_disabled() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("Done."),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
 
@@ -497,11 +519,13 @@ fn approval_handler_allows_asked_tool_call() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("Approved."),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
 
@@ -549,11 +573,13 @@ fn approval_handler_denies_asked_tool_call() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("Denied."),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
 
@@ -595,11 +621,13 @@ fn approval_handler_modifies_asked_tool_call() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("Modified."),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
 

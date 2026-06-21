@@ -382,6 +382,7 @@ async fn agent_session_falls_back_to_default_assembly() {
         message: Message::assistant("done"),
         stop_reason: StopReason::EndTurn,
         usage: None,
+        model: None,
     }]);
 
     let config = AgentConfig::default();

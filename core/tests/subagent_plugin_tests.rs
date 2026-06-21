@@ -88,17 +88,20 @@ fn subagent_tool_runs_in_process_agent() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("outer done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let inner_provider = Arc::new(MockProvider::new(vec![CompletionResponse {
             message: Message::assistant("inner answer"),
             stop_reason: StopReason::EndTurn,
             usage: None,
+            model: None,
         }]));
         let mut tools = ToolRegistry::new();
         tools.register(SubagentTool::new(
@@ -152,11 +155,13 @@ fn subagent_fork_mode_runs_multiple_lenses() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("outer done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let inner_provider = Arc::new(MockProvider::new(vec![
@@ -164,11 +169,13 @@ fn subagent_fork_mode_runs_multiple_lenses() {
                 message: Message::assistant("Security: found XSS"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("Performance: slow query"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]));
         let mut tools = ToolRegistry::new();
@@ -205,6 +212,7 @@ async fn subagent_background_mode_records_task_output() {
         message: Message::assistant("background inner answer"),
         stop_reason: StopReason::EndTurn,
         usage: None,
+        model: None,
     }]));
     let tool = SubagentTool::new(
         inner_provider,
@@ -257,6 +265,7 @@ async fn subagent_background_worktree_records_task_path() {
         message: Message::assistant("background worktree answer"),
         stop_reason: StopReason::EndTurn,
         usage: None,
+        model: None,
     }]));
     let tool = SubagentTool::new(
         provider,
@@ -371,11 +380,13 @@ async fn subagent_worktree_isolation_runs_child_tools_in_worktree() {
             },
             stop_reason: StopReason::ToolUse,
             usage: None,
+            model: None,
         },
         CompletionResponse {
             message: Message::assistant("worktree done"),
             stop_reason: StopReason::EndTurn,
             usage: None,
+            model: None,
         },
     ]));
     let tool = SubagentTool::new(provider, child_tools, AgentConfig::default());

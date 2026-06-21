@@ -40,6 +40,7 @@ fn session_save_and_resume_works() {
             message: Message::assistant("hi there"),
             stop_reason: StopReason::EndTurn,
             usage: None,
+            model: None,
         }]);
         let tools = ToolRegistry::new();
         let mut session = AgentSession::new(AgentConfig {
@@ -87,6 +88,7 @@ fn session_save_replaces_snapshot_without_duplicates() {
             message: Message::assistant("first"),
             stop_reason: StopReason::EndTurn,
             usage: None,
+            model: None,
         }]);
         let tools = ToolRegistry::new();
         let mut session = AgentSession::new(AgentConfig {

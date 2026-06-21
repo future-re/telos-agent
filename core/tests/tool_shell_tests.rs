@@ -21,6 +21,7 @@ async fn cancelling_during_bash_tool_kills_running_command() {
         },
         stop_reason: StopReason::ToolUse,
         usage: None,
+        model: None,
     }]);
     let cancellation = CancellationState::new();
     let mut engine = PermissionEngine::new();
@@ -94,6 +95,7 @@ async fn cancelling_during_bash_tool_kills_child_processes() {
         },
         stop_reason: StopReason::ToolUse,
         usage: None,
+        model: None,
     }]);
     let cancellation = CancellationState::new();
     let mut engine = PermissionEngine::new();

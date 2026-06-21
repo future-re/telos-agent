@@ -29,11 +29,13 @@ fn multi_step_tool_loop_completes() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("The answer is 5."),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
 
@@ -108,11 +110,13 @@ fn tool_calls_continue_even_when_stop_reason_is_end_turn() {
                 // follow the actual assistant content blocks.
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("The answer is 10."),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
 
@@ -142,11 +146,13 @@ fn missing_tool_returns_error_result_message() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("I could not run that tool."),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
 
@@ -176,11 +182,13 @@ async fn runtime_input_after_tool_forces_thinking_reconsideration() {
             },
             stop_reason: StopReason::ToolUse,
             usage: None,
+            model: None,
         },
         CompletionResponse {
             message: Message::assistant("I reconsidered with the new input."),
             stop_reason: StopReason::EndTurn,
             usage: None,
+            model: None,
         },
     ]));
 
@@ -255,11 +263,13 @@ fn permission_denial_returns_structured_tool_error() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("Denied."),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
 
@@ -286,6 +296,7 @@ fn run_turn_stream_emits_deltas_and_hooks() {
             message: Message::assistant("hello"),
             stop_reason: StopReason::EndTurn,
             usage: None,
+            model: None,
         }]);
         let tools = ToolRegistry::new();
         let mut session =
@@ -323,6 +334,7 @@ fn stop_hook_does_not_hijack_final_message() {
             message: Message::assistant("model answer"),
             stop_reason: StopReason::EndTurn,
             usage: None,
+            model: None,
         }]);
         let tools = ToolRegistry::new();
         let mut session =
@@ -356,11 +368,13 @@ fn tool_result_budget_compacts_large_output() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -401,16 +415,19 @@ fn summary_compaction_triggers_when_over_budget() {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("summary result"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let mut tools = ToolRegistry::new();
@@ -445,11 +462,13 @@ fn token_budget_triggers_auto_compaction() {
                 message: Message::assistant("summary"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("done"),
                 stop_reason: StopReason::EndTurn,
                 usage: Some(telos_agent::TokenUsage::new(10, 2)),
+                model: None,
             },
         ]);
         let tools = ToolRegistry::new();
@@ -489,6 +508,7 @@ fn thinking_blocks_are_separate_from_final_text() {
             },
             stop_reason: StopReason::EndTurn,
             usage: None,
+            model: None,
         }]);
 
         let tools = ToolRegistry::new();
@@ -527,16 +547,19 @@ fn compaction_emits_system_reminder() {
                 message: Message::assistant("summary"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("summary"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("hi"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]);
         let tools = ToolRegistry::new();

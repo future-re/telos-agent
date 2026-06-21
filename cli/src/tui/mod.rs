@@ -59,7 +59,6 @@ impl Drop for TuiGuard {
         let _ = crossterm::execute!(
             std::io::stdout(),
             crossterm::event::DisableBracketedPaste,
-            crossterm::event::DisableMouseCapture,
             crossterm::terminal::LeaveAlternateScreen
         );
     }
@@ -82,11 +81,7 @@ pub async fn run(
 ) -> Result<()> {
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = stdout();
-    crossterm::execute!(
-        stdout,
-        crossterm::terminal::EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture
-    )?;
+    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
     let keyboard_enhancement_enabled =
         matches!(crossterm::terminal::supports_keyboard_enhancement(), Ok(true))
             && crossterm::execute!(

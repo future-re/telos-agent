@@ -191,7 +191,14 @@ Do not duplicate work already being performed in the parent session.",
         _arguments: &Value,
         _context: &ToolContext,
     ) -> Result<PermissionDecision, AgentError> {
-        Ok(PermissionDecision::Ask { reason: "subagent execution requires approval".into() })
+        // Subagent is a pure delegation mechanism — its child tools run inside
+        // a child AgentSession that inherits the parent's approval_handler via
+        // config.clone(). Every child tool call already goes through the normal
+        // approval flow (auto-allow, safety checks, human prompts). Requiring
+        // separate approval for the subagent call itself is redundant and causes
+        // the parent tool phase to block while waiting for a decision that
+        // conveys no additional security benefit.
+        Ok(PermissionDecision::Allow)
     }
 
     async fn invoke(

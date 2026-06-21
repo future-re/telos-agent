@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { buildTodayTokenMetrics, buildTokenUsageDashboard } from "@/tokenUsageDashboard";
 
 describe("buildTokenUsageDashboard", () => {
@@ -6,7 +6,7 @@ describe("buildTokenUsageDashboard", () => {
     const dashboard = buildTokenUsageDashboard({});
 
     expect(dashboard.map((item) => item.empty)).toEqual([true, true, true]);
-    expect(dashboard.map((item) => item.label)).toEqual(["今日消耗", "当前会话", "当前单轮"]);
+    expect(dashboard.map((item) => item.label)).toEqual(["Today", "Session", "Turn"]);
   });
 
   it("formats today, session, and turn usage with input and output breakdowns", () => {
@@ -19,35 +19,49 @@ describe("buildTokenUsageDashboard", () => {
     expect(dashboard).toEqual([
       {
         id: "today",
-        label: "今日消耗",
+        label: "Today",
         value: "1,545",
         empty: false,
-        details: ["输入 1,200", "输出 345"],
+        details: ["Input 1,200", "Output 345", "Cost ¥0.0019"],
       },
       {
         id: "session",
-        label: "当前会话",
+        label: "Session",
         value: "1,000",
         empty: false,
-        details: ["输入 900", "输出 100"],
+        details: ["Input 900", "Output 100", "Cost ¥0.0011"],
       },
       {
         id: "turn",
-        label: "当前单轮",
+        label: "Turn",
         value: "250",
         empty: false,
-        details: ["输入 200", "输出 50", "思考 25"],
+        details: ["Input 200", "Output 50", "Reasoning 25", "Cost ¥0.0003"],
       },
     ]);
   });
+});
 
-  it("builds compact horizontal metrics for today's right panel", () => {
-    expect(
-      buildTodayTokenMetrics({ inputTokens: 1200, outputTokens: 345, totalTokens: 1545 }),
-    ).toEqual([
-      { id: "total", label: "总计", value: "1,545", empty: false, details: [] },
-      { id: "input", label: "输入", value: "1,200", empty: false, details: [] },
-      { id: "output", label: "输出", value: "345", empty: false, details: [] },
+describe("buildTodayTokenMetrics", () => {
+  it("returns fallback items when no usage", () => {
+    const metrics = buildTodayTokenMetrics(undefined);
+    expect(metrics.map((m) => m.id)).toEqual(["total", "cost"]);
+    expect(metrics.map((m) => m.value)).toEqual(["-", "-"]);
+  });
+
+  it("returns total and cost with cache breakdown", () => {
+    const metrics = buildTodayTokenMetrics({
+      inputTokens: 1000000,
+      outputTokens: 500000,
+      totalTokens: 1500000,
+      promptCacheHitTokens: 800000,
+      promptCacheMissTokens: 200000,
+    });
+
+    expect(metrics).toEqual([
+      { id: "total", label: "Total", value: "1,500,000" },
+      { id: "cache", label: "Cache", value: "80.0%" },
+      { id: "cost", label: "Cost", value: "¥1.22" },
     ]);
   });
 });

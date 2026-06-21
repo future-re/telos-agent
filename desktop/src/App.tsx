@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+﻿import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -492,6 +492,7 @@ export function App() {
             onSettingsSectionChange={setSettingsSection}
             appearance={appearance}
             turnUsage={state.currentTurnUsage}
+            turnModel={state.currentTurnUsage?.model}
           />
           <div className="grid min-h-0 min-w-0 grid-cols-1 min-[1180px]:grid-cols-[340px_minmax(0,1fr)]">
             <AgentStatusRail

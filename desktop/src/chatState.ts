@@ -15,6 +15,7 @@ export interface TokenUsage {
   promptCacheHitTokens?: number;
   promptCacheMissTokens?: number;
   reasoningTokens?: number;
+  model?: string;
 }
 
 export type ToolStatus = "running" | "completed" | "failed";
@@ -37,6 +38,7 @@ export interface TelosEvent {
   promptCacheHitTokens?: number;
   promptCacheMissTokens?: number;
   reasoningTokens?: number;
+  model?: string;
   toolCallId?: string;
   toolName?: string;
   arguments?: unknown;
@@ -224,6 +226,7 @@ function applyProviderUsage(state: ChatState, event: TelosEvent): ChatState {
   }
 
   const nextUsage = addUsage(state.currentTurnUsage, {
+    model: event.model,
     inputTokens: event.inputTokens,
     outputTokens: event.outputTokens,
     totalTokens: event.totalTokens ?? event.inputTokens + event.outputTokens,
@@ -242,7 +245,9 @@ function applyProviderUsage(state: ChatState, event: TelosEvent): ChatState {
 }
 
 function addUsage(current: TokenUsage | undefined, next: TokenUsage): TokenUsage {
+    const model = next.model ?? current?.model;
   return {
+    model,
     inputTokens: (current?.inputTokens ?? 0) + next.inputTokens,
     outputTokens: (current?.outputTokens ?? 0) + next.outputTokens,
     totalTokens: (current?.totalTokens ?? 0) + next.totalTokens,

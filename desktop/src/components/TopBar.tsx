@@ -1,4 +1,4 @@
-import {
+﻿import {
   Bot,
   Check,
   Folder,
@@ -79,6 +79,7 @@ interface TopBarProps {
   onTogglePanel: () => void;
   onReset: () => void;
   turnUsage?: TokenUsage;
+  turnModel?: string | null;
 }
 
 export function TopBar({
@@ -211,6 +212,7 @@ function SettingsDialog({
   settings: ResolvedDesktopSettings;
   tokenHistory: TokenUsageHistory;
   turnUsage?: TokenUsage;
+  turnModel?: string | null;
 }) {
   const section = sectionMeta[activeSection] ?? sectionMeta.appearance;
   const usageDashboard = buildTokenUsageDashboard({ sessionUsage, turnUsage });

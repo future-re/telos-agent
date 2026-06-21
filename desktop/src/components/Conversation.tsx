@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+﻿import { useEffect, useMemo, useRef } from "react";
 import { KeyRound, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ConversationTurn, groupConversationMessages } from "@/conversationView";
 import { cn } from "@/lib/utils";
-import { formatTokenCount } from "@/tokenUsage";
+import { estimateCost, formatCost, formatTokenCount } from "@/tokenUsage";
 
 interface ConversationProps {
   messages: ChatMessage[];
@@ -118,8 +118,20 @@ function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsa
             <span className="thinking-dots" aria-label="正在生成" />
           )}
           {usage && (
-            <span className="rounded-full border bg-background px-2 py-0.5 font-mono text-[11px]">
-              {formatTokenCount(usage.totalTokens)} tokens
+            <span className="inline-flex items-center gap-2 rounded-full border bg-background px-2 py-0.5 font-mono text-[11px]">
+              <span>{formatTokenCount(usage.totalTokens)} tokens</span>
+              {usage.promptCacheHitTokens !== undefined && (
+                <span className="text-green-600">hit {formatTokenCount(usage.promptCacheHitTokens)}</span>
+              )}
+              {usage.promptCacheMissTokens !== undefined && (
+                <span className="text-amber-600">miss {formatTokenCount(usage.promptCacheMissTokens)}</span>
+              )}
+              {(() => {
+                const cost = estimateCost(usage.model, usage);
+                return cost && cost.totalCost > 0 ? (
+                  <span className="text-muted-foreground">{formatCost(cost.totalCost)}</span>
+                ) : null;
+              })()}
             </span>
           )}
         </div>

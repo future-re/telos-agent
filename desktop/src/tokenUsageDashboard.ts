@@ -1,5 +1,5 @@
-import { TokenUsage } from "@/chatState";
-import { formatTokenCount } from "@/tokenUsage";
+﻿import { TokenUsage } from "@/chatState";
+import { estimateCost, formatCost, formatTokenCount } from "@/tokenUsage";
 
 export interface TokenUsageDashboardItem {
   id: "today" | "session" | "turn" | "total" | "input" | "output";
@@ -13,56 +13,91 @@ export function buildTokenUsageDashboard({
   sessionUsage,
   todayUsage,
   turnUsage,
+  turnModel,
 }: {
   todayUsage?: TokenUsage;
   sessionUsage?: TokenUsage;
   turnUsage?: TokenUsage;
+  turnModel?: string | null;
 }): TokenUsageDashboardItem[] {
   return [
-    toDashboardItem("today", "今日消耗", todayUsage),
-    toDashboardItem("session", "当前会话", sessionUsage),
-    toDashboardItem("turn", "当前单轮", turnUsage),
+    toDashboardItem("today", "Today", todayUsage),
+    toDashboardItem("session", "Session", sessionUsage),
+    toDashboardItem("turn", "Turn", turnUsage, turnModel),
   ];
 }
 
-export function buildTodayTokenMetrics(usage?: TokenUsage): TokenUsageDashboardItem[] {
+export interface TodayMetric {
+  id: string;
+  label: string;
+  value: string;
+}
+
+export function buildTodayTokenMetrics(usage?: TokenUsage): TodayMetric[] {
   if (!usage) {
     return [
-      emptyMetric("total", "总计"),
-      emptyMetric("input", "输入"),
-      emptyMetric("output", "输出"),
+      { id: "total", label: "Total", value: "-" },
+      { id: "cost", label: "Cost", value: "-" },
     ];
   }
 
-  return [
-    tokenMetric("total", "总计", usage.totalTokens),
-    tokenMetric("input", "输入", usage.inputTokens),
-    tokenMetric("output", "输出", usage.outputTokens),
+  const items: TodayMetric[] = [
+    { id: "total", label: "Total", value: formatTokenCount(usage.totalTokens) },
   ];
+
+  if (usage.promptCacheHitTokens !== undefined && usage.promptCacheMissTokens !== undefined) {
+    const total = usage.promptCacheHitTokens + usage.promptCacheMissTokens;
+    const rate = total > 0 ? ((usage.promptCacheHitTokens / total) * 100).toFixed(1) : "0.0";
+    items.push({
+      id: "cache",
+      label: "Cache",
+      value: `${rate}%`,
+    });
+  }
+
+  const cost = estimateCost(usage.model ?? undefined, usage);
+  if (cost && cost.totalCost > 0) {
+    items.push({ id: "cost", label: "Cost", value: formatCost(cost.totalCost) });
+  }
+
+  return items;
 }
 
 function toDashboardItem(
   id: TokenUsageDashboardItem["id"],
   label: string,
   usage?: TokenUsage,
+  model?: string | null,
 ): TokenUsageDashboardItem {
   if (!usage) {
     return {
       id,
       label,
-      value: "暂无上报",
+      value: "No usage yet",
       empty: true,
       details: [],
     };
   }
 
   const details = [
-    `输入 ${formatTokenCount(usage.inputTokens)}`,
-    `输出 ${formatTokenCount(usage.outputTokens)}`,
+    `Input ${formatTokenCount(usage.inputTokens)}`,
+    `Output ${formatTokenCount(usage.outputTokens)}`,
   ];
 
   if (usage.reasoningTokens !== undefined) {
-    details.push(`思考 ${formatTokenCount(usage.reasoningTokens)}`);
+    details.push(`Reasoning ${formatTokenCount(usage.reasoningTokens)}`);
+  }
+
+  if (usage.promptCacheHitTokens !== undefined) {
+    details.push(`Cache hit ${formatTokenCount(usage.promptCacheHitTokens)}`);
+  }
+  if (usage.promptCacheMissTokens !== undefined) {
+    details.push(`Cache miss ${formatTokenCount(usage.promptCacheMissTokens)}`);
+  }
+
+  const cost = estimateCost(model ?? undefined, usage);
+  if (cost && cost.totalCost > 0) {
+    details.push(`Cost ${formatCost(cost.totalCost)}`);
   }
 
   return {
@@ -71,32 +106,5 @@ function toDashboardItem(
     value: formatTokenCount(usage.totalTokens),
     empty: false,
     details,
-  };
-}
-
-function emptyMetric(
-  id: TokenUsageDashboardItem["id"],
-  label: string,
-): TokenUsageDashboardItem {
-  return {
-    id,
-    label,
-    value: "暂无",
-    empty: true,
-    details: [],
-  };
-}
-
-function tokenMetric(
-  id: TokenUsageDashboardItem["id"],
-  label: string,
-  tokens: number,
-): TokenUsageDashboardItem {
-  return {
-    id,
-    label,
-    value: formatTokenCount(tokens),
-    empty: false,
-    details: [],
   };
 }

@@ -50,12 +50,25 @@ impl RoutedModelConfig {
 
     /// Convenience constructor for the common two-model case.
     ///
-    /// Routes Thinking + Recovery → `thinking`, Execution + Summarization → `execution`.
-    /// Default model = `execution` (fast path).
+    /// Routing strategy:
+    /// - Thinking → thinking model (pro): first-iteration understanding,
+    ///   stuck-detection re-planning, complex reasoning.
+    /// - Recovery → thinking model (pro): after a tool error, the model
+    ///   needs to diagnose what went wrong — real reasoning work.
+    /// - Execution → execution model (flash): the steady-state of most
+    ///   turns — processing tool results, issuing shell/edit commands.
+    ///   Flash is fast and cheap; if it makes a mistake, pro catches it
+    ///   on the next iteration via Recovery.
+    /// - Summarization → execution model (flash): compressing already-
+    ///   resolved history is purely mechanical.
+    /// - Default → flash: when no model_hint is set, use the fast path.
+    ///
+    /// If a single model is specified (`--model deepseek-v4-pro`) the
+    /// [`RoutedProvider`] is skipped entirely and all calls go to that model.
     pub fn dual(api_key: String, thinking: String, execution: String) -> Self {
         let mut routes = HashMap::new();
         routes.insert(ModelHint::Thinking, thinking.clone());
-        routes.insert(ModelHint::Recovery, thinking);
+        routes.insert(ModelHint::Recovery, thinking.clone());
         routes.insert(ModelHint::Execution, execution.clone());
         routes.insert(ModelHint::Summarization, execution.clone());
         Self {

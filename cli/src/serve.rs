@@ -7,35 +7,81 @@
 //!
 //! | field | type | description |
 //! |---|---|---|
-//! | `cmd` | string | `"run"`, `"new_session"`, `"quit"` |
+//! | `cmd` | string | `"run"`, `"new_session"`, `"_approve"`, `"quit"` |
 //! | `prompt` | string? | user input for `"run"` |
+//! | `tool_call_id` | string? | tool call ID for `"_approve"` |
+//! | `decision` | string? | `"allow"` or `"deny"` for `"_approve"` |
 //!
 //! # Events (stdout, one JSON object per line)
 //!
 //! Turn events are serialized with an added `"type"` field. Extra control
-//! events: `{"type":"_done"}`, `{"type":"_error","message":"…"}`.
+//! events: `{"type":"_done"}`, `{"type":"_error","message":"…"}`,
+//! `{"type":"_approval_required","tool_call_id":"…","name":"…",...}`.
+//!
+//! # Approval flow
+//!
+//! When a tool requires approval, the daemon emits `_approval_required` and
+//! blocks the turn until it receives `{"cmd":"_approve","decision":"allow"}`.
 
+use std::io::Write;
 use std::pin::pin;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
+use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde::Deserialize;
-use telos_agent::AgentSession;
+use telos_agent::{AgentSession, ApprovalDecision, ApprovalHandler, ApprovalRequest};
 use tokio::io::AsyncBufReadExt;
+use tokio::sync::oneshot;
 
 use crate::cli::SharedOptions;
 use crate::config::FileConfig;
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ServeCommand {
     cmd: String,
+    #[serde(default)]
     prompt: Option<String>,
+    #[serde(default)]
+    tool_call_id: Option<String>,
+    #[serde(default)]
+    decision: Option<String>,
+}
+
+/// Approval handler that suspends the turn and waits for the Python
+/// frontend to send back `{"cmd":"_approve","decision":"allow"}` via stdin.
+#[derive(Debug, Clone)]
+struct ServeApprovalHandler {
+    pending: Arc<Mutex<Option<oneshot::Sender<ApprovalDecision>>>>,
+}
+
+#[async_trait]
+impl ApprovalHandler for ServeApprovalHandler {
+    async fn ask(&self, request: ApprovalRequest) -> ApprovalDecision {
+        let (tx, rx) = oneshot::channel();
+        *self.pending.lock().unwrap() = Some(tx);
+
+        let event = serde_json::json!({
+            "type": "_approval_required",
+            "name": request.tool_name,
+            "arguments": request.arguments,
+            "reason": request.reason,
+        });
+        println!("{}", serde_json::to_string(&event).unwrap_or_default());
+        let _ = std::io::stdout().flush();
+
+        rx.await.unwrap_or(ApprovalDecision::Deny {
+            reason: "approval timeout / channel closed".into(),
+        })
+    }
 }
 
 /// Run the JSON-line daemon.
 pub async fn run_serve(options: &SharedOptions, file_config: &FileConfig) -> Result<()> {
     let mut runtime = crate::runtime::prepare_runtime(options, file_config, None)?;
-    let provider: std::sync::Arc<dyn telos_agent::ModelProvider> =
+    let provider: Arc<dyn telos_agent::ModelProvider> =
         crate::build_erased_provider(options, file_config)?;
     crate::runtime::register_cli_subagent_tool(
         &mut runtime.tools,
@@ -43,6 +89,11 @@ pub async fn run_serve(options: &SharedOptions, file_config: &FileConfig) -> Res
         provider.clone(),
     )?;
     crate::runtime::rebuild_prompt_assembly(&mut runtime);
+
+    // Shared state for approval handshake.
+    let pending: Arc<Mutex<Option<oneshot::Sender<ApprovalDecision>>>> = Arc::new(Mutex::new(None));
+    runtime.agent_config.approval_handler =
+        Some(Arc::new(ServeApprovalHandler { pending: pending.clone() }));
 
     let base_config = runtime.agent_config.clone();
     let tools = runtime.tools;
@@ -80,9 +131,19 @@ pub async fn run_serve(options: &SharedOptions, file_config: &FileConfig) -> Res
             "new_session" => {
                 session = AgentSession::new(base_config.clone())?;
                 let _ = session.save().await;
-                emit_event("_session_new", None);
+                emit_event("_session_new");
             }
             "quit" | "exit" => break,
+            "_approve" => {
+                let decision = match command.decision.as_deref().unwrap_or("deny") {
+                    "allow" | "yes" | "y" => ApprovalDecision::Allow,
+                    _ => ApprovalDecision::Deny { reason: "denied by user".into() },
+                };
+                if let Some(tx) = pending.lock().unwrap().take() {
+                    let _ = tx.send(decision);
+                }
+                // If no pending approval, it's a no-op (stale response).
+            }
             other => {
                 emit_error(&format!("unknown command: {other}"));
             }
@@ -94,7 +155,7 @@ pub async fn run_serve(options: &SharedOptions, file_config: &FileConfig) -> Res
 
 async fn run_turn(
     session: &mut AgentSession,
-    provider: std::sync::Arc<dyn telos_agent::ModelProvider>,
+    provider: Arc<dyn telos_agent::ModelProvider>,
     tools: &telos_agent::ToolRegistry,
     prompt: String,
 ) {
@@ -117,7 +178,6 @@ async fn run_turn(
             }
         }
     }
-    // Signal end-of-turn.
     emit_done();
 }
 
@@ -154,13 +214,10 @@ fn emit_done() {
 fn emit_error(message: &str) {
     let escaped = serde_json::to_string(message).unwrap_or_default();
     println!(r#"{{"type":"_error","message":{escaped}}}"#);
-    // Flush so the Python side gets events immediately.
-    use std::io::Write;
     let _ = std::io::stdout().flush();
 }
 
-fn emit_event(type_name: &str, _payload: Option<&serde_json::Value>) {
+fn emit_event(type_name: &str) {
     println!(r#"{{"type":"{type_name}"}}"#);
-    use std::io::Write;
     let _ = std::io::stdout().flush();
 }

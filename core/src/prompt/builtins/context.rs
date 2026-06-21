@@ -19,7 +19,8 @@ impl PromptSection for DateSection {
         "date"
     }
     fn stability(&self) -> PromptStability {
-        PromptStability::Dynamic
+        // A session rarely spans midnight; the date is effectively constant.
+        PromptStability::Static
     }
 
     async fn render(&self, _ctx: &()) -> String {
@@ -46,7 +47,8 @@ impl PromptSection for CwdSection {
         "cwd"
     }
     fn stability(&self) -> PromptStability {
-        PromptStability::Dynamic
+        // The working directory doesn't change during a session.
+        PromptStability::Static
     }
 
     async fn render(&self, _ctx: &()) -> String {
@@ -90,7 +92,8 @@ impl PromptSection for GitStatusSection {
         "git_status"
     }
     fn stability(&self) -> PromptStability {
-        PromptStability::Dynamic
+        // Rendered once at session start; runtime changes appear in tool results.
+        PromptStability::Static
     }
 
     async fn render(&self, _ctx: &()) -> String {
@@ -126,7 +129,9 @@ impl PromptSection for MemorySection {
         "memory"
     }
     fn stability(&self) -> PromptStability {
-        PromptStability::Dynamic
+        // Rendered once at session start; memories are injected as
+        // <system-reminder> tags by the runtime when they change.
+        PromptStability::Static
     }
 
     async fn render(&self, _ctx: &()) -> String {

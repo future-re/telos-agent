@@ -13,7 +13,13 @@ struct SubagentRunResult {
     session_id: String,
     final_text: String,
     event_count: usize,
+    tool_call_count: usize,
 }
+
+/// Max characters of subagent output returned to the parent agent.
+/// Longer output is truncated to prevent subagent results from
+/// flooding the parent's context window.
+const MAX_SUBAGENT_RESULT_CHARS: usize = 2_000;
 
 impl SubagentTool {
     pub(super) async fn run_agent(
@@ -160,7 +166,9 @@ impl SubagentTool {
             "status": "completed",
             "session_id": result.session_id,
             "final_text": result.final_text,
+            "final_text_truncated": result.final_text.len() >= MAX_SUBAGENT_RESULT_CHARS,
             "event_count": result.event_count,
+            "tool_call_count": result.tool_call_count,
             "worktree_path": worktree_path_string,
         })))
     }
@@ -221,10 +229,22 @@ async fn run_child_agent(
         .map(|message| message.text_content())
         .unwrap_or_default();
 
+    let tool_call_count = session.messages().iter().flat_map(|m| m.tool_calls()).count();
+
+    // Truncate subagent output to protect the parent's context window.
+    // The parent receives a preview + metadata; full output is available
+    // in the subagent's session transcript (if storage is configured).
+    let final_text = if final_text.len() > MAX_SUBAGENT_RESULT_CHARS {
+        final_text.chars().take(MAX_SUBAGENT_RESULT_CHARS).collect()
+    } else {
+        final_text
+    };
+
     Ok(SubagentRunResult {
         session_id: session.session_id().to_string(),
         final_text,
         event_count: events.len(),
+        tool_call_count,
     })
 }
 

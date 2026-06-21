@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use crate::config::{AgentConfig, TaskPath};
 use crate::error::AgentError;
@@ -65,13 +65,22 @@ impl AgentSession {
                 return Err(AgentError::Cancelled);
             }
 
-            let (system_prompt, system_prompt_blocks) =
-                if let Some(assembly) = &self.config.prompt_assembly {
-                    let blocks = assembly.build_blocks().await;
-                    (None, Some(blocks))
-                } else {
-                    (self.config.base_system_prompt.clone(), None)
-                };
+            // Render the system prompt once and cache it. Re-rendering on
+            // every provider call breaks DeepSeek's prefix caching: even a
+            // single byte change in the system message invalidates the entire
+            // cache for that request.
+            if self.cached_system_prompt.is_none()
+                && let Some(assembly) = &self.config.prompt_assembly
+            {
+                let blocks = assembly.build_blocks().await;
+                self.cached_system_prompt =
+                    Some(blocks.into_iter().map(|b| b.text).collect::<Vec<_>>().join("\n\n"));
+            }
+            let (system_prompt, system_prompt_blocks) = if self.cached_system_prompt.is_some() {
+                (self.cached_system_prompt.clone(), None)
+            } else {
+                (self.config.base_system_prompt.clone(), None)
+            };
 
             let request = CompletionRequest {
                 system_prompt,
@@ -159,6 +168,41 @@ impl AgentSession {
                     }
                     continue;
                 }
+
+                // Reactive compaction: if the context window was exceeded,
+                // compact the conversation and retry once rather than failing.
+                if e.is_context_too_long()
+                    && let Some(compaction) = self.config.compaction.clone()
+                {
+                    warn!(
+                        error = %e,
+                        "context window exceeded — attempting reactive compaction"
+                    );
+                    match compaction.compact(&mut self.messages, provider).await {
+                        Ok(true) => {
+                            info!("reactive compaction succeeded, retrying provider call");
+                            self.metrics.add_compaction();
+                            self.push_system_reminder(crate::message::SystemReminder::Compaction {
+                                reason: "reactive".into(),
+                            });
+                            // Yield a compaction event so consumers know.
+                            events.push(TurnEvent::CompactionStarted { reason: "reactive".into() });
+                            events
+                                .push(TurnEvent::CompactionCompleted { reason: "reactive".into() });
+                            continue;
+                        }
+                        Ok(false) => {
+                            warn!("reactive compaction had no effect — context still too large");
+                        }
+                        Err(compact_err) => {
+                            warn!(
+                                error = %compact_err,
+                                "reactive compaction failed"
+                            );
+                        }
+                    }
+                }
+
                 if e.is_retryable() {
                     error!(attempts, error = %e, "provider retries exhausted");
                     return Err(AgentError::ProviderRetriesExhausted {

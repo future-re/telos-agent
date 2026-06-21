@@ -111,14 +111,28 @@ impl CompactionStrategy for SummaryCompaction {
 
         // Wrap the summary in an identifiable XML-ish tag so subsequent
         // inspection can locate it without parsing the model's prose.
-        let summary_msg = Message::system(format!(
+        let summary_msg = Message::user(format!(
             "<conversation_summary>\n{}\n</conversation_summary>",
             summary_text
         ));
 
-        // Preserve any leading system prompt(s) before the summary, then keep
-        // the recent messages that were not summarised.
+        // Build the compacted conversation:
+        //   1. Leading system prompt (preserved verbatim)
+        //   2. Compact boundary marker (so future code can locate the split)
+        //   3. Summary of old messages
+        //   4. Recent messages (preserved verbatim)
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let boundary_msg = Message::user(format!(
+            "<compact_boundary timestamp='{ts}' original_count='{oc}' summary_count='1' keep_recent='{kr}'/>",
+            ts = timestamp,
+            oc = split_point,
+            kr = self.keep_recent,
+        ));
         let mut new_messages = messages[..system_idx].to_vec();
+        new_messages.push(boundary_msg);
         new_messages.push(summary_msg);
         new_messages.extend(messages[split_point..].iter().cloned());
         *messages = new_messages;
@@ -162,7 +176,11 @@ mod tests {
         assert!(changed);
         assert_eq!(messages[0].role, Role::System);
         assert_eq!(messages[0].text_content(), "persona");
-        assert!(messages[1].text_content().contains("summary text"));
+        // messages[1] is the compact boundary marker (user role so it
+        // doesn't interfere with system prompt caching detection)
+        assert_eq!(messages[1].role, Role::User);
+        assert!(messages[1].text_content().contains("<compact_boundary"));
+        assert!(messages[2].text_content().contains("summary text"));
     }
 
     #[tokio::test]

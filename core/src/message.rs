@@ -197,6 +197,9 @@ pub enum SystemReminder {
     HookInterception { phase: String, name: String },
     /// A tool result contains a system-level note.
     ToolResult { tool_name: String, note: String },
+    /// Dynamic memory injection — relevant memories scored against the
+    /// current user query are presented as a system reminder.
+    MemoryInjection { content: String },
 }
 
 impl SystemReminder {
@@ -217,6 +220,9 @@ impl SystemReminder {
             }
             SystemReminder::ToolResult { tool_name, note } => {
                 format!("Tool `{tool_name}` reported: {note}")
+            }
+            SystemReminder::MemoryInjection { content } => {
+                content.clone()
             }
         };
         format!("<system-reminder>\n{}\n</system-reminder>", body)

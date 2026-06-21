@@ -37,6 +37,13 @@ pub struct AgentSession {
     pub(super) read_file_state: FileReadState,
     /// Accumulated session-level metrics updated by the runtime.
     pub(super) metrics: SessionMetrics,
+    /// Consecutive compaction failures. Used as a circuit breaker to
+    /// stop retrying when the context is irrecoverably over the limit.
+    pub(super) consecutive_compaction_failures: usize,
+    /// System prompt rendered once from PromptAssembly and cached.
+    /// Avoids re-rendering on every provider call, which would break
+    /// DeepSeek's prefix caching (identical prefix → cache hit).
+    pub(super) cached_system_prompt: Option<String>,
 }
 
 impl AgentSession {
@@ -61,6 +68,8 @@ impl AgentSession {
             messages,
             read_file_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             metrics: SessionMetrics::new(),
+            consecutive_compaction_failures: 0,
+            cached_system_prompt: None,
         })
     }
 
@@ -156,6 +165,10 @@ impl AgentSession {
             let user_message = Message::user(user_input.clone());
             self.messages.push(user_message.clone());
 
+            // Save a clone for memory injection later in the loop
+            // (user_input is moved into TurnStarted below).
+            let user_input_for_memory = user_input.clone();
+
             yield TurnEvent::TurnStarted {
                 session_id: self.session_id.clone(),
                 turn_id,
@@ -230,6 +243,16 @@ impl AgentSession {
                     self.messages.push(message.clone());
                     force_thinking_next_iteration = true;
                     yield TurnEvent::User(message);
+                }
+
+                // Dynamic memory injection: score cached memories against
+                // the user's current input and inject the top-K as a system
+                // reminder before the first provider call of each turn.
+                if iterations == 1
+                    && let Some(injector) = &self.config.memory_injector
+                    && let Some(reminder) = injector.inject_for_query(&user_input_for_memory)
+                {
+                    self.push_system_reminder(reminder);
                 }
 
                 let hint = if force_thinking_next_iteration {

@@ -25,20 +25,23 @@ pub struct MemoryStore {
     root: PathBuf,
     /// name → full path on disk
     index: HashMap<String, PathBuf>,
+    /// name → parsed entry (in-memory cache to avoid O(n) disk reads)
+    cache: HashMap<String, MemoryEntry>,
 }
 
 impl MemoryStore {
     /// Open or create a memory store at the given root directory.
     pub fn new(root: PathBuf) -> Self {
         std::fs::create_dir_all(&root).ok();
-        let mut store = Self { root, index: HashMap::new() };
+        let mut store = Self { root, index: HashMap::new(), cache: HashMap::new() };
         store.rebuild_index();
         store
     }
 
-    /// Re-scan the root directory and rebuild the in-memory index.
+    /// Re-scan the root directory and rebuild the in-memory index and cache.
     fn rebuild_index(&mut self) {
         self.index.clear();
+        self.cache.clear();
         let subdirs = ["scripts", "commands", "patterns", "facts", "workflows"];
         for subdir in subdirs {
             let dir = self.root.join(subdir);
@@ -54,6 +57,7 @@ impl MemoryStore {
                     if let Ok(content) = std::fs::read_to_string(&path)
                         && let Some(mem) = MemoryFormat::parse(&content)
                     {
+                        self.cache.insert(mem.name.clone(), mem.clone());
                         self.index.insert(mem.name.clone(), path);
                     }
                 }
@@ -79,6 +83,7 @@ impl MemoryStore {
         }
         let content = MemoryFormat::serialize(&entry);
         std::fs::write(&path, content)?;
+        self.cache.insert(entry.name.clone(), entry.clone());
         self.index.insert(entry.name.clone(), path);
         self.write_index_md()?;
         Ok(())
@@ -122,9 +127,7 @@ impl MemoryStore {
 
     /// Read a memory entry by name.
     pub fn read(&self, name: &str) -> Option<MemoryEntry> {
-        let path = self.index.get(name)?;
-        let content = std::fs::read_to_string(path).ok()?;
-        MemoryFormat::parse(&content)
+        self.cache.get(name).cloned()
     }
 
     /// Return all memory names.
@@ -155,6 +158,7 @@ impl MemoryStore {
 
     /// Move a memory to the _archived directory (never delete).
     pub fn archive(&mut self, name: &str) -> std::io::Result<()> {
+        self.cache.remove(name);
         if let Some(path) = self.index.remove(name) {
             let archive_dir = self.root.join("_archived");
             std::fs::create_dir_all(&archive_dir)?;

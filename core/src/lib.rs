@@ -205,7 +205,8 @@ pub use provider::{
 };
 // Runtime — the agent session and the streaming turn loop.
 pub use runtime::{
-    AgentSession, TurnEvent, TurnInputReceiver, TurnInputSender, TurnResult, turn_input_channel,
+    AgentSession, MemoryInjector, TurnEvent, TurnInputReceiver, TurnInputSender, TurnResult,
+    turn_input_channel,
 };
 // Skills — user-defined slash-commands loaded from markdown files.
 pub use skills::{Skill, SkillArg, SkillLoader, SkillRegistry, SkillSource};

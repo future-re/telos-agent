@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::approval::ApprovalHandler;
-use crate::compaction::CompactionStrategy;
+use crate::compaction::{CompactionStrategy, SummaryCompaction};
 use crate::diagnostics::ToolDiagnosticsSink;
 use crate::error::AgentError;
 use crate::hooks::HookRegistry;
@@ -165,6 +165,12 @@ pub struct AgentConfig {
     /// Hard cap on the character length of any individual tool result. Anything
     /// longer is replaced with a truncated preview to protect the context window.
     pub max_tool_result_chars: usize,
+    /// Hard cap on the aggregate character length of all tool results within a
+    /// single message. When N parallel tool calls collectively exceed this, the
+    /// largest results are truncated to fit. Prevents a turn with many tool
+    /// calls from flooding the context window even when each result individually
+    /// stays under `max_tool_result_chars`.
+    pub max_message_tool_results_chars: usize,
     /// Registry of [`Hook`](crate::Hook)s invoked at well-known turn phases.
     pub hooks: Arc<HookRegistry>,
     /// Optional persistent backing store for session messages.
@@ -206,6 +212,11 @@ pub struct AgentConfig {
     /// Optional task manager used by long-running tools such as background
     /// subagents to publish lifecycle state and output.
     pub task_manager: Option<Arc<crate::tasks::TaskManager>>,
+    /// Optional memory injector for dynamic per-turn memory scoring.
+    /// When set, memories are scored against the user's current input
+    /// and injected as system reminders before the first provider call
+    /// of each turn.
+    pub memory_injector: Option<Arc<crate::runtime::MemoryInjector>>,
 }
 
 impl std::fmt::Debug for AgentConfig {
@@ -221,6 +232,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("cwd", &self.cwd)
             .field("env", &format!("{} keys: [REDACTED]", env_keys.len()))
             .field("max_tool_result_chars", &self.max_tool_result_chars)
+            .field("max_message_tool_results_chars", &self.max_message_tool_results_chars)
             .field("hooks", &self.hooks)
             .field("storage", &self.storage)
             .field("tool_diagnostics", &self.tool_diagnostics.as_ref().map(|_| "<set>"))
@@ -237,6 +249,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("skill_registry", &self.skill_registry.as_ref().map(|_| "<set>"))
             .field("plugin_registry", &self.plugin_registry.as_ref().map(|_| "<set>"))
             .field("task_manager", &self.task_manager.as_ref().map(|_| "<set>"))
+            .field("memory_injector", &self.memory_injector.as_ref().map(|_| "<set>"))
             .finish()
     }
 }
@@ -254,11 +267,12 @@ impl Default for AgentConfig {
             // the entire process environment risks leaking secrets to arbitrary
             // tool calls.
             env: platform_base_env(),
-            max_tool_result_chars: usize::MAX,
+            max_tool_result_chars: 50_000,
+            max_message_tool_results_chars: 300_000,
             hooks: Arc::new(HookRegistry::new()),
             storage: None,
             tool_diagnostics: None,
-            compaction: None,
+            compaction: Some(Arc::new(SummaryCompaction { max_tokens: 800_000, keep_recent: 12 })),
             permission_engine: None,
             approval_handler: None,
             tool_concurrency_limit: 10,
@@ -271,6 +285,7 @@ impl Default for AgentConfig {
             skill_registry: None,
             plugin_registry: None,
             task_manager: None,
+            memory_injector: None,
         }
     }
 }
@@ -430,12 +445,13 @@ impl AgentConfig {
             TaskPath::Standard => {
                 self.max_iterations = None;
                 self.tool_timeout_ms = None;
-                self.token_budget = None;
+                // 1M context window — compact early to leave headroom for output.
+                self.token_budget = Some(TokenBudget::new(900_000));
             }
             TaskPath::Heavy => {
                 self.max_iterations = None;
                 self.tool_timeout_ms = Some(60_000);
-                self.token_budget = Some(TokenBudget::new(308_000));
+                self.token_budget = Some(TokenBudget::new(950_000));
                 self.tool_concurrency_limit = 5;
             }
         }

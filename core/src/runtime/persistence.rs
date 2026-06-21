@@ -78,7 +78,25 @@ impl AgentSession {
             messages,
             read_file_state: Arc::new(tokio::sync::Mutex::new(read_file_state)),
             metrics,
+            consecutive_compaction_failures: 0,
+            cached_system_prompt: None,
         })
+    }
+}
+
+impl AgentSession {
+    /// Save a pre-compaction snapshot of the current messages to storage.
+    ///
+    /// Uses a sub-session ID so the snapshot is stored alongside the main
+    /// session but can be distinguished. This preserves history that would
+    /// otherwise be lost when compaction replaces old messages with a summary.
+    pub async fn save_pre_compact_snapshot(&self) -> Result<(), AgentError> {
+        if let Some(storage) = &self.config.storage {
+            let snapshot_id = format!("{}-pre-compact", self.session_id);
+            storage.save_snapshot(&snapshot_id, &self.messages).await
+        } else {
+            Ok(())
+        }
     }
 }
 

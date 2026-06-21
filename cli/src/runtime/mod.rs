@@ -51,6 +51,9 @@ pub(crate) fn prepare_runtime(
     register_cli_task_tools(&mut tools, task_manager);
 
     telos_agent::register_memory_tools(&mut tools, memory_store.clone());
+    // Wire dynamic memory injection: score memories against user input each turn.
+    agent_config.memory_injector =
+        Some(Arc::new(telos_agent::MemoryInjector::new(memory_store.clone())));
     agent_config.prompt_assembly = Some(Arc::new(build_prompt_assembly(
         &agent_config,
         &tools,
@@ -83,7 +86,7 @@ fn build_prompt_assembly(
     agent_config: &AgentConfig,
     tools: &ToolRegistry,
     context: &ProjectContext,
-    memory_store: Arc<Mutex<MemoryStore>>,
+    _memory_store: Arc<Mutex<MemoryStore>>,
 ) -> telos_agent::PromptAssembly {
     let tools = Arc::new(tools.clone());
     let mut assembly = telos_agent::PromptAssembly::new();
@@ -101,7 +104,9 @@ fn build_prompt_assembly(
     context::append_prompt_context(&mut assembly, context);
     assembly.add(telos_agent::DateSection);
     assembly.add(telos_agent::CwdSection::new(agent_config.cwd.clone()));
-    assembly.add(telos_agent::MemorySection::new(memory_store));
+    // Memory injection is now handled dynamically by MemoryInjector in the
+    // turn loop — memories are scored against the current user query on each
+    // turn rather than baked into the static system prompt.
     assembly
 }
 

@@ -19,11 +19,15 @@ impl AgentSession {
     ) -> Result<(Message, Vec<TurnEvent>), AgentError> {
         let mut events = Vec::new();
         let messages = Arc::new(self.messages.clone());
+        // Clone config/session_id to release the immutable borrow on self
+        // before we push system-reminders later (which needs &mut self).
+        let config = self.config.clone();
+        let session_id = self.session_id.clone();
         let mut execution = Box::pin(execute_tool_calls_stream(
             tool_calls,
             tools,
-            &self.config,
-            &self.session_id,
+            &config,
+            &session_id,
             turn_id,
             messages,
             self.read_file_state.clone(),
@@ -65,6 +69,15 @@ impl AgentSession {
             }
         }
 
+        // Collect memory-mutation tool names before tool_results is moved
+        // into the Message builder. We'll push system reminders afterwards
+        // so the model knows its memory state may be stale.
+        let memory_mutations: Vec<String> = tool_results
+            .iter()
+            .filter(|r| !r.is_error && is_memory_mutation_tool(&r.name))
+            .map(|r| r.name.clone())
+            .collect();
+
         for result in &tool_results {
             self.metrics.add_tool_call();
             if result.is_error {
@@ -73,14 +86,33 @@ impl AgentSession {
         }
 
         let tool_message = Message::tool_results(tool_results);
-        let compaction_config =
-            CompactionConfig { max_tool_result_chars: self.config.max_tool_result_chars };
+        let compaction_config = CompactionConfig {
+            max_tool_result_chars: self.config.max_tool_result_chars,
+            max_message_tool_results_chars: self.config.max_message_tool_results_chars,
+        };
         let compaction = compact_tool_result_message(tool_message, &compaction_config);
         if compaction.compacted {
             events.push(TurnEvent::CompactionStarted { reason: "tool_result_budget".into() });
             events.push(TurnEvent::CompactionCompleted { reason: "tool_result_budget".into() });
         }
 
+        // Notify the model when persistent state it may rely on has changed.
+        // MemorySection is Static (rendered once at session start), so new
+        // memories must be injected mid-conversation via system reminders.
+        for tool_name in &memory_mutations {
+            self.push_system_reminder(crate::message::SystemReminder::ToolResult {
+                tool_name: tool_name.clone(),
+                note: "Memory state has changed. New memories are now available; consider using MemoryRead or MemoryGrep to find relevant context for future work.".into(),
+            });
+        }
+
         Ok((compaction.message, events))
     }
+}
+
+/// Tools that mutate the memory store. When one of these succeeds, the
+/// runtime injects a system reminder so the model knows its memory state
+/// is stale and fresh results are available.
+fn is_memory_mutation_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "MemoryWrite" | "MemoryEdit" | "memory_write" | "memory_edit")
 }

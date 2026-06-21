@@ -85,6 +85,32 @@ impl AgentError {
             _ => false,
         }
     }
+
+    /// Whether the error indicates the context window was exceeded.
+    ///
+    /// HTTP 400 with a message about context/token length means the request
+    /// was too large for the model. This is NOT retryable in the normal sense
+    /// (repeating the same request will fail), but it IS recoverable via
+    /// compaction: summarise history, then retry with fewer tokens.
+    pub fn is_context_too_long(&self) -> bool {
+        match self {
+            AgentError::Provider(ProviderError::Http { status, message }) if *status == 400 => {
+                let lower = message.to_lowercase();
+                lower.contains("context")
+                    || lower.contains("token")
+                    || lower.contains("too long")
+                    || lower.contains("too large")
+                    || lower.contains("exceeds")
+                    || lower.contains("maximum")
+                    || lower.contains("length")
+            }
+            AgentError::Provider(ProviderError::Api(message)) => {
+                let lower = message.to_lowercase();
+                lower.contains("context") || lower.contains("token") || lower.contains("too long")
+            }
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]

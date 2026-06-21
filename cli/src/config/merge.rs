@@ -1,6 +1,6 @@
 use super::{
-    AgentSection, ApprovalSection, DiagnosticsGithubSection, DiagnosticsSection, FileConfig,
-    TuiSection,
+    AgentSection, ApprovalSection, BillingModelPricing, BillingSection, DiagnosticsGithubSection,
+    DiagnosticsSection, FileConfig, TuiSection,
 };
 
 /// Merge two config layers. `project` values override `user` values.
@@ -13,6 +13,10 @@ pub fn merge_configs(user: Option<FileConfig>, project: Option<FileConfig>) -> F
     let approval = merge_approval(
         user.as_ref().and_then(|c| c.approval.as_ref()),
         project.as_ref().and_then(|c| c.approval.as_ref()),
+    );
+    let billing = merge_billing(
+        user.as_ref().and_then(|c| c.billing.as_ref()),
+        project.as_ref().and_then(|c| c.billing.as_ref()),
     );
     let auto_mode = project
         .as_ref()
@@ -36,7 +40,7 @@ pub fn merge_configs(user: Option<FileConfig>, project: Option<FileConfig>) -> F
         (None, None) => None,
     };
 
-    FileConfig { agent, approval, diagnostics, tui, env, auto_mode }
+    FileConfig { agent, approval, billing, diagnostics, tui, env, auto_mode }
 }
 
 fn merge_agent(
@@ -87,6 +91,53 @@ fn merge_approval(
             default_policy: p.default_policy.clone().or_else(|| u.default_policy.clone()),
             policies: p.policies.clone().or_else(|| u.policies.clone()),
         }),
+    }
+}
+
+fn merge_billing(
+    user: Option<&BillingSection>,
+    project: Option<&BillingSection>,
+) -> Option<BillingSection> {
+    match (user, project) {
+        (None, None) => None,
+        (Some(u), None) => Some(u.clone()),
+        (None, Some(p)) => Some(p.clone()),
+        (Some(u), Some(p)) => Some(BillingSection {
+            models: merge_billing_models(u.models.as_ref(), p.models.as_ref()),
+        }),
+    }
+}
+
+fn merge_billing_models(
+    user: Option<&std::collections::HashMap<String, BillingModelPricing>>,
+    project: Option<&std::collections::HashMap<String, BillingModelPricing>>,
+) -> Option<std::collections::HashMap<String, BillingModelPricing>> {
+    match (user, project) {
+        (None, None) => None,
+        (Some(u), None) => Some(u.clone()),
+        (None, Some(p)) => Some(p.clone()),
+        (Some(u), Some(p)) => {
+            let mut merged = u.clone();
+            for (model, pricing) in p {
+                let next = if let Some(existing) = merged.get(model) {
+                    BillingModelPricing {
+                        input_cache_hit_per_million: pricing
+                            .input_cache_hit_per_million
+                            .or(existing.input_cache_hit_per_million),
+                        input_cache_miss_per_million: pricing
+                            .input_cache_miss_per_million
+                            .or(existing.input_cache_miss_per_million),
+                        output_per_million: pricing
+                            .output_per_million
+                            .or(existing.output_per_million),
+                    }
+                } else {
+                    pricing.clone()
+                };
+                merged.insert(model.clone(), next);
+            }
+            Some(merged)
+        }
     }
 }
 

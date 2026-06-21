@@ -23,6 +23,7 @@ pub(super) fn stream_json_to<'a>(
         let mut tool_calls: Vec<StreamingToolCall> = Vec::new();
         let mut stop_reason = StopReason::EndTurn;
         let mut usage = None;
+        let mut model = None;
 
         yield ProviderEvent::MessageStart;
 
@@ -47,6 +48,7 @@ pub(super) fn stream_json_to<'a>(
                         &mut tool_calls,
                         &mut stop_reason,
                         &mut usage,
+                        &mut model,
                     )? {
                         yield event;
                     }
@@ -76,7 +78,7 @@ pub(super) fn stream_json_to<'a>(
             });
         }
 
-        yield ProviderEvent::MessageStop { stop_reason, usage };
+        yield ProviderEvent::MessageStop { stop_reason, usage, model };
     }
 }
 
@@ -114,9 +116,13 @@ fn apply_stream_chunk(
     tool_calls: &mut Vec<StreamingToolCall>,
     stop_reason: &mut StopReason,
     usage: &mut Option<TokenUsage>,
+    model: &mut Option<String>,
 ) -> Result<Vec<ProviderEvent>, AgentError> {
     if let Some(chunk_usage) = value.get("usage").filter(|usage| !usage.is_null()) {
         *usage = Some(parse_usage(chunk_usage)?);
+    }
+    if let Some(chunk_model) = value.get("model").and_then(Value::as_str) {
+        *model = Some(chunk_model.to_string());
     }
 
     let mut events = Vec::new();

@@ -12,6 +12,7 @@ pub struct DesktopEvent {
     pub prompt_cache_hit_tokens: Option<usize>,
     pub prompt_cache_miss_tokens: Option<usize>,
     pub reasoning_tokens: Option<usize>,
+    pub model: Option<String>,
     pub tool_call_id: Option<String>,
     pub tool_name: Option<String>,
     pub detail: Option<String>,
@@ -30,6 +31,7 @@ impl DesktopEvent {
             prompt_cache_hit_tokens: None,
             prompt_cache_miss_tokens: None,
             reasoning_tokens: None,
+            model: None,
             tool_call_id: None,
             tool_name: None,
             detail: None,
@@ -84,6 +86,7 @@ pub fn map_turn_event(event: TurnEvent) -> DesktopEvent {
             prompt_cache_hit_tokens,
             prompt_cache_miss_tokens,
             reasoning_tokens,
+            model,
         } => DesktopEvent {
             input_tokens: Some(input_tokens),
             output_tokens: Some(output_tokens),
@@ -91,6 +94,7 @@ pub fn map_turn_event(event: TurnEvent) -> DesktopEvent {
             prompt_cache_hit_tokens,
             prompt_cache_miss_tokens,
             reasoning_tokens,
+            model,
             ..DesktopEvent::new("provider_usage")
         },
         TurnEvent::TurnFinished { final_text, .. } => {
@@ -132,6 +136,7 @@ mod tests {
             prompt_cache_hit_tokens: Some(3),
             prompt_cache_miss_tokens: None,
             reasoning_tokens: Some(2),
+            model: Some("deepseek-v4-flash".into()),
         });
 
         assert_eq!(event.kind, "provider_usage");
@@ -140,5 +145,6 @@ mod tests {
         assert_eq!(event.total_tokens, Some(14));
         assert_eq!(event.prompt_cache_hit_tokens, Some(3));
         assert_eq!(event.reasoning_tokens, Some(2));
+        assert_eq!(event.model.as_deref(), Some("deepseek-v4-flash"));
     }
 }

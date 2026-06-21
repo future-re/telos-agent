@@ -249,11 +249,13 @@ mod tests {
                 },
                 stop_reason: StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             CompletionResponse {
                 message: Message::assistant("rethought"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]));
         let started = Arc::new(tokio::sync::Notify::new());

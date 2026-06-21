@@ -27,7 +27,12 @@ pub(super) fn parse_chat_response(value: Value) -> Result<CompletionResponse, Ag
     let stop_reason = parse_stop_reason(choice.get("finish_reason"));
     let usage = value.get("usage").map(parse_usage).transpose()?;
 
-    Ok(CompletionResponse { message, stop_reason, usage })
+    Ok(CompletionResponse {
+        message,
+        stop_reason,
+        usage,
+        model: value.get("model").and_then(Value::as_str).map(str::to_string),
+    })
 }
 
 pub(super) fn parse_fim_response(value: Value) -> Result<DeepSeekFimResponse, AgentError> {

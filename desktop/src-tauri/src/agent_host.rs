@@ -123,6 +123,7 @@ impl AgentHost {
                 message: Message::assistant("桌面端当前使用 Mock Provider，没有真实模型调用。"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             }])) as Arc<dyn ModelProvider + Send + Sync>,
         };
 

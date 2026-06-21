@@ -144,6 +144,7 @@ mod tests {
                 message: Message::assistant("summary text"),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             })
         }
 

@@ -49,6 +49,7 @@
 //!         message: Message::assistant("done"),
 //!         stop_reason: StopReason::EndTurn,
 //!         usage: None,
+//!         model: None,
 //!     }]);
 //!
 //!     let tools = ToolRegistry::new();

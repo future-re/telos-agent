@@ -209,10 +209,6 @@ export function App() {
     () => prompt.trim().length > 0 && !deepseekNeedsKey && !loadingSettings,
     [deepseekNeedsKey, loadingSettings, prompt],
   );
-  const turnCount = useMemo(
-    () => groupConversationMessages(state.messages).length,
-    [state.messages],
-  );
   const sessionUsage = useMemo(
     () => sumTokenUsage(Object.values(state.usageByTurnId)),
     [state.usageByTurnId],
@@ -508,7 +504,6 @@ export function App() {
               running={state.running}
               status={state.status}
               tools={state.tools}
-              turnCount={turnCount}
             />
             <div className="grid min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto]">
               <Conversation

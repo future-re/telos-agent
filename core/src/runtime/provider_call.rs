@@ -54,7 +54,8 @@ impl AgentSession {
         provider: &P,
         tool_definitions: &[ToolDefinition],
         hint: ModelHint,
-    ) -> Result<(Message, StopReason, Option<TokenUsage>, Vec<TurnEvent>), AgentError> {
+    ) -> Result<(Message, StopReason, Option<TokenUsage>, Option<String>, Vec<TurnEvent>), AgentError>
+    {
         let mut events = Vec::new();
         let mut attempts = 0;
 
@@ -84,6 +85,7 @@ impl AgentSession {
             let mut blocks = Vec::new();
             let mut stop_reason = StopReason::EndTurn;
             let mut usage = None;
+            let mut model = None;
             let mut text_buf: Option<String> = None;
             let mut thinking_buf: Option<String> = None;
             let mut stream_error: Option<AgentError> = None;
@@ -119,9 +121,14 @@ impl AgentSession {
                         }
                         blocks.push(ContentBlock::ToolCall(call));
                     }
-                    Ok(ProviderEvent::MessageStop { stop_reason: reason, usage: event_usage }) => {
+                    Ok(ProviderEvent::MessageStop {
+                        stop_reason: reason,
+                        usage: event_usage,
+                        model: event_model,
+                    }) => {
                         stop_reason = reason;
                         usage = event_usage;
+                        model = event_model;
                     }
                     Err(e) => {
                         stream_error = Some(e);
@@ -173,7 +180,13 @@ impl AgentSession {
                     is_redacted: false,
                 }));
             }
-            return Ok((Message { role: Role::Assistant, blocks }, stop_reason, usage, events));
+            return Ok((
+                Message { role: Role::Assistant, blocks },
+                stop_reason,
+                usage,
+                model,
+                events,
+            ));
         }
     }
 }

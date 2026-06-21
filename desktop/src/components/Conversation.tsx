@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ConversationTurn, groupConversationMessages } from "@/conversationView";
+import { cn } from "@/lib/utils";
 import { formatTokenCount } from "@/tokenUsage";
 
 interface ConversationProps {
@@ -46,10 +47,10 @@ export function Conversation({
   return (
     <section className="h-full min-h-0 overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.08),transparent_32rem),linear-gradient(180deg,var(--background),var(--muted))]">
       <ScrollArea className="h-full w-full">
-        <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col px-4 py-6 md:px-6 md:py-8">
+        <div className="mx-auto flex min-h-full w-full min-w-0 max-w-4xl flex-col px-4 py-6 md:px-6 md:py-8">
           {turns.length === 0 ? (
             <div className="flex min-h-[420px] flex-1 items-end pb-8 md:pb-12">
-              <div className="w-full">
+              <div className="w-full min-w-0">
                 {needsApiKey ? (
                   <OnboardingCard
                     apiKeyDraft={apiKeyDraft}
@@ -83,7 +84,7 @@ export function Conversation({
 function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsage }) {
   if (turn.role === "system") {
     return (
-      <div className="flex justify-center">
+      <div className="flex min-w-0 justify-center">
         <p className="max-w-2xl rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs leading-5 text-amber-950">
           {turn.content}
         </p>
@@ -93,12 +94,12 @@ function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsa
 
   if (turn.role === "user") {
     return (
-      <article className="flex justify-end">
-        <div className="max-w-[min(680px,82%)]">
+      <article className="flex min-w-0 justify-end">
+        <div className="min-w-0 max-w-[min(680px,82%)]">
           <div className="mb-1.5 pr-1 text-right text-[13px] font-medium text-muted-foreground">
             {roleLabels.user}
           </div>
-          <div className="rounded-2xl rounded-br-md bg-primary px-4 py-3 text-[15px] leading-7 text-primary-foreground shadow-[0_10px_24px_rgba(15,23,42,0.14)]">
+          <div className="min-w-0 overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-3 text-[15px] leading-7 text-primary-foreground shadow-[0_10px_24px_rgba(15,23,42,0.14)]">
             <MarkdownContent className="markdown-body markdown-body-user" content={turn.content} />
           </div>
         </div>
@@ -144,7 +145,7 @@ function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsa
 
 function MarkdownContent({ className, content }: { className?: string; content: string }) {
   return (
-    <div className={className}>
+    <div className={cn("min-w-0", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{

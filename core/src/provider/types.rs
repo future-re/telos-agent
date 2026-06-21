@@ -84,6 +84,7 @@ pub struct CompletionResponse {
     pub message: Message,
     pub stop_reason: StopReason,
     pub usage: Option<TokenUsage>,
+    pub model: Option<String>,
 }
 
 /// One unit of incremental output from a streaming completion.
@@ -98,7 +99,7 @@ pub enum ProviderEvent {
     /// Fully-assembled tool call from the assistant (providers buffer streamed JSON internally).
     ToolCall(ToolCall),
     /// Final marker carrying the stop reason and (optional) usage.
-    MessageStop { stop_reason: StopReason, usage: Option<TokenUsage> },
+    MessageStop { stop_reason: StopReason, usage: Option<TokenUsage>, model: Option<String> },
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ pub use telos_agent::DefaultShell;
 pub struct FileConfig {
     pub agent: Option<AgentSection>,
     pub approval: Option<ApprovalSection>,
+    pub billing: Option<BillingSection>,
     pub diagnostics: Option<DiagnosticsSection>,
     pub tui: Option<TuiSection>,
     pub env: Option<HashMap<String, String>>,
@@ -38,6 +39,18 @@ pub struct DiagnosticsSection {
     pub enabled: Option<bool>,
     pub retention_days: Option<u64>,
     pub github: Option<DiagnosticsGithubSection>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct BillingSection {
+    pub models: Option<HashMap<String, BillingModelPricing>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct BillingModelPricing {
+    pub input_cache_hit_per_million: Option<f64>,
+    pub input_cache_miss_per_million: Option<f64>,
+    pub output_per_million: Option<f64>,
 }
 
 /// GitHub issue reporter configuration for sanitized diagnostics summaries.

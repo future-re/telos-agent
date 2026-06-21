@@ -27,6 +27,7 @@ pub enum TurnEvent {
         prompt_cache_hit_tokens: Option<usize>,
         prompt_cache_miss_tokens: Option<usize>,
         reasoning_tokens: Option<usize>,
+        model: Option<String>,
     },
     /// Incremental text fragment streamed from the assistant.
     AssistantDelta { text: String },
@@ -118,6 +119,7 @@ impl TurnEvent {
                 prompt_cache_hit_tokens,
                 prompt_cache_miss_tokens,
                 reasoning_tokens,
+                model,
             } => {
                 let mut parts =
                     vec![format!("input={input_tokens}"), format!("output={output_tokens}")];
@@ -132,6 +134,9 @@ impl TurnEvent {
                 }
                 if let Some(tokens) = reasoning_tokens {
                     parts.push(format!("reasoning={tokens}"));
+                }
+                if let Some(model) = model {
+                    parts.push(format!("model={model}"));
                 }
                 format!("provider_usage:{}", parts.join(" "))
             }

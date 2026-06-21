@@ -367,6 +367,7 @@ mod tests {
             message: crate::Message::assistant("explore result"),
             stop_reason: crate::provider::StopReason::EndTurn,
             usage: None,
+            model: None,
         }]));
         let tool = SubagentTool::new(provider.clone(), ToolRegistry::new(), AgentConfig::default());
 
@@ -400,6 +401,7 @@ mod tests {
             message: crate::Message::assistant("done"),
             stop_reason: crate::provider::StopReason::EndTurn,
             usage: None,
+            model: None,
         }]));
         let mut registry = SubagentRegistry::new();
         let mut agent = AgentDefinition::new(
@@ -445,6 +447,7 @@ mod tests {
             message: crate::Message::assistant("done"),
             stop_reason: crate::provider::StopReason::EndTurn,
             usage: None,
+            model: None,
         }]));
         let mut registry = SubagentRegistry::new();
         let mut agent = AgentDefinition::new(
@@ -487,6 +490,7 @@ mod tests {
             message: crate::Message::assistant("done"),
             stop_reason: crate::provider::StopReason::EndTurn,
             usage: None,
+            model: None,
         }]));
         let tool = SubagentTool::new(provider.clone(), ToolRegistry::new(), AgentConfig::default());
 
@@ -522,11 +526,13 @@ mod tests {
                 },
                 stop_reason: crate::provider::StopReason::ToolUse,
                 usage: None,
+                model: None,
             },
             crate::provider::CompletionResponse {
                 message: crate::Message::assistant("done"),
                 stop_reason: crate::provider::StopReason::EndTurn,
                 usage: None,
+                model: None,
             },
         ]));
         let tool = SubagentTool::new(provider, ToolRegistry::new(), AgentConfig::default());

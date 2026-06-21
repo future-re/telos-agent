@@ -11,8 +11,9 @@ pub use provider::{
     ResolvedProvider, build_agent_config, build_provider, build_provider_from_onboarding,
 };
 pub use types::{
-    AgentSection, ApprovalSection, DefaultShell, DiagnosticsGithubSection, DiagnosticsSection,
-    FileConfig, ModelsSection, TuiDensity, TuiSection,
+    AgentSection, ApprovalSection, BillingModelPricing, BillingSection, DefaultShell,
+    DiagnosticsGithubSection, DiagnosticsSection, FileConfig, ModelsSection, TuiDensity,
+    TuiSection,
 };
 
 #[cfg(test)]
@@ -170,6 +171,29 @@ min_occurrences = 2
     }
 
     #[test]
+    fn parses_billing_config() {
+        let cfg: FileConfig = toml::from_str(
+            r#"
+[billing.models.deepseek-v4-flash]
+input_cache_hit_per_million = 0.02
+input_cache_miss_per_million = 1.0
+output_per_million = 2.0
+"#,
+        )
+        .unwrap();
+
+        let flash = cfg
+            .billing
+            .and_then(|billing| billing.models)
+            .and_then(|models| models.get("deepseek-v4-flash").cloned())
+            .unwrap();
+
+        assert_eq!(flash.input_cache_hit_per_million, Some(0.02));
+        assert_eq!(flash.input_cache_miss_per_million, Some(1.0));
+        assert_eq!(flash.output_per_million, Some(2.0));
+    }
+
+    #[test]
     fn parses_tui_density_config() {
         let cfg: FileConfig = toml::from_str(
             r#"
@@ -236,6 +260,47 @@ density = "cozy"
         let merged = merge_configs(Some(user), Some(project));
 
         assert_eq!(merged.tui.unwrap().density, Some(TuiDensity::Compact));
+    }
+
+    #[test]
+    fn merge_configs_overlays_billing_model_prices() {
+        let user = FileConfig {
+            billing: Some(BillingSection {
+                models: Some(HashMap::from([(
+                    "deepseek-v4-flash".into(),
+                    BillingModelPricing {
+                        input_cache_hit_per_million: Some(0.02),
+                        input_cache_miss_per_million: Some(1.0),
+                        output_per_million: Some(2.0),
+                    },
+                )])),
+            }),
+            ..FileConfig::default()
+        };
+        let project = FileConfig {
+            billing: Some(BillingSection {
+                models: Some(HashMap::from([(
+                    "deepseek-v4-flash".into(),
+                    BillingModelPricing {
+                        input_cache_hit_per_million: None,
+                        input_cache_miss_per_million: Some(1.2),
+                        output_per_million: None,
+                    },
+                )])),
+            }),
+            ..FileConfig::default()
+        };
+
+        let merged = merge_configs(Some(user), Some(project));
+        let flash = merged
+            .billing
+            .and_then(|billing| billing.models)
+            .and_then(|models| models.get("deepseek-v4-flash").cloned())
+            .unwrap();
+
+        assert_eq!(flash.input_cache_hit_per_million, Some(0.02));
+        assert_eq!(flash.input_cache_miss_per_million, Some(1.2));
+        assert_eq!(flash.output_per_million, Some(2.0));
     }
 
     #[test]

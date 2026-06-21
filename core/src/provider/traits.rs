@@ -43,6 +43,7 @@ pub trait ModelProvider: Send + Sync {
             yield ProviderEvent::MessageStop {
                 stop_reason: response.stop_reason,
                 usage: response.usage,
+                model: response.model,
             };
         })
     }

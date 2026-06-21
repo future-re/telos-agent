@@ -94,7 +94,7 @@ async fn deepseek_stream_smoke() {
             Ok(ProviderEvent::MessageStart) => saw_start = true,
             Ok(ProviderEvent::TextDelta(delta)) => text.push_str(&delta),
             Ok(ProviderEvent::ThinkingDelta(_)) => {}
-            Ok(ProviderEvent::MessageStop { stop_reason, usage: u }) => {
+            Ok(ProviderEvent::MessageStop { stop_reason, usage: u, .. }) => {
                 saw_stop = true;
                 assert_eq!(stop_reason, StopReason::EndTurn);
                 usage = u;

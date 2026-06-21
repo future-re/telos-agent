@@ -88,6 +88,7 @@ impl App {
                 prompt_cache_hit_tokens,
                 prompt_cache_miss_tokens,
                 reasoning_tokens,
+                model,
             } => {
                 self.turn_input_tokens = input_tokens as u64;
                 self.turn_output_tokens = output_tokens as u64;
@@ -98,6 +99,18 @@ impl App {
                     prompt_cache_miss_tokens.map(|tokens| tokens as u64);
                 self.turn_reasoning_tokens = reasoning_tokens.map(|tokens| tokens as u64);
                 self.turn_has_provider_usage = true;
+
+                let usage = telos_agent::TokenUsage {
+                    input_tokens,
+                    output_tokens,
+                    total_tokens,
+                    prompt_cache_hit_tokens,
+                    prompt_cache_miss_tokens,
+                    reasoning_tokens,
+                };
+                if let Some(estimate) = self.cost_calculator.estimate(model.as_deref(), &usage) {
+                    self.turn_cost += estimate.total;
+                }
             }
             TurnEvent::ApprovalRequested { tool_call_id, name, reason } => {
                 self.tool_activity.approval_requested(&tool_call_id, name, reason);

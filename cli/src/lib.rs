@@ -1,3 +1,4 @@
+pub mod billing;
 pub mod cli;
 pub mod config;
 #[path = "workspace/context.rs"]

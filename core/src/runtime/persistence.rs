@@ -18,6 +18,8 @@ impl AgentSession {
                 next_turn_id: self.next_turn_id,
                 total_input_tokens: self.metrics.total_input_tokens(),
                 total_output_tokens: self.metrics.total_output_tokens(),
+                total_prompt_cache_hit_tokens: self.metrics.total_prompt_cache_hit_tokens(),
+                total_prompt_cache_miss_tokens: self.metrics.total_prompt_cache_miss_tokens(),
                 total_tool_calls: self.metrics.total_tool_calls(),
                 total_tool_errors: self.metrics.total_tool_errors(),
                 total_iterations: self.metrics.total_iterations(),
@@ -53,6 +55,8 @@ impl AgentSession {
                 SessionMetrics::with_values(
                     m.total_input_tokens,
                     m.total_output_tokens,
+                    m.total_prompt_cache_hit_tokens,
+                    m.total_prompt_cache_miss_tokens,
                     m.total_tool_calls,
                     m.total_tool_errors,
                     m.total_iterations,

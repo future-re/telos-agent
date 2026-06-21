@@ -22,6 +22,10 @@ pub struct SessionMetadata {
     pub next_turn_id: u64,
     pub total_input_tokens: usize,
     pub total_output_tokens: usize,
+    #[serde(default)]
+    pub total_prompt_cache_hit_tokens: usize,
+    #[serde(default)]
+    pub total_prompt_cache_miss_tokens: usize,
     pub total_tool_calls: usize,
     pub total_tool_errors: usize,
     pub total_iterations: usize,
@@ -397,6 +401,8 @@ mod tests {
             next_turn_id: 42,
             total_input_tokens: 100,
             total_output_tokens: 50,
+            total_prompt_cache_hit_tokens: 10,
+            total_prompt_cache_miss_tokens: 90,
             total_tool_calls: 5,
             total_tool_errors: 1,
             total_iterations: 20,
@@ -410,6 +416,8 @@ mod tests {
         let loaded = storage.load_metadata("s").await.unwrap().unwrap();
         assert_eq!(loaded.next_turn_id, 42);
         assert_eq!(loaded.total_input_tokens, 100);
+        assert_eq!(loaded.total_prompt_cache_hit_tokens, 10);
+        assert_eq!(loaded.total_prompt_cache_miss_tokens, 90);
         assert_eq!(loaded.total_tool_calls, 5);
         let key = PathBuf::from("src/lib.rs");
         assert!(loaded.read_file_state.contains_key(&key));

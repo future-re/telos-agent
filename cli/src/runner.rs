@@ -5,9 +5,10 @@ use std::pin::pin;
 use std::sync::{Arc, Mutex};
 use telos_agent::{
     AgentSession, ApprovalHandler, CompletionResponse, MemoryStore, Message, MockProvider,
-    StopReason, ToolRegistry,
+    StopReason, TokenUsage, ToolRegistry,
 };
 
+use crate::billing::CostCalculator;
 use crate::cli::SharedOptions;
 use crate::config::{self, FileConfig, ResolvedProvider};
 
@@ -43,6 +44,7 @@ pub async fn run_single(
                 &runtime.tools,
                 prompt,
                 runtime.memory_store.clone(),
+                config.billing.as_ref(),
             )
             .await?;
         }
@@ -62,6 +64,7 @@ pub async fn run_single(
                 &runtime.tools,
                 prompt,
                 runtime.memory_store.clone(),
+                config.billing.as_ref(),
             )
             .await?;
         }
@@ -71,6 +74,7 @@ pub async fn run_single(
                 message: Message::assistant("Mock provider has no real response configured."),
                 stop_reason: StopReason::EndTurn,
                 usage: None,
+                model: None,
             }]));
             crate::runtime::register_cli_subagent_tool(
                 &mut runtime.tools,
@@ -86,6 +90,7 @@ pub async fn run_single(
                 &runtime.tools,
                 prompt,
                 runtime.memory_store.clone(),
+                config.billing.as_ref(),
             )
             .await?;
         }
@@ -141,6 +146,7 @@ pub async fn run_chat(
         crate::tui::app::TuiLayoutSettings::from_density(
             config.tui.as_ref().and_then(|tui| tui.density).unwrap_or_default(),
         ),
+        config.billing.clone(),
     )
     .await;
     crate::runtime::process_diagnostics(&runtime.diagnostics, config).await;
@@ -153,11 +159,14 @@ async fn run_with_provider<P: telos_agent::ModelProvider>(
     tools: &ToolRegistry,
     prompt: String,
     memory_store: Arc<Mutex<MemoryStore>>,
+    billing: Option<&crate::config::BillingSection>,
 ) -> Result<()> {
     crate::memory_runtime::record_user_preference(&memory_store, &prompt).await;
     let mut stream = pin!(session.run_turn_stream(provider, tools, prompt));
     let mut printed = String::new();
     let mut tool_details: HashMap<String, String> = HashMap::new();
+    let cost_calculator = CostCalculator::from_section(billing);
+    let mut total_cost = 0.0;
     while let Some(event) = stream.next().await {
         match event {
             Ok(telos_agent::TurnEvent::AssistantDelta { text }) => {
@@ -195,6 +204,27 @@ async fn run_with_provider<P: telos_agent::ModelProvider>(
                     }
                 }
             }
+            Ok(telos_agent::TurnEvent::ProviderUsage {
+                input_tokens,
+                output_tokens,
+                total_tokens,
+                prompt_cache_hit_tokens,
+                prompt_cache_miss_tokens,
+                reasoning_tokens,
+                model,
+            }) => {
+                let usage = TokenUsage {
+                    input_tokens,
+                    output_tokens,
+                    total_tokens,
+                    prompt_cache_hit_tokens,
+                    prompt_cache_miss_tokens,
+                    reasoning_tokens,
+                };
+                if let Some(estimate) = cost_calculator.estimate(model.as_deref(), &usage) {
+                    total_cost += estimate.total;
+                }
+            }
             Ok(telos_agent::TurnEvent::TurnFinished { final_text, .. }) => {
                 if !final_text.is_empty() && !printed.ends_with(&final_text) {
                     print!("{final_text}");
@@ -204,6 +234,10 @@ async fn run_with_provider<P: telos_agent::ModelProvider>(
             Err(e) => return Err(e.into()),
             _ => {}
         }
+    }
+
+    if total_cost > 0.0 {
+        eprintln!("Estimated cost: {}", CostCalculator::format_cost(total_cost));
     }
     Ok(())
 }

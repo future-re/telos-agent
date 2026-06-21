@@ -242,7 +242,7 @@ impl AgentSession {
                     )
                 };
 
-                let (assistant_message, stop_reason, usage, provider_events) =
+                let (assistant_message, stop_reason, usage, actual_model, provider_events) =
                     self.call_provider(provider, &tool_definitions, hint).await?;
                 for event in provider_events {
                     yield event;
@@ -251,6 +251,12 @@ impl AgentSession {
                 if let Some(TokenUsage { input_tokens, output_tokens, total_tokens, prompt_cache_hit_tokens, prompt_cache_miss_tokens, reasoning_tokens }) = usage {
                     self.metrics.add_input_tokens(input_tokens);
                     self.metrics.add_output_tokens(output_tokens);
+                    if let Some(hit) = prompt_cache_hit_tokens {
+                        self.metrics.add_prompt_cache_hit_tokens(hit);
+                    }
+                    if let Some(miss) = prompt_cache_miss_tokens {
+                        self.metrics.add_prompt_cache_miss_tokens(miss);
+                    }
                     debug!(
                         input_tokens,
                         output_tokens,
@@ -258,6 +264,7 @@ impl AgentSession {
                         prompt_cache_hit_tokens,
                         prompt_cache_miss_tokens,
                         reasoning_tokens,
+                        model = ?actual_model,
                         "provider usage"
                     );
                     yield TurnEvent::ProviderUsage {
@@ -267,6 +274,7 @@ impl AgentSession {
                         prompt_cache_hit_tokens,
                         prompt_cache_miss_tokens,
                         reasoning_tokens,
+                        model: actual_model,
                     };
                 }
 
@@ -492,6 +500,7 @@ mod tests {
             message: Message::assistant("hello"),
             stop_reason: StopReason::EndTurn,
             usage: Some(TokenUsage::new(10, 5)),
+            model: None,
         }]);
         let tools = ToolRegistry::new();
         session.run_turn(&provider, &tools, "hi").await.unwrap();
@@ -499,6 +508,8 @@ mod tests {
         assert_eq!(session.metrics.turn_count(), 1);
         assert_eq!(session.metrics.total_input_tokens(), 10);
         assert_eq!(session.metrics.total_output_tokens(), 5);
+        assert_eq!(session.metrics.total_prompt_cache_hit_tokens(), 0);
+        assert_eq!(session.metrics.total_prompt_cache_miss_tokens(), 0);
 
         // Inject a read-file record so we can verify it round-trips.
         session.read_file_state.lock().await.insert(
@@ -520,6 +531,8 @@ mod tests {
         assert_eq!(resumed.metrics.turn_count(), 1);
         assert_eq!(resumed.metrics.total_input_tokens(), 10);
         assert_eq!(resumed.metrics.total_output_tokens(), 5);
+        assert_eq!(resumed.metrics.total_prompt_cache_hit_tokens(), 0);
+        assert_eq!(resumed.metrics.total_prompt_cache_miss_tokens(), 0);
         assert_eq!(
             resumed
                 .read_file_state

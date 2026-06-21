@@ -28,6 +28,7 @@ mod tool_rendering;
 #[path = "overlays/user_input_popup.rs"]
 pub mod user_input_popup;
 
+use crate::config::BillingSection;
 use crate::tui::app::{App, ModelSwitchConfig, TuiLayoutSettings};
 use crate::tui::event::Event;
 use anyhow::Result;
@@ -65,6 +66,7 @@ impl Drop for TuiGuard {
 }
 
 /// Launch the ratatui full-screen TUI.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     config: AgentConfig,
     provider: Arc<dyn ModelProvider>,
@@ -76,6 +78,7 @@ pub async fn run(
     memory_store: Arc<Mutex<MemoryStore>>,
     model_switch: ModelSwitchConfig,
     layout_settings: TuiLayoutSettings,
+    billing: Option<BillingSection>,
 ) -> Result<()> {
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = stdout();
@@ -108,6 +111,7 @@ pub async fn run(
         memory_store,
         model_switch,
         layout_settings,
+        billing,
     )?;
     let tick_rate = Duration::from_millis(100);
     let mut reader = EventStream::new();

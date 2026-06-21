@@ -21,6 +21,8 @@ pub struct SessionMetrics {
 struct MetricsInner {
     total_input_tokens: AtomicUsize,
     total_output_tokens: AtomicUsize,
+    total_prompt_cache_hit_tokens: AtomicUsize,
+    total_prompt_cache_miss_tokens: AtomicUsize,
     total_tool_calls: AtomicUsize,
     total_tool_errors: AtomicUsize,
     total_iterations: AtomicUsize,
@@ -32,13 +34,15 @@ struct MetricsInner {
 impl SessionMetrics {
     /// Create a fresh metrics accumulator.
     pub(crate) fn new() -> Self {
-        Self::with_values(0, 0, 0, 0, 0, 0, 0, 0)
+        Self::with_values(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     }
 
     /// Restore metrics from persisted counter values.
     pub(crate) fn with_values(
         total_input_tokens: usize,
         total_output_tokens: usize,
+        total_prompt_cache_hit_tokens: usize,
+        total_prompt_cache_miss_tokens: usize,
         total_tool_calls: usize,
         total_tool_errors: usize,
         total_iterations: usize,
@@ -50,6 +54,8 @@ impl SessionMetrics {
             inner: Arc::new(MetricsInner {
                 total_input_tokens: AtomicUsize::new(total_input_tokens),
                 total_output_tokens: AtomicUsize::new(total_output_tokens),
+                total_prompt_cache_hit_tokens: AtomicUsize::new(total_prompt_cache_hit_tokens),
+                total_prompt_cache_miss_tokens: AtomicUsize::new(total_prompt_cache_miss_tokens),
                 total_tool_calls: AtomicUsize::new(total_tool_calls),
                 total_tool_errors: AtomicUsize::new(total_tool_errors),
                 total_iterations: AtomicUsize::new(total_iterations),
@@ -70,6 +76,16 @@ impl SessionMetrics {
     /// Total output tokens produced across all turns.
     pub fn total_output_tokens(&self) -> usize {
         self.inner.total_output_tokens.load(Ordering::Relaxed)
+    }
+
+    /// Total prompt tokens served from cache across all turns.
+    pub fn total_prompt_cache_hit_tokens(&self) -> usize {
+        self.inner.total_prompt_cache_hit_tokens.load(Ordering::Relaxed)
+    }
+
+    /// Total prompt tokens not served from cache across all turns.
+    pub fn total_prompt_cache_miss_tokens(&self) -> usize {
+        self.inner.total_prompt_cache_miss_tokens.load(Ordering::Relaxed)
     }
 
     /// Total number of tool calls executed.
@@ -112,6 +128,14 @@ impl SessionMetrics {
         self.inner.total_output_tokens.fetch_add(n, Ordering::Relaxed);
     }
 
+    pub(crate) fn add_prompt_cache_hit_tokens(&self, n: usize) {
+        self.inner.total_prompt_cache_hit_tokens.fetch_add(n, Ordering::Relaxed);
+    }
+
+    pub(crate) fn add_prompt_cache_miss_tokens(&self, n: usize) {
+        self.inner.total_prompt_cache_miss_tokens.fetch_add(n, Ordering::Relaxed);
+    }
+
     pub(crate) fn add_tool_call(&self) {
         self.inner.total_tool_calls.fetch_add(1, Ordering::Relaxed);
     }
@@ -143,6 +167,14 @@ impl SessionMetrics {
         MetricsCheckpoint {
             total_input_tokens: self.inner.total_input_tokens.load(Ordering::Relaxed),
             total_output_tokens: self.inner.total_output_tokens.load(Ordering::Relaxed),
+            total_prompt_cache_hit_tokens: self
+                .inner
+                .total_prompt_cache_hit_tokens
+                .load(Ordering::Relaxed),
+            total_prompt_cache_miss_tokens: self
+                .inner
+                .total_prompt_cache_miss_tokens
+                .load(Ordering::Relaxed),
             total_tool_calls: self.inner.total_tool_calls.load(Ordering::Relaxed),
             total_tool_errors: self.inner.total_tool_errors.load(Ordering::Relaxed),
             total_iterations: self.inner.total_iterations.load(Ordering::Relaxed),
@@ -156,6 +188,12 @@ impl SessionMetrics {
     pub(crate) fn restore(&self, cp: &MetricsCheckpoint) {
         self.inner.total_input_tokens.store(cp.total_input_tokens, Ordering::Relaxed);
         self.inner.total_output_tokens.store(cp.total_output_tokens, Ordering::Relaxed);
+        self.inner
+            .total_prompt_cache_hit_tokens
+            .store(cp.total_prompt_cache_hit_tokens, Ordering::Relaxed);
+        self.inner
+            .total_prompt_cache_miss_tokens
+            .store(cp.total_prompt_cache_miss_tokens, Ordering::Relaxed);
         self.inner.total_tool_calls.store(cp.total_tool_calls, Ordering::Relaxed);
         self.inner.total_tool_errors.store(cp.total_tool_errors, Ordering::Relaxed);
         self.inner.total_iterations.store(cp.total_iterations, Ordering::Relaxed);
@@ -169,6 +207,8 @@ impl SessionMetrics {
 pub(crate) struct MetricsCheckpoint {
     total_input_tokens: usize,
     total_output_tokens: usize,
+    total_prompt_cache_hit_tokens: usize,
+    total_prompt_cache_miss_tokens: usize,
     total_tool_calls: usize,
     total_tool_errors: usize,
     total_iterations: usize,

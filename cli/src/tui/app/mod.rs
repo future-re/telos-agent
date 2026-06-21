@@ -20,7 +20,8 @@ mod tools;
 mod turn_events;
 mod turn_summary;
 
-use crate::config::TuiDensity;
+use crate::billing::CostCalculator;
+use crate::config::{BillingSection, TuiDensity};
 use crate::tui::approval::PendingApproval;
 use crate::tui::approval_inline;
 use crate::tui::chat_widget::ChatWidget;
@@ -120,6 +121,10 @@ pub struct App {
     spinner_frame: usize,
     /// Maximum tokens for the budget progress bar.
     token_budget_max: Option<u64>,
+    /// Cost calculator built from the billing configuration.
+    cost_calculator: CostCalculator,
+    /// Estimated cost of the current turn in the configured currency.
+    turn_cost: f64,
     /// Shared memory store for tools, prompt injection, and automatic feedback.
     memory: Arc<Mutex<MemoryStore>>,
     /// Session storage used by the background session and TUI resume UI.
@@ -165,6 +170,7 @@ impl App {
         auto_mode_on: bool,
         memory: Arc<Mutex<MemoryStore>>,
         model_switch: ModelSwitchConfig,
+        billing: Option<BillingSection>,
     ) -> Result<Self, telos_agent::AgentError> {
         Self::new_with_layout_settings(
             config,
@@ -177,9 +183,11 @@ impl App {
             memory,
             model_switch,
             TuiLayoutSettings::default(),
+            billing,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_layout_settings(
         mut config: telos_agent::AgentConfig,
         provider: Arc<dyn telos_agent::ModelProvider>,
@@ -191,6 +199,7 @@ impl App {
         memory: Arc<Mutex<MemoryStore>>,
         model_switch: ModelSwitchConfig,
         layout_settings: TuiLayoutSettings,
+        billing: Option<BillingSection>,
     ) -> Result<Self, telos_agent::AgentError> {
         // Wire up session storage before creating the AgentSession.
         let session_manager = crate::session::SessionManager::new(project_root);
@@ -270,6 +279,8 @@ impl App {
             inline_approval_queue: VecDeque::new(),
             spinner_frame: 0,
             token_budget_max,
+            cost_calculator: CostCalculator::from_section(billing.as_ref()),
+            turn_cost: 0.0,
             turn_tx: prompt_tx,
             turn_rx: event_rx,
             approval_rx,
@@ -300,7 +311,12 @@ impl App {
         }
         let up_k = self.turn_input_tokens as f64 / 1000.0;
         let down_k = self.turn_output_tokens as f64 / 1000.0;
-        format!("↑{:.1}k ↓{:.1}k", up_k, down_k)
+        let tokens = format!("↑{:.1}k ↓{:.1}k", up_k, down_k);
+        if self.turn_cost > 0.0 {
+            format!("{} · {}", tokens, CostCalculator::format_cost(self.turn_cost))
+        } else {
+            tokens
+        }
     }
 
     fn input_panel_height(&self, width: usize) -> u16 {
@@ -319,6 +335,7 @@ impl App {
         self.turn_prompt_cache_miss_tokens = None;
         self.turn_reasoning_tokens = None;
         self.turn_has_provider_usage = false;
+        self.turn_cost = 0.0;
     }
 
     fn push_turn_summary(&mut self) {
@@ -378,7 +395,13 @@ impl App {
             self.turn_reasoning_tokens,
         );
 
-        Some(format!("Turn {elapsed} · {tool_text} · {token_text}"))
+        let cost_text = if self.turn_cost > 0.0 {
+            format!(" · {}", CostCalculator::format_cost(self.turn_cost))
+        } else {
+            String::new()
+        };
+
+        Some(format!("Turn {elapsed} · {tool_text} · {token_text}{cost_text}"))
     }
 
     /// Update status bar to reflect auto-mode state.
@@ -534,6 +557,7 @@ mod tests {
             false,
             memory,
             ModelSwitchConfig::default(),
+            None,
         )
         .unwrap()
     }
@@ -587,6 +611,7 @@ mod tests {
             false,
             memory,
             ModelSwitchConfig::default(),
+            None,
         )
         .unwrap();
 
@@ -673,6 +698,7 @@ mod tests {
             false,
             memory,
             ModelSwitchConfig::default(),
+            None,
         )
         .unwrap();
         app.mode = Mode::Streaming;
@@ -713,6 +739,7 @@ mod tests {
             false,
             memory,
             ModelSwitchConfig::default(),
+            None,
         )
         .unwrap();
         app.turn_active = true;
@@ -788,6 +815,7 @@ mod tests {
             false,
             memory,
             ModelSwitchConfig::default(),
+            None,
         )
         .unwrap();
         app.tool_activity.push_call("call-1".into(), "Bash".into(), "cargo test".into());
@@ -855,6 +883,7 @@ mod tests {
             false,
             memory,
             ModelSwitchConfig::default(),
+            None,
         )
         .unwrap();
         app.input.handle_key(crossterm::event::KeyEvent::new(
@@ -895,6 +924,7 @@ mod tests {
             false,
             memory,
             ModelSwitchConfig::default(),
+            None,
         )
         .unwrap();
 
@@ -939,6 +969,7 @@ mod tests {
             false,
             memory,
             ModelSwitchConfig::default(),
+            None,
         )
         .unwrap();
         let (tx, _rx) = oneshot::channel();
@@ -970,6 +1001,7 @@ mod tests {
             false,
             memory,
             ModelSwitchConfig::default(),
+            None,
         )
         .unwrap();
         let (allow_tx, allow_rx) = oneshot::channel();
@@ -1117,6 +1149,7 @@ mod tests {
             false,
             memory,
             ModelSwitchConfig::default(),
+            None,
         )
         .unwrap();
         let (first_tx, _first_rx) = oneshot::channel();
@@ -1152,6 +1185,7 @@ mod tests {
             false,
             memory,
             ModelSwitchConfig::default(),
+            None,
         )
         .unwrap();
         let (tx, _rx) = oneshot::channel();
@@ -1185,6 +1219,7 @@ mod tests {
             false,
             memory,
             ModelSwitchConfig::default(),
+            None,
         )
         .unwrap();
         app.mode = Mode::Streaming;
@@ -1225,6 +1260,7 @@ mod tests {
             false,
             memory,
             ModelSwitchConfig::default(),
+            None,
         )
         .unwrap();
         app.mode = Mode::Streaming;

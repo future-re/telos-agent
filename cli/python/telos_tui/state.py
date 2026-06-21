@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+from textual.dom import DOMNode
 from textual.reactive import reactive
 
 
@@ -28,8 +29,11 @@ class Message:
     is_error: bool = False
 
 
-class AppState:
+class AppState(DOMNode):
     """Reactive store. App owns one instance. Widgets watch fields."""
+
+    def __init__(self) -> None:
+        super().__init__()
 
     # Connection
     connected: reactive[bool] = reactive(False)

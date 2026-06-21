@@ -46,10 +46,10 @@ pub fn default_coding_assembly(
     assembly.add(ShellAwareToolUsageSection::new(Arc::clone(&tools)));
     assembly.add(ToolsSection::new(Arc::clone(&tools)));
     assembly.add(ToolPromptsSection::new(Arc::clone(&tools)));
-    assembly.add(DateSection);
-    assembly.add(CwdSection::new(cwd));
     if let Some(skills) = skills {
         assembly.add(SkillsSection::new(skills));
     }
+    assembly.add(DateSection);
+    assembly.add(CwdSection::new(cwd));
     assembly
 }

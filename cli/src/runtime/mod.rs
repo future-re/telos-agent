@@ -94,13 +94,22 @@ fn build_prompt_assembly(
     context: &ProjectContext,
     memory_store: Arc<Mutex<MemoryStore>>,
 ) -> telos_agent::PromptAssembly {
-    let mut assembly = telos_agent::prompt::default_coding_assembly(
-        Arc::new(tools.clone()),
-        agent_config.cwd.clone(),
-        agent_config.skill_registry.clone(),
-        agent_config.path,
-    );
+    let tools = Arc::new(tools.clone());
+    let mut assembly = telos_agent::PromptAssembly::new();
+    assembly.add(telos_agent::IdentitySection::new(None));
+    assembly.add(telos_agent::ToneStyleSection);
+    assembly.add(telos_agent::TaskGuidanceSection);
+    assembly.add(telos_agent::SafetySection);
+    assembly.add(telos_agent::prompt::PathSection::new(agent_config.path));
+    assembly.add(telos_agent::ShellAwareToolUsageSection::new(Arc::clone(&tools)));
+    assembly.add(telos_agent::ToolsSection::new(Arc::clone(&tools)));
+    assembly.add(telos_agent::prompt::ToolPromptsSection::new(Arc::clone(&tools)));
+    if let Some(skills) = agent_config.skill_registry.clone() {
+        assembly.add(telos_agent::SkillsSection::new(skills));
+    }
     context::append_prompt_context(&mut assembly, context);
+    assembly.add(telos_agent::DateSection);
+    assembly.add(telos_agent::CwdSection::new(agent_config.cwd.clone()));
     assembly.add(telos_agent::MemorySection::new(memory_store));
     assembly
 }

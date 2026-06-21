@@ -271,11 +271,13 @@ impl ToolRegistry {
 
     /// Collect [`ToolDefinition`]s for every registered tool — sent to the provider on each turn.
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        self.tools
+        let mut definitions = self
+            .canonical_names
             .iter()
-            .filter(|(name, _)| self.canonical_names.iter().any(|canonical| canonical == *name))
-            .map(|(_, tool)| tool.definition())
-            .collect::<Vec<_>>()
+            .filter_map(|name| self.tools.get(name).map(|tool| tool.definition()))
+            .collect::<Vec<_>>();
+        definitions.sort_by(|a, b| a.name.cmp(&b.name));
+        definitions
     }
 
     /// Return a registry containing only tools allowed by `allowed` and not denied by `denied`.

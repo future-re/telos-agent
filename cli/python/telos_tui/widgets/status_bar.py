@@ -37,21 +37,18 @@ class StatusBar(Widget):
     def state(self) -> "AppState":
         return self.app.state  # type: ignore[attr-defined]
 
-    def watch_state_status_text(self) -> None:
-        """Re-render when status text changes."""
-        self.refresh()
-
-    def watch_state_streaming(self, streaming: bool) -> None:
-        if streaming and self._started_at is None:
-            self._started_at = datetime.now()
-        elif not streaming:
-            self._started_at = None
-        self.refresh()
-
     def _tick_spinner(self) -> None:
+        """Periodic tick: updates spinner frame and tracks streaming state."""
+        was_streaming = self._started_at is not None
+        now_streaming = self.state.streaming
+
+        if now_streaming and not was_streaming:
+            self._started_at = datetime.now()
+        elif was_streaming and not now_streaming:
+            self._started_at = None
+
         self._spinner_frame = (self._spinner_frame + 1) % len(BRAILLE_SPINNER)
-        if self.state.streaming:
-            self.refresh()
+        self.refresh()
 
     def render(self) -> RenderableType:
         parts: list[Text] = []

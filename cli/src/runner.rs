@@ -180,6 +180,64 @@ pub async fn run_chat(
     Ok(())
 }
 
+pub async fn run_tui(
+    options: &SharedOptions,
+    config: &FileConfig,
+    onboarding: Option<crate::onboarding::OnboardingResult>,
+    approval_handler: Option<Arc<dyn ApprovalHandler>>,
+) -> Result<()> {
+    let mut runtime = crate::runtime::prepare_runtime(options, config, approval_handler)?;
+    let provider = if let Some(ref onb) = onboarding {
+        crate::build_erased_from_onboarding(onb)?
+    } else {
+        crate::build_erased_provider(options, config)?
+    };
+    crate::runtime::register_cli_subagent_tool(
+        &mut runtime.tools,
+        &runtime.agent_config,
+        provider.clone(),
+    )?;
+    crate::runtime::rebuild_prompt_assembly(&mut runtime);
+
+    let status = crate::context::build_status_text(
+        options.model.as_deref(),
+        runtime.project_root.as_deref(),
+        &runtime.context,
+    );
+    let auto_mode = config.auto_mode.unwrap_or(false);
+    let project_root_or_cwd = runtime.project_root.clone().unwrap_or_else(|| {
+        options.cwd.clone().unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        })
+    });
+
+    let result = crate::tui::run(
+        runtime.agent_config,
+        provider,
+        runtime.tools,
+        status,
+        runtime.project_root.as_deref(),
+        &project_root_or_cwd,
+        auto_mode,
+        runtime.memory_store,
+        crate::tui::app::ModelSwitchConfig {
+            deepseek_api_key: crate::deepseek_api_key_for_switch(
+                options,
+                config,
+                onboarding.as_ref(),
+            ),
+        },
+        crate::tui::app::TuiLayoutSettings::from_density(
+            config.tui.as_ref().and_then(|tui| tui.density).unwrap_or_default(),
+        ),
+        config.billing.clone(),
+    )
+    .await;
+
+    crate::runtime::process_diagnostics(&runtime.diagnostics, config).await;
+    result
+}
+
 async fn run_interactive_turn(
     session: &mut AgentSession,
     provider: &dyn telos_agent::ModelProvider,

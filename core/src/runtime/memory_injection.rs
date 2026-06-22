@@ -1,4 +1,8 @@
 use std::sync::{Arc, Mutex};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
 
 use crate::memory::MemoryStore;
 use crate::message::SystemReminder;
@@ -12,6 +16,11 @@ use crate::message::SystemReminder;
 pub struct MemoryInjector {
     store: Arc<Mutex<MemoryStore>>,
     max_memories: usize,
+}
+
+pub struct MemoryInjection {
+    pub reminder: SystemReminder,
+    pub fingerprint: u64,
 }
 
 impl MemoryInjector {
@@ -30,7 +39,7 @@ impl MemoryInjector {
     ///
     /// Returns `None` when the store has no relevant memories (empty store,
     /// no matches, or all deprecated).
-    pub fn inject_for_query(&self, query: &str) -> Option<SystemReminder> {
+    pub fn inject_for_query(&self, query: &str) -> Option<MemoryInjection> {
         let store = self.store.lock().ok()?;
         let memories = store.search_relevant(query, self.max_memories);
         if memories.is_empty() {
@@ -47,11 +56,17 @@ impl MemoryInjector {
                 "- **{}** ({:?}{}): {}",
                 entry.name, entry.category, status_tag, entry.description,
             ));
-            let preview: String = entry.body.chars().take(200).collect();
+            let preview: String = entry.body.chars().take(96).collect();
             if !preview.is_empty() {
                 lines.push(format!("  {}", preview));
             }
         }
-        Some(SystemReminder::MemoryInjection { content: lines.join("\n") })
+        let content = lines.join("\n");
+        let mut hasher = DefaultHasher::new();
+        content.hash(&mut hasher);
+        Some(MemoryInjection {
+            reminder: SystemReminder::MemoryInjection { content },
+            fingerprint: hasher.finish(),
+        })
     }
 }

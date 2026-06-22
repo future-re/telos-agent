@@ -147,7 +147,12 @@ impl AgentHost {
         })
     }
 
-    pub async fn run_prompt<F>(&mut self, prompt: String, mut on_event: F) -> Result<String, String>
+    pub async fn run_prompt<F>(
+        &mut self,
+        session_id: &str,
+        prompt: String,
+        mut on_event: F,
+    ) -> Result<String, String>
     where
         F: FnMut(DesktopEvent),
     {
@@ -165,7 +170,7 @@ impl AgentHost {
                 if let telos_agent::TurnEvent::TurnFinished { final_text: text, .. } = &event {
                     final_text = text.clone();
                 }
-                let desktop_event = map_turn_event(event);
+                let desktop_event = map_turn_event(session_id, event);
                 if desktop_event.kind != "ignored" {
                     on_event(desktop_event);
                 }
@@ -496,7 +501,7 @@ mod tests {
 
         let mut events = Vec::new();
         let final_text = host
-            .run_prompt("hello".to_string(), |event| events.push(event))
+            .run_prompt("session-1", "hello".to_string(), |event| events.push(event))
             .await
             .expect("mock prompt should run");
 

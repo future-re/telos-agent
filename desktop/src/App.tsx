@@ -64,6 +64,7 @@ interface PromptResult {
 }
 
 interface PendingApproval {
+  sessionId: string;
   approvalId: string;
   toolName: string;
   arguments: unknown;
@@ -131,19 +132,18 @@ export function App() {
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryOverview, setMemoryOverview] = useState<MemoryOverview | undefined>();
-  const [pendingApproval, setPendingApproval] = useState<PendingApproval | undefined>();
+  const [pendingApprovals, setPendingApprovals] = useState<Record<string, PendingApproval>>({});
   const [approvalDraft, setApprovalDraft] = useState("");
   const [approvalError, setApprovalError] = useState("");
   const [usageHistory, setUsageHistory] = useState<TokenUsageHistory>(() =>
     typeof window === "undefined" ? {} : loadTokenUsageHistory(),
   );
-  const runningSessionIdRef = useRef(activeSessionId);
-
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? sessions[0],
     [activeSessionId, sessions],
   );
   const state = activeSession?.state ?? initialChatState;
+  const pendingApproval = pendingApprovals[activeSessionId];
 
   function dispatch(action: Action, sessionId = activeSessionId) {
     if (action.type === "event" && action.event.kind === "provider_usage") {
@@ -165,19 +165,21 @@ export function App() {
   useEffect(() => {
     const unlisten = listen<TelosEvent>("telos://event", (event) => {
       const payload = event.payload;
+      const targetSessionId = payload.sessionId ?? activeSessionId;
       if (payload.kind === "approval_required" && payload.approvalId) {
         const nextApproval = {
+          sessionId: targetSessionId,
           approvalId: payload.approvalId,
           toolName: payload.toolName ?? "Tool",
           arguments: payload.arguments ?? {},
           cwd: payload.cwd,
           reason: payload.reason,
         };
-        setPendingApproval(nextApproval);
-        setApprovalDraft(formatJson(nextApproval.arguments));
+        setPendingApprovals((current) => ({ ...current, [targetSessionId]: nextApproval }));
+        setActiveSessionId(targetSessionId);
         setApprovalError("");
       }
-      dispatch({ type: "event", event: payload }, runningSessionIdRef.current);
+      dispatch({ type: "event", event: payload }, targetSessionId);
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -194,6 +196,13 @@ export function App() {
     applyAppearance(appearance);
     saveAppearance(appearance);
   }, [appearance]);
+
+  useEffect(() => {
+    if (pendingApproval) {
+      setApprovalDraft(formatJson(pendingApproval.arguments));
+      setApprovalError("");
+    }
+  }, [pendingApproval?.approvalId]);
 
   const effectiveSettings = useMemo(
     () => ({
@@ -273,8 +282,11 @@ export function App() {
       setSettings(resolved);
       setOverrides((current) => ({ ...current, provider: "deepseek", apiKey: undefined }));
       setApiKeyDraft("");
-      await invoke("reset_session").catch(() => undefined);
-      dispatch({ type: "reset" });
+      await invoke("reset_all_sessions").catch(() => undefined);
+      setSessions((current) =>
+        current.map((session) => ({ ...session, state: initialChatState })),
+      );
+      setPendingApprovals({});
     } catch (error) {
       dispatch({ type: "error", message: `保存 API Key 失败：${String(error)}` });
     } finally {
@@ -288,7 +300,6 @@ export function App() {
     if (!text || state.running || deepseekNeedsKey) {
       return;
     }
-    runningSessionIdRef.current = activeSessionId;
     setPrompt("");
     setSessions((current) =>
       updateSessionState(current, activeSessionId, (chatState) =>
@@ -300,6 +311,7 @@ export function App() {
     try {
       await invoke<PromptResult>("send_prompt", {
         request: {
+          sessionId: activeSessionId,
           prompt: text,
           settings: normalizeOverrides(overrides, settings),
         },
@@ -311,7 +323,9 @@ export function App() {
 
   async function stopCurrentTask() {
     if (isTauriRuntime()) {
-      await invoke("cancel_current_task").catch((error) => {
+      await invoke("cancel_current_task", {
+        request: { sessionId: activeSessionId },
+      }).catch((error) => {
         dispatch({ type: "error", message: `停止任务失败：${String(error)}` });
       });
     }
@@ -323,16 +337,24 @@ export function App() {
           message: "已停止当前任务",
         },
       },
-      runningSessionIdRef.current,
+      activeSessionId,
     );
-    setPendingApproval(undefined);
+    setPendingApprovals((current) => {
+      const next = { ...current };
+      delete next[activeSessionId];
+      return next;
+    });
     setApprovalError("");
   }
 
   async function resetSession() {
-    await invoke("reset_session").catch(() => undefined);
+    await invoke("reset_session", { request: { sessionId: activeSessionId } }).catch(() => undefined);
     dispatch({ type: "reset" });
-    setPendingApproval(undefined);
+    setPendingApprovals((current) => {
+      const next = { ...current };
+      delete next[activeSessionId];
+      return next;
+    });
     setApprovalError("");
   }
 
@@ -352,13 +374,18 @@ export function App() {
     }
 
     const approvalId = pendingApproval.approvalId;
-    setPendingApproval(undefined);
+    setPendingApprovals((current) => {
+      const next = { ...current };
+      delete next[pendingApproval.sessionId];
+      return next;
+    });
     setApprovalError("");
 
     try {
       if (isTauriRuntime()) {
         await invoke("resolve_approval", {
           request: {
+            sessionId: pendingApproval.sessionId,
             approvalId,
             decision,
             arguments: parsedArguments,
@@ -366,7 +393,10 @@ export function App() {
         });
       }
     } catch (error) {
-      dispatch({ type: "error", message: `处理审批失败：${String(error)}` }, runningSessionIdRef.current);
+      dispatch(
+        { type: "error", message: `处理审批失败：${String(error)}` },
+        pendingApproval.sessionId,
+      );
     }
   }
 
@@ -383,10 +413,19 @@ export function App() {
       return;
     }
 
+    if (isTauriRuntime()) {
+      invoke("reset_session", { request: { sessionId } }).catch(() => undefined);
+    }
+
     setSessions((current) => {
       const result = deleteConversationSession(current, sessionId, activeSessionId);
       setActiveSessionId(result.activeSessionId);
       return result.sessions;
+    });
+    setPendingApprovals((current) => {
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
     });
   }
 
@@ -418,8 +457,11 @@ export function App() {
     const next = { ...overrides, cwd: selected };
     setOverrides(next);
     await refreshSettings(next);
-    await invoke("reset_session").catch(() => undefined);
-    dispatch({ type: "reset" });
+    await invoke("reset_all_sessions").catch(() => undefined);
+    setSessions((current) =>
+      current.map((session) => ({ ...session, state: initialChatState })),
+    );
+    setPendingApprovals({});
   }
 
   async function openMemoryOverview() {

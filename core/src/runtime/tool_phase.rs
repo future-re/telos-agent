@@ -8,6 +8,7 @@ use crate::executor::{ToolExecutionEvent, ToolExecutionStreamItem, execute_tool_
 use crate::message::Message;
 use crate::runtime::{AgentSession, TurnEvent};
 use crate::tool::ToolRegistry;
+use tracing::debug;
 
 impl AgentSession {
     /// Execute a batch of tool calls and build the compacted tool-result message.
@@ -99,11 +100,30 @@ impl AgentSession {
         // Notify the model when persistent state it may rely on has changed.
         // MemorySection is Static (rendered once at session start), so new
         // memories must be injected mid-conversation via system reminders.
-        for tool_name in &memory_mutations {
+        if !memory_mutations.is_empty() {
+            self.memory_state_dirty = true;
+            debug!(
+                session_id = %self.session_id,
+                turn_id,
+                memory_mutation_count = memory_mutations.len(),
+                "memory state marked dirty"
+            );
+        }
+
+        if !memory_mutations.is_empty()
+            && !self.current_turn_memory_injected
+            && !self.current_turn_memory_mutation_notified
+        {
+            debug!(
+                session_id = %self.session_id,
+                turn_id,
+                "emitting memory mutation reminder"
+            );
             self.push_system_reminder(crate::message::SystemReminder::ToolResult {
-                tool_name: tool_name.clone(),
-                note: "Memory state has changed. New memories are now available; consider using MemoryRead or MemoryGrep to find relevant context for future work.".into(),
+                tool_name: "memory".into(),
+                note: "Memory state changed this turn. Fresh memory context is available for future reasoning.".into(),
             });
+            self.current_turn_memory_mutation_notified = true;
         }
 
         Ok((compaction.message, events))

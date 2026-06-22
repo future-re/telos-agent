@@ -88,6 +88,15 @@ function toDashboardItem(
     details.push(`Reasoning ${formatTokenCount(usage.reasoningTokens)}`);
   }
 
+  if (
+    usage.promptCacheHitTokens !== undefined &&
+    usage.promptCacheMissTokens !== undefined
+  ) {
+    const total = usage.promptCacheHitTokens + usage.promptCacheMissTokens;
+    const rate = total > 0 ? ((usage.promptCacheHitTokens / total) * 100).toFixed(1) : "0.0";
+    details.push(`Cache ${rate}%`);
+  }
+
   if (usage.promptCacheHitTokens !== undefined) {
     details.push(`Cache hit ${formatTokenCount(usage.promptCacheHitTokens)}`);
   }

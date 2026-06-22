@@ -30,6 +30,7 @@ export interface ToolActivity {
 
 export interface TelosEvent {
   kind: string;
+  sessionId?: string;
   text?: string;
   approvalId?: string;
   inputTokens?: number;
@@ -245,7 +246,7 @@ function applyProviderUsage(state: ChatState, event: TelosEvent): ChatState {
 }
 
 function addUsage(current: TokenUsage | undefined, next: TokenUsage): TokenUsage {
-    const model = next.model ?? current?.model;
+  const model = next.model ?? current?.model;
   return {
     model,
     inputTokens: (current?.inputTokens ?? 0) + next.inputTokens,

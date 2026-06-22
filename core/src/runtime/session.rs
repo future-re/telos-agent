@@ -44,6 +44,15 @@ pub struct AgentSession {
     /// Avoids re-rendering on every provider call, which would break
     /// DeepSeek's prefix caching (identical prefix → cache hit).
     pub(super) cached_system_prompt: Option<String>,
+    /// Fingerprint of the last injected memory reminder, used to skip
+    /// identical re-injections that only add prompt churn.
+    pub(super) last_memory_injection_fingerprint: Option<u64>,
+    /// Whether persistent memory changed since the last effective injection.
+    pub(super) memory_state_dirty: bool,
+    /// Tracks whether the current turn already injected memory context.
+    pub(super) current_turn_memory_injected: bool,
+    /// Tracks whether the current turn already notified about memory mutation.
+    pub(super) current_turn_memory_mutation_notified: bool,
 }
 
 impl AgentSession {
@@ -70,6 +79,10 @@ impl AgentSession {
             metrics: SessionMetrics::new(),
             consecutive_compaction_failures: 0,
             cached_system_prompt: None,
+            last_memory_injection_fingerprint: None,
+            memory_state_dirty: false,
+            current_turn_memory_injected: false,
+            current_turn_memory_mutation_notified: false,
         })
     }
 
@@ -90,13 +103,24 @@ impl AgentSession {
 
     /// Drop all non-system messages and reset the turn counter.
     pub fn reset(&mut self) {
-        self.messages.retain(|message| message.role == crate::message::Role::System);
+        self.messages = self
+            .messages
+            .first()
+            .filter(|message| message.role == crate::message::Role::System)
+            .cloned()
+            .into_iter()
+            .collect();
         self.next_turn_id = 1;
         self.read_file_state = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        self.cached_system_prompt = None;
+        self.last_memory_injection_fingerprint = None;
+        self.memory_state_dirty = false;
+        self.current_turn_memory_injected = false;
+        self.current_turn_memory_mutation_notified = false;
     }
 
     pub(super) fn push_system_reminder(&mut self, reminder: crate::message::SystemReminder) {
-        self.messages.push(crate::message::Message::user(reminder.render()));
+        self.messages.push(crate::message::Message::system(reminder.render()));
     }
 
     /// Run one turn, yielding [`TurnEvent`]s as the turn progresses.
@@ -146,6 +170,8 @@ impl AgentSession {
             let turn_id = self.next_turn_id;
             self.next_turn_id += 1;
             let user_input = user_input.into();
+            self.current_turn_memory_injected = false;
+            self.current_turn_memory_mutation_notified = false;
 
             // If no system prompt source was configured, build the default modular
             // prompt assembly from the tool registry so the model gets the full
@@ -250,9 +276,29 @@ impl AgentSession {
                 // reminder before the first provider call of each turn.
                 if iterations == 1
                     && let Some(injector) = &self.config.memory_injector
-                    && let Some(reminder) = injector.inject_for_query(&user_input_for_memory)
+                    && let Some(injection) = injector.inject_for_query(&user_input_for_memory)
                 {
-                    self.push_system_reminder(reminder);
+                    let unchanged = self.last_memory_injection_fingerprint == Some(injection.fingerprint);
+                    if self.memory_state_dirty || !unchanged {
+                        debug!(
+                            session_id = %self.session_id,
+                            turn_id,
+                            fingerprint = injection.fingerprint,
+                            memory_state_dirty = self.memory_state_dirty,
+                            "injecting memory reminder"
+                        );
+                        self.push_system_reminder(injection.reminder);
+                        self.last_memory_injection_fingerprint = Some(injection.fingerprint);
+                        self.current_turn_memory_injected = true;
+                    } else {
+                        debug!(
+                            session_id = %self.session_id,
+                            turn_id,
+                            fingerprint = injection.fingerprint,
+                            "skipping unchanged memory reminder"
+                        );
+                    }
+                    self.memory_state_dirty = false;
                 }
 
                 let hint = if force_thinking_next_iteration {

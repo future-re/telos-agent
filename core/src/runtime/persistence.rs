@@ -80,6 +80,10 @@ impl AgentSession {
             metrics,
             consecutive_compaction_failures: 0,
             cached_system_prompt: None,
+            last_memory_injection_fingerprint: None,
+            memory_state_dirty: false,
+            current_turn_memory_injected: false,
+            current_turn_memory_mutation_notified: false,
         })
     }
 }

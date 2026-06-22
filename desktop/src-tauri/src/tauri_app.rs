@@ -12,19 +12,26 @@ use crate::agent_host::{
     resolve_desktop_settings, save_deepseek_api_key,
 };
 
-type PendingApprovalMap =
-    Arc<Mutex<HashMap<String, oneshot::Sender<telos_agent::ApprovalDecision>>>>;
+type HostMap = Mutex<HashMap<String, Arc<Mutex<AgentHost>>>>;
+type CancelMap = Mutex<HashMap<String, CancellationToken>>;
+type PendingApprovalMap = Arc<Mutex<HashMap<String, PendingApprovalEntry>>>;
+
+struct PendingApprovalEntry {
+    session_id: String,
+    sender: oneshot::Sender<telos_agent::ApprovalDecision>,
+}
 
 #[derive(Default)]
 struct AppState {
-    host: Mutex<Option<AgentHost>>,
-    cancel: Mutex<Option<CancellationToken>>,
+    hosts: HostMap,
+    cancels: CancelMap,
     approvals: PendingApprovalMap,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PromptRequest {
+    session_id: String,
     prompt: String,
     settings: DesktopSettingsOverrides,
     reset: Option<bool>,
@@ -50,7 +57,14 @@ struct SaveDeepSeekKeyRequest {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct SessionRequest {
+    session_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ResolveApprovalRequest {
+    session_id: String,
     approval_id: String,
     decision: String,
     arguments: Option<Value>,
@@ -60,6 +74,7 @@ struct ResolveApprovalRequest {
 #[serde(rename_all = "camelCase")]
 struct DesktopApprovalEvent {
     kind: &'static str,
+    session_id: String,
     approval_id: String,
     tool_name: String,
     arguments: Value,
@@ -69,6 +84,7 @@ struct DesktopApprovalEvent {
 
 #[derive(Clone)]
 struct DesktopApprovalHandler {
+    session_id: String,
     window: Window,
     approvals: PendingApprovalMap,
 }
@@ -84,10 +100,14 @@ impl telos_agent::ApprovalHandler for DesktopApprovalHandler {
     async fn ask(&self, request: telos_agent::ApprovalRequest) -> telos_agent::ApprovalDecision {
         let approval_id = new_approval_id();
         let (tx, rx) = oneshot::channel();
-        self.approvals.lock().await.insert(approval_id.clone(), tx);
+        self.approvals.lock().await.insert(
+            approval_id.clone(),
+            PendingApprovalEntry { session_id: self.session_id.clone(), sender: tx },
+        );
 
         let event = DesktopApprovalEvent {
             kind: "approval_required",
+            session_id: self.session_id.clone(),
             approval_id: approval_id.clone(),
             tool_name: request.tool_name,
             arguments: request.arguments,
@@ -132,22 +152,35 @@ fn memory_summary(request: Option<ResolveSettingsRequest>) -> Result<MemoryOverv
 }
 
 #[tauri::command]
-async fn reset_session(state: State<'_, AppState>) -> Result<(), String> {
-    if let Some(token) = state.cancel.lock().await.take() {
+async fn reset_all_sessions(state: State<'_, AppState>) -> Result<(), String> {
+    let tokens = state.cancels.lock().await.drain().map(|(_, token)| token).collect::<Vec<_>>();
+    for token in tokens {
         token.cancel();
     }
-    deny_pending_approvals(&state.approvals, "session reset").await;
-    let mut host = state.host.lock().await;
-    *host = None;
+    deny_pending_approvals(&state.approvals, None, "session reset").await;
+    state.hosts.lock().await.clear();
     Ok(())
 }
 
 #[tauri::command]
-async fn cancel_current_task(state: State<'_, AppState>) -> Result<(), String> {
-    if let Some(token) = state.cancel.lock().await.take() {
+async fn reset_session(state: State<'_, AppState>, request: SessionRequest) -> Result<(), String> {
+    if let Some(token) = state.cancels.lock().await.remove(&request.session_id) {
         token.cancel();
     }
-    deny_pending_approvals(&state.approvals, "task cancelled").await;
+    deny_pending_approvals(&state.approvals, Some(&request.session_id), "session reset").await;
+    state.hosts.lock().await.remove(&request.session_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn cancel_current_task(
+    state: State<'_, AppState>,
+    request: SessionRequest,
+) -> Result<(), String> {
+    if let Some(token) = state.cancels.lock().await.remove(&request.session_id) {
+        token.cancel();
+    }
+    deny_pending_approvals(&state.approvals, Some(&request.session_id), "task cancelled").await;
     Ok(())
 }
 
@@ -156,12 +189,16 @@ async fn resolve_approval(
     state: State<'_, AppState>,
     request: ResolveApprovalRequest,
 ) -> Result<(), String> {
-    let tx = state
+    let entry = state
         .approvals
         .lock()
         .await
         .remove(&request.approval_id)
         .ok_or_else(|| "Approval request is no longer pending".to_string())?;
+
+    if entry.session_id != request.session_id {
+        return Err("Approval request belongs to a different session".to_string());
+    }
 
     let decision = match request.decision.as_str() {
         "allow" => telos_agent::ApprovalDecision::Allow,
@@ -174,7 +211,7 @@ async fn resolve_approval(
         other => return Err(format!("Unknown approval decision: {other}")),
     };
 
-    tx.send(decision).map_err(|_| "Approval request already closed".to_string())
+    entry.sender.send(decision).map_err(|_| "Approval request already closed".to_string())
 }
 
 #[tauri::command]
@@ -188,34 +225,57 @@ async fn send_prompt(
         return Err("Prompt cannot be empty".into());
     }
 
-    let mut host = state.host.lock().await;
-    if request.reset.unwrap_or(false) || host.is_none() {
-        let manual_approval_handler = Arc::new(DesktopApprovalHandler {
-            window: window.clone(),
-            approvals: state.approvals.clone(),
-        });
-        *host = Some(AgentHost::new(request.settings, Some(manual_approval_handler))?);
+    let session_id = request.session_id.clone();
+    if request.reset.unwrap_or(false) {
+        if let Some(token) = state.cancels.lock().await.remove(&session_id) {
+            token.cancel();
+        }
+        deny_pending_approvals(&state.approvals, Some(&session_id), "session reset").await;
     }
-    let host = host.as_mut().ok_or_else(|| "Agent host failed to initialize".to_string())?;
+    let host = {
+        let mut hosts = state.hosts.lock().await;
+        if request.reset.unwrap_or(false) {
+            hosts.remove(&session_id);
+        }
+        if let Some(existing) = hosts.get(&session_id) {
+            existing.clone()
+        } else {
+            let manual_approval_handler = Arc::new(DesktopApprovalHandler {
+                session_id: session_id.clone(),
+                window: window.clone(),
+                approvals: state.approvals.clone(),
+            });
+            let host = Arc::new(Mutex::new(AgentHost::new(
+                request.settings,
+                Some(manual_approval_handler),
+            )?));
+            hosts.insert(session_id.clone(), host.clone());
+            host
+        }
+    };
 
     let token = CancellationToken::new();
-    *state.cancel.lock().await = Some(token.clone());
+    state.cancels.lock().await.insert(session_id.clone(), token.clone());
 
     let final_text = tokio::select! {
-        result = host.run_prompt(prompt, |event| {
-            let _ = window.emit("telos://event", event);
-        }) => result?,
+        result = async {
+            let mut host = host.lock().await;
+            host.run_prompt(&session_id, prompt, |event| {
+                let _ = window.emit("telos://event", event);
+            }).await
+        } => result?,
         _ = token.cancelled() => {
-            deny_pending_approvals(&state.approvals, "task cancelled").await;
+            deny_pending_approvals(&state.approvals, Some(&session_id), "task cancelled").await;
             let _ = window.emit("telos://event", serde_json::json!({
                 "kind": "cancelled",
+                "sessionId": session_id,
                 "message": "已停止当前任务"
             }));
             String::new()
         }
     };
 
-    *state.cancel.lock().await = None;
+    state.cancels.lock().await.remove(&request.session_id);
 
     Ok(PromptResult { final_text })
 }
@@ -228,6 +288,7 @@ pub fn run() {
             resolved_settings,
             save_deepseek_key,
             memory_summary,
+            reset_all_sessions,
             reset_session,
             cancel_current_task,
             resolve_approval,
@@ -237,10 +298,26 @@ pub fn run() {
         .expect("failed to run telos desktop");
 }
 
-async fn deny_pending_approvals(approvals: &PendingApprovalMap, reason: &str) {
-    let pending = approvals.lock().await.drain().map(|(_, tx)| tx).collect::<Vec<_>>();
-    for tx in pending {
-        let _ = tx.send(telos_agent::ApprovalDecision::Deny { reason: reason.into() });
+async fn deny_pending_approvals(
+    approvals: &PendingApprovalMap,
+    session_id: Option<&str>,
+    reason: &str,
+) {
+    let mut pending = approvals.lock().await;
+    let approval_ids = pending
+        .iter()
+        .filter(|(_, entry)| session_id.is_none_or(|id| id == entry.session_id))
+        .map(|(approval_id, _)| approval_id.clone())
+        .collect::<Vec<_>>();
+
+    let senders = approval_ids
+        .into_iter()
+        .filter_map(|approval_id| pending.remove(&approval_id).map(|entry| entry.sender))
+        .collect::<Vec<_>>();
+    drop(pending);
+
+    for sender in senders {
+        let _ = sender.send(telos_agent::ApprovalDecision::Deny { reason: reason.into() });
     }
 }
 

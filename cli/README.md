@@ -177,7 +177,7 @@ Diagnostics do not store or upload raw commands, full stdout/stderr, environment
 |-----|--------|
 | `Enter` | Send message |
 | `Alt+Enter` | Insert newline |
-| `Ctrl+D` | Quit (empty input) |
+| `Ctrl+D` | Quit from an empty prompt |
 | `Ctrl+C` | Cancel turn |
 | `Ctrl+L` | Clear chat |
 | `Ctrl+N` | New session |

@@ -12,6 +12,7 @@ use telos_agent::{
 use crate::billing::CostCalculator;
 use crate::cli::SharedOptions;
 use crate::config::{self, FileConfig, ResolvedProvider};
+use crate::interactive_input::InputLine;
 
 pub async fn run_single(
     options: &SharedOptions,
@@ -135,14 +136,12 @@ pub async fn run_chat(
     let billing = config.billing.clone();
 
     let stdin = io::stdin();
-    let mut line = String::new();
     loop {
-        line.clear();
         eprint!("> ");
         let _ = io::stderr().flush();
-        match stdin.read_line(&mut line) {
-            Ok(0) => break, // Ctrl+D
-            Ok(_) => {
+        match crate::interactive_input::read_line(&stdin) {
+            Ok(InputLine::Eof) => break,
+            Ok(InputLine::Line(line)) => {
                 let prompt = line.trim().to_string();
                 if prompt.is_empty() {
                     continue;

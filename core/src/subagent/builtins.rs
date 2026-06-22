@@ -24,7 +24,6 @@ pub fn builtin_agents() -> Vec<AgentDefinition> {
         "Bash".into(),
     ];
     explore.disallowed_tools = vec!["Write".into(), "Edit".into(), "subagent".into()];
-    explore.max_iterations = Some(8);
     explore.skills = vec!["explore".into()];
 
     let mut plan = AgentDefinition::new(
@@ -35,7 +34,6 @@ pub fn builtin_agents() -> Vec<AgentDefinition> {
     );
     plan.allowed_tools = explore.allowed_tools.clone();
     plan.disallowed_tools = explore.disallowed_tools.clone();
-    plan.max_iterations = Some(8);
     plan.skills = vec!["brainstorm".into(), "explore".into()];
 
     let mut verification = AgentDefinition::new(
@@ -52,7 +50,6 @@ pub fn builtin_agents() -> Vec<AgentDefinition> {
         "WebFetch".into(),
         "WebSearch".into(),
     ];
-    verification.max_iterations = Some(10);
     verification.skills = vec!["verify".into()];
 
     vec![general, explore, plan, verification]
@@ -67,5 +64,11 @@ mod tests {
         let agents = builtin_agents();
         assert!(agents.iter().all(|agent| !agent.description.is_empty()));
         assert!(agents.iter().all(|agent| !agent.system_prompt.is_empty()));
+    }
+
+    #[test]
+    fn builtin_agents_do_not_cap_tool_iterations() {
+        let agents = builtin_agents();
+        assert!(agents.iter().all(|agent| agent.max_iterations.is_none()));
     }
 }

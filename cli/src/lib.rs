@@ -13,7 +13,6 @@ pub mod runner;
 pub mod serve;
 #[path = "interaction/terminal/mod.rs"]
 pub mod terminal;
-pub mod tui;
 pub mod update_check;
 
 #[path = "interaction/approval.rs"]
@@ -113,10 +112,6 @@ pub async fn run() -> Result<()> {
                         return Err(e);
                     }
                 };
-                if std::io::stdin().is_terminal() {
-                    return runner::run_tui(&cli.shared, &merged, onboarding, approval_handler)
-                        .await;
-                }
                 return runner::run_chat(&cli.shared, &merged, onboarding, approval_handler).await;
             }
             let onboarding = match check_onboarding(&cli.shared, &merged) {

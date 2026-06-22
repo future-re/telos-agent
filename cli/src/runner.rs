@@ -3,7 +3,6 @@ use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::pin::pin;
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use telos_agent::{
     AgentSession, ApprovalHandler, CompletionResponse, MemoryStore, Message, MockProvider,
@@ -179,42 +178,6 @@ pub async fn run_chat(
 
     crate::runtime::process_diagnostics(&runtime.diagnostics, config).await;
     Ok(())
-}
-
-pub async fn run_tui(
-    options: &SharedOptions,
-    config: &FileConfig,
-    onboarding: Option<crate::onboarding::OnboardingResult>,
-    approval_handler: Option<Arc<dyn ApprovalHandler>>,
-) -> Result<()> {
-    let mut runtime = crate::runtime::prepare_runtime(options, config, approval_handler)?;
-    let provider = if let Some(ref onb) = onboarding {
-        crate::build_erased_from_onboarding(onb)?
-    } else {
-        crate::build_erased_provider(options, config)?
-    };
-    crate::runtime::register_cli_subagent_tool(
-        &mut runtime.tools,
-        &runtime.agent_config,
-        provider.clone(),
-    )?;
-    crate::runtime::rebuild_prompt_assembly(&mut runtime);
-
-    let status = crate::context::build_status_text(
-        options.model.as_deref(),
-        runtime.project_root.as_deref(),
-        &runtime.context,
-    );
-    let auto_mode = Arc::new(AtomicBool::new(config.auto_mode.unwrap_or(false)));
-
-    crate::tui::spawn::run_with_agent(
-        runtime.agent_config,
-        provider,
-        runtime.tools,
-        status,
-        auto_mode,
-    )
-    .await
 }
 
 async fn run_interactive_turn(

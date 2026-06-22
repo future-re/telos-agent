@@ -9,8 +9,7 @@ use telos_agent::{
 };
 
 use super::FileConfig;
-use crate::cli::{ProviderArg, SharedOptions};
-use crate::onboarding::OnboardingResult;
+use crate::options::{ProviderKind, ProviderSetup, SharedOptions};
 
 const DEEPSEEK_AUTO_MODE: &str = "hybrid";
 const DEEPSEEK_AUTO_MODE_OLD: &str = "auto";
@@ -25,8 +24,7 @@ pub enum ResolvedProvider {
     Mock(MockProvider),
 }
 
-#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-pub(super) enum DeepSeekModelSelection {
+enum DeepSeekModelSelection {
     Routed { thinking: String, fast: String },
     Single(String),
 }
@@ -42,10 +40,8 @@ pub fn build_agent_config(
         agent_config.cwd = cwd.clone();
     }
 
-    // Priority: CLI --max-iterations > config file > unlimited.
     agent_config.max_iterations =
         options.max_iterations.or_else(|| config.agent.as_ref()?.max_iterations);
-
     agent_config.auto_validate_schema = !options.no_validate_schema;
     agent_config.approval_handler = approval_handler;
 
@@ -61,14 +57,12 @@ pub fn build_agent_config(
 }
 
 pub fn build_provider(options: &SharedOptions, config: &FileConfig) -> Result<ResolvedProvider> {
-    // Priority: CLI --provider > TELOS_PROVIDER env (already in options) > config file > Mock.
     let provider =
-        options.provider.or_else(|| provider_from_config(config)).unwrap_or(ProviderArg::Mock);
-
+        options.provider.or_else(|| provider_from_config(config)).unwrap_or(ProviderKind::Mock);
     let config_env = config.env.as_ref();
 
     match provider {
-        ProviderArg::Deepseek => {
+        ProviderKind::Deepseek => {
             let api_key =
                 resolve_api_key(provider, options.api_key.clone(), config_env, "DEEPSEEK_API_KEY")?;
 
@@ -87,11 +81,30 @@ pub fn build_provider(options: &SharedOptions, config: &FileConfig) -> Result<Re
                 }
             }
         }
-        ProviderArg::Mock => Ok(ResolvedProvider::Mock(MockProvider::new(vec![]))),
+        ProviderKind::Mock => Ok(ResolvedProvider::Mock(MockProvider::new(vec![]))),
     }
 }
 
-pub(super) fn resolve_deepseek_model_selection(
+pub fn build_provider_from_setup(result: &ProviderSetup) -> Result<ResolvedProvider> {
+    match result.provider {
+        ProviderKind::Deepseek => {
+            if result.thinking_model != result.fast_model {
+                let routed_config = RoutedModelConfig::dual(
+                    result.api_key.clone(),
+                    result.thinking_model.clone(),
+                    result.fast_model.clone(),
+                );
+                Ok(ResolvedProvider::Routed(RoutedProvider::new(routed_config)))
+            } else {
+                let cfg = DeepSeekConfig::new(&result.api_key, &result.thinking_model);
+                Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
+            }
+        }
+        ProviderKind::Mock => Ok(ResolvedProvider::Mock(MockProvider::new(vec![]))),
+    }
+}
+
+fn resolve_deepseek_model_selection(
     options: &SharedOptions,
     config: &FileConfig,
 ) -> DeepSeekModelSelection {
@@ -137,55 +150,23 @@ fn configured_fast_model(options: &SharedOptions, config: &FileConfig) -> String
         .unwrap_or_else(|| DEEPSEEK_FLASH_MODEL.into())
 }
 
-/// Parse a provider string from FileConfig into a ProviderArg.
-pub(super) fn provider_from_config(config: &FileConfig) -> Option<ProviderArg> {
+fn provider_from_config(config: &FileConfig) -> Option<ProviderKind> {
     let provider = config.agent.as_ref()?.provider.as_deref()?;
     match provider.to_lowercase().as_str() {
-        "deepseek" | "deep" => Some(ProviderArg::Deepseek),
-        "mock" => Some(ProviderArg::Mock),
+        "deepseek" | "deep" => Some(ProviderKind::Deepseek),
+        "mock" => Some(ProviderKind::Mock),
         _ => None,
     }
 }
 
-/// Build a provider directly from onboarding results, bypassing all
-/// CLI/env/config resolution. Used when the user just completed setup.
-pub fn build_provider_from_onboarding(result: &OnboardingResult) -> Result<ResolvedProvider> {
-    match result.provider {
-        ProviderArg::Deepseek => {
-            if result.thinking_model != result.fast_model {
-                let routed_config = RoutedModelConfig::dual(
-                    result.api_key.clone(),
-                    result.thinking_model.clone(),
-                    result.fast_model.clone(),
-                );
-                Ok(ResolvedProvider::Routed(RoutedProvider::new(routed_config)))
-            } else {
-                let cfg = DeepSeekConfig::new(&result.api_key, &result.thinking_model);
-                Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
-            }
-        }
-        ProviderArg::Mock => Ok(ResolvedProvider::Mock(MockProvider::new(vec![]))),
-    }
-}
-
-/// Apply env vars from FileConfig to the process environment.
-/// Does NOT override already-set vars — CLI/env vars from outside the config
-/// take priority.
-///
-/// # Deprecation
-/// This function is a no-op and will be removed in a future version.
-/// Config env vars are now read directly from `FileConfig::env`
-/// instead of being mirrored into the process environment.
 #[deprecated(
     since = "0.2.0",
     note = "config env vars are now read directly from FileConfig::env; apply_config_env is a no-op and will be removed"
 )]
-pub fn apply_config_env(_config: &FileConfig) {
-    // No-op: avoid unsafe `std::env::set_var` in multi-threaded async contexts.
-}
+pub fn apply_config_env(_config: &FileConfig) {}
 
 fn resolve_api_key(
-    provider: ProviderArg,
+    provider: ProviderKind,
     cli_key: Option<String>,
     config_env: Option<&HashMap<String, String>>,
     env_var: &str,
@@ -223,9 +204,9 @@ fn resolve_api_key(
     )
 }
 
-fn provider_name(provider: ProviderArg) -> &'static str {
+fn provider_name(provider: ProviderKind) -> &'static str {
     match provider {
-        ProviderArg::Deepseek => "DeepSeek",
-        ProviderArg::Mock => "Mock",
+        ProviderKind::Deepseek => "DeepSeek",
+        ProviderKind::Mock => "Mock",
     }
 }

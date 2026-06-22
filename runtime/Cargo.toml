@@ -1,0 +1,26 @@
+[package]
+name = "telos-runtime"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Shared runtime assembly for telos-agent frontends"
+
+[lib]
+name = "telos_runtime"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+dirs = "5"
+glob = "0.3"
+rpassword = "7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+telos_agent = { version = "0.1.0", path = "../core" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+toml = "0.8"
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

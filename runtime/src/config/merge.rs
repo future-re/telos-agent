@@ -3,8 +3,6 @@ use super::{
     DiagnosticsSection, FileConfig, TuiSection,
 };
 
-/// Merge two config layers. `project` values override `user` values.
-/// Fields set to `None` on the project layer fall through to the user layer.
 pub fn merge_configs(user: Option<FileConfig>, project: Option<FileConfig>) -> FileConfig {
     let agent = merge_agent(
         user.as_ref().and_then(|c| c.agent.as_ref()),

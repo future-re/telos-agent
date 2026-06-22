@@ -86,6 +86,24 @@ pub struct SharedOptions {
     pub config: Option<PathBuf>,
 }
 
+impl SharedOptions {
+    pub fn to_runtime(&self) -> telos_runtime::SharedOptions {
+        telos_runtime::SharedOptions {
+            provider: self.provider.map(|provider| match provider {
+                ProviderArg::Deepseek => telos_runtime::ProviderKind::Deepseek,
+                ProviderArg::Mock => telos_runtime::ProviderKind::Mock,
+            }),
+            model: self.model.clone(),
+            thinking_model: self.thinking_model.clone(),
+            fast_model: self.fast_model.clone(),
+            api_key: self.api_key.clone(),
+            cwd: self.cwd.clone(),
+            max_iterations: self.max_iterations,
+            no_validate_schema: self.no_validate_schema,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

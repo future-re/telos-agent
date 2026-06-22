@@ -6,13 +6,14 @@ use std::sync::Arc;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use telos_agent::{
-    AgentConfig, AgentSession, ApprovalDecision, ApprovalHandler, AutoDenyHandler,
-    CompletionResponse, FixedDecisionHandler, JsonlStorage, MemoryCategory, MemoryEntry,
-    MemoryQuery, MemorySort, MemoryStatus, Message, MockProvider, ModelProvider, StopReason,
-    ToolRegistry,
+    AgentSession, ApprovalDecision, ApprovalHandler, AutoDenyHandler, CompletionResponse,
+    FixedDecisionHandler, JsonlStorage, MemoryCategory, MemoryEntry, MemoryQuery, MemorySort,
+    MemoryStatus, Message, MockProvider, ModelProvider, StopReason, ToolRegistry,
 };
-use telos_cli::cli::{ProviderArg, SharedOptions};
-use telos_cli::config::{self, FileConfig, ResolvedProvider};
+use telos_runtime::config::{self, FileConfig, ResolvedProvider};
+use telos_runtime::context::ProjectContext;
+use telos_runtime::runtime as shared_runtime;
+use telos_runtime::{ProviderKind as RuntimeProviderKind, SharedOptions};
 
 use crate::desktop_event::{DesktopEvent, map_turn_event};
 
@@ -107,7 +108,8 @@ impl AgentHost {
                 manual_approval_handler.unwrap_or_else(|| Arc::new(AutoDenyHandler))
             });
 
-        let mut runtime = prepare_desktop_runtime(&shared, &merged, approval_handler)?;
+        let mut runtime = shared_runtime::prepare_runtime(&shared, &merged, approval_handler)
+            .map_err(|e| e.to_string())?;
         let sessions_dir = resolved.project_root_or_cwd.join(".telos").join("desktop-sessions");
         runtime.agent_config.storage =
             Some(Arc::new(JsonlStorage::new(sessions_dir).map_err(|e| e.to_string())?));
@@ -127,18 +129,13 @@ impl AgentHost {
             }])) as Arc<dyn ModelProvider + Send + Sync>,
         };
 
-        telos_agent::register_subagent_tool(
+        shared_runtime::register_subagent_tool(
             &mut runtime.tools,
-            Arc::clone(&provider),
             &runtime.agent_config,
+            Arc::clone(&provider),
         )
         .map_err(|e| e.to_string())?;
-        runtime.agent_config.prompt_assembly = Some(Arc::new(build_desktop_prompt_assembly(
-            &runtime.agent_config,
-            &runtime.tools,
-            &runtime.project_context,
-            runtime.memory_store.clone(),
-        )));
+        shared_runtime::rebuild_prompt_assembly(&mut runtime);
         let session = AgentSession::new(runtime.agent_config).map_err(|e| e.to_string())?;
 
         Ok(Self {
@@ -154,7 +151,7 @@ impl AgentHost {
     where
         F: FnMut(DesktopEvent),
     {
-        telos_cli::memory_runtime::record_user_preference(&self.memory_store, &prompt).await;
+        telos_runtime::memory_runtime::record_user_preference(&self.memory_store, &prompt).await;
 
         let erased = telos_agent::ErasedProvider(self.provider.as_ref());
         let mut final_text = String::new();
@@ -190,7 +187,7 @@ async fn record_memory_from_event(
             tool_details.insert(tool_call_id.clone(), detail.clone());
         }
         telos_agent::TurnEvent::ToolCompleted { tool_call_id, name, is_error: false, .. } => {
-            telos_cli::memory_runtime::record_successful_tool(
+            telos_runtime::memory_runtime::record_successful_tool(
                 memory_store,
                 name,
                 tool_call_id,
@@ -200,9 +197,9 @@ async fn record_memory_from_event(
         }
         telos_agent::TurnEvent::ToolResult(message) => {
             for result in message.tool_results_iter() {
-                telos_cli::memory_runtime::record_subagent_learning(memory_store, result).await;
+                telos_runtime::memory_runtime::record_subagent_learning(memory_store, result).await;
                 if result.is_error {
-                    telos_cli::memory_runtime::record_tool_error(
+                    telos_runtime::memory_runtime::record_tool_error(
                         memory_store,
                         result,
                         tool_details.get(&result.tool_call_id).map(String::as_str),
@@ -215,30 +212,23 @@ async fn record_memory_from_event(
     }
 }
 
-struct PreparedDesktopRuntime {
-    agent_config: AgentConfig,
-    tools: ToolRegistry,
-    memory_store: Arc<std::sync::Mutex<telos_agent::MemoryStore>>,
-    project_context: telos_cli::context::ProjectContext,
-}
-
 pub fn resolve_desktop_settings(
     overrides: &DesktopSettingsOverrides,
 ) -> Result<ResolvedDesktopSettings, String> {
-    let cwd = clean_path(overrides.cwd.clone().unwrap_or_else(telos_cli::config::default_cwd));
+    let cwd = clean_path(overrides.cwd.clone().unwrap_or_else(config::default_cwd));
     let merged = load_merged_config(&cwd)?;
     let shared = shared_options(overrides, &settings_from_config(&merged, cwd.clone())?);
-    let project_root = telos_cli::find_project_root(&cwd).ok().map(clean_path);
+    let project_root = telos_runtime::find_project_root(&cwd).ok().map(clean_path);
     let project_root_or_cwd = project_root.clone().unwrap_or_else(|| cwd.clone());
     let memory_root = clean_path(
-        telos_cli::memory_runtime::memory_root(project_root.as_deref())
+        telos_runtime::memory_runtime::memory_root(project_root.as_deref())
             .map_err(|e| e.to_string())?,
     );
     let memory_count = telos_agent::MemoryStore::new(memory_root.clone()).list().len();
     let context = project_root
         .as_deref()
-        .map(telos_cli::context::load_project_context)
-        .unwrap_or_else(telos_cli::context::ProjectContext::empty);
+        .map(telos_runtime::context::load_project_context)
+        .unwrap_or_else(ProjectContext::empty);
 
     let provider = overrides
         .provider
@@ -392,59 +382,9 @@ fn is_auto_tool_error_memory(entry: &MemoryEntry) -> bool {
         || entry.name.starts_with("fix-")
 }
 
-fn prepare_desktop_runtime(
-    options: &SharedOptions,
-    file_config: &FileConfig,
-    approval_handler: Option<Arc<dyn telos_agent::ApprovalHandler>>,
-) -> Result<PreparedDesktopRuntime, String> {
-    let cwd = options.cwd.clone().unwrap_or_else(telos_cli::config::default_cwd);
-    let project_root = telos_cli::find_project_root(&cwd).ok();
-    let project_root_or_cwd = project_root.clone().unwrap_or_else(|| cwd.clone());
-    let context = project_root
-        .as_deref()
-        .map(telos_cli::context::load_project_context)
-        .unwrap_or_else(telos_cli::context::ProjectContext::empty);
-    let memory_store = telos_cli::memory_runtime::open_memory_store(project_root.as_deref())
-        .map_err(|e| e.to_string())?;
-
-    let mut agent_config = config::build_agent_config(options, file_config, approval_handler)
-        .map_err(|e| e.to_string())?;
-    let mut tools = ToolRegistry::new();
-    telos_agent::register_core_tools(&mut tools);
-    let task_manager =
-        Arc::new(telos_agent::TaskManager::new(project_root_or_cwd.join(".telos").join("tasks")));
-    agent_config.task_manager = Some(task_manager.clone());
-    telos_agent::register_task_tools(&mut tools, task_manager);
-
-    telos_agent::register_memory_tools(&mut tools, memory_store.clone());
-    let assembly =
-        build_desktop_prompt_assembly(&agent_config, &tools, &context, memory_store.clone());
-    agent_config.prompt_assembly = Some(Arc::new(assembly));
-
-    Ok(PreparedDesktopRuntime { agent_config, tools, memory_store, project_context: context })
-}
-
-fn build_desktop_prompt_assembly(
-    agent_config: &AgentConfig,
-    tools: &ToolRegistry,
-    context: &telos_cli::context::ProjectContext,
-    memory_store: Arc<std::sync::Mutex<telos_agent::MemoryStore>>,
-) -> telos_agent::PromptAssembly {
-    let tools = Arc::new(tools.clone());
-    let mut assembly = telos_agent::prompt::default_coding_assembly(
-        tools,
-        agent_config.cwd.clone(),
-        agent_config.skill_registry.clone(),
-        agent_config.path,
-    );
-    telos_cli::context::append_prompt_context(&mut assembly, context);
-    assembly.add(telos_agent::MemorySection::new(memory_store));
-    assembly
-}
-
 fn load_merged_config(cwd: &Path) -> Result<FileConfig, String> {
     let user = config::load_user_config(None).map_err(|e| e.to_string())?;
-    let project = telos_cli::find_project_root(cwd)
+    let project = telos_runtime::find_project_root(cwd)
         .ok()
         .map(|root| config::load_project_config(&root).map_err(|e| e.to_string()))
         .transpose()?
@@ -457,10 +397,10 @@ fn settings_from_config(
     cwd: PathBuf,
 ) -> Result<ResolvedDesktopSettings, String> {
     let cwd = clean_path(cwd);
-    let project_root = telos_cli::find_project_root(&cwd).ok().map(clean_path);
+    let project_root = telos_runtime::find_project_root(&cwd).ok().map(clean_path);
     let project_root_or_cwd = project_root.clone().unwrap_or_else(|| cwd.clone());
     let memory_root = clean_path(
-        telos_cli::memory_runtime::memory_root(project_root.as_deref())
+        telos_runtime::memory_runtime::memory_root(project_root.as_deref())
             .map_err(|e| e.to_string())?,
     );
     Ok(ResolvedDesktopSettings {
@@ -489,8 +429,8 @@ fn shared_options(
 ) -> SharedOptions {
     SharedOptions {
         provider: Some(match overrides.provider.unwrap_or(resolved.provider) {
-            ProviderKind::Deepseek => ProviderArg::Deepseek,
-            ProviderKind::Mock => ProviderArg::Mock,
+            ProviderKind::Deepseek => RuntimeProviderKind::Deepseek,
+            ProviderKind::Mock => RuntimeProviderKind::Mock,
         }),
         model: overrides.model.clone().or_else(|| Some(resolved.model.clone())),
         api_key: overrides
@@ -607,25 +547,20 @@ max_iterations = 9
     #[tokio::test]
     async fn desktop_prompt_registers_system_subagent_tool() {
         let temp = tempfile::tempdir().expect("tempdir should be created");
-        let memory_store = Arc::new(std::sync::Mutex::new(telos_agent::MemoryStore::new(
-            temp.path().join("memory"),
-        )));
+        let shared = SharedOptions {
+            provider: Some(RuntimeProviderKind::Mock),
+            cwd: Some(temp.path().to_path_buf()),
+            ..SharedOptions::default()
+        };
+        let mut runtime =
+            shared_runtime::prepare_runtime(&shared, &FileConfig::default(), None).unwrap();
         let provider = Arc::new(MockProvider::new(vec![]));
-        let agent_config = AgentConfig { cwd: temp.path().to_path_buf(), ..AgentConfig::default() };
-        let mut tools = ToolRegistry::new();
-        telos_agent::register_core_tools(&mut tools);
+        shared_runtime::register_subagent_tool(&mut runtime.tools, &runtime.agent_config, provider)
+            .unwrap();
+        shared_runtime::rebuild_prompt_assembly(&mut runtime);
+        let prompt = runtime.agent_config.prompt_assembly.unwrap().build().await;
 
-        telos_agent::register_subagent_tool(&mut tools, provider, &agent_config).unwrap();
-        let prompt = build_desktop_prompt_assembly(
-            &agent_config,
-            &tools,
-            &telos_cli::context::ProjectContext::empty(),
-            memory_store,
-        )
-        .build()
-        .await;
-
-        assert!(tools.get("subagent").is_ok());
+        assert!(runtime.tools.get("subagent").is_ok());
         assert!(prompt.contains("Subagent"));
         assert!(prompt.contains("subagent_type"));
     }

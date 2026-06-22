@@ -84,19 +84,19 @@ pub async fn run_serve(options: &SharedOptions, file_config: &FileConfig) -> Res
     let provider: Arc<dyn telos_agent::ModelProvider> =
         crate::build_erased_provider(options, file_config)?;
     crate::runtime::register_cli_subagent_tool(
-        &mut runtime.tools,
-        &runtime.agent_config,
+        &mut runtime.shared.tools,
+        &runtime.shared.agent_config,
         provider.clone(),
     )?;
     crate::runtime::rebuild_prompt_assembly(&mut runtime);
 
     // Shared state for approval handshake.
     let pending: Arc<Mutex<Option<oneshot::Sender<ApprovalDecision>>>> = Arc::new(Mutex::new(None));
-    runtime.agent_config.approval_handler =
+    runtime.shared.agent_config.approval_handler =
         Some(Arc::new(ServeApprovalHandler { pending: pending.clone() }));
 
-    let base_config = runtime.agent_config.clone();
-    let tools = runtime.tools;
+    let base_config = runtime.shared.agent_config.clone();
+    let tools = runtime.shared.tools;
     let mut session = AgentSession::new(base_config.clone())?;
 
     let stdin = tokio::io::stdin();

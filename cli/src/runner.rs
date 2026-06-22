@@ -32,19 +32,19 @@ pub async fn run_single(
         ResolvedProvider::DeepSeek(p) => {
             let provider = Arc::new(p);
             crate::runtime::register_cli_subagent_tool(
-                &mut runtime.tools,
-                &runtime.agent_config,
+                &mut runtime.shared.tools,
+                &runtime.shared.agent_config,
                 provider.clone(),
             )?;
             crate::runtime::rebuild_prompt_assembly(&mut runtime);
-            let mut session = AgentSession::new(runtime.agent_config)
+            let mut session = AgentSession::new(runtime.shared.agent_config)
                 .context("failed to create agent session")?;
             run_with_provider(
                 &mut session,
                 provider.as_ref(),
-                &runtime.tools,
+                &runtime.shared.tools,
                 prompt,
-                runtime.memory_store.clone(),
+                runtime.shared.memory_store.clone(),
                 config.billing.as_ref(),
             )
             .await?;
@@ -52,19 +52,19 @@ pub async fn run_single(
         ResolvedProvider::Routed(p) => {
             let provider = Arc::new(p);
             crate::runtime::register_cli_subagent_tool(
-                &mut runtime.tools,
-                &runtime.agent_config,
+                &mut runtime.shared.tools,
+                &runtime.shared.agent_config,
                 provider.clone(),
             )?;
             crate::runtime::rebuild_prompt_assembly(&mut runtime);
-            let mut session = AgentSession::new(runtime.agent_config)
+            let mut session = AgentSession::new(runtime.shared.agent_config)
                 .context("failed to create agent session")?;
             run_with_provider(
                 &mut session,
                 provider.as_ref(),
-                &runtime.tools,
+                &runtime.shared.tools,
                 prompt,
-                runtime.memory_store.clone(),
+                runtime.shared.memory_store.clone(),
                 config.billing.as_ref(),
             )
             .await?;
@@ -78,19 +78,19 @@ pub async fn run_single(
                 model: None,
             }]));
             crate::runtime::register_cli_subagent_tool(
-                &mut runtime.tools,
-                &runtime.agent_config,
+                &mut runtime.shared.tools,
+                &runtime.shared.agent_config,
                 provider.clone(),
             )?;
             crate::runtime::rebuild_prompt_assembly(&mut runtime);
-            let mut session = AgentSession::new(runtime.agent_config)
+            let mut session = AgentSession::new(runtime.shared.agent_config)
                 .context("failed to create agent session")?;
             run_with_provider(
                 &mut session,
                 provider.as_ref(),
-                &runtime.tools,
+                &runtime.shared.tools,
                 prompt,
-                runtime.memory_store.clone(),
+                runtime.shared.memory_store.clone(),
                 config.billing.as_ref(),
             )
             .await?;
@@ -115,23 +115,23 @@ pub async fn run_chat(
         crate::build_erased_provider(options, config)?
     };
     crate::runtime::register_cli_subagent_tool(
-        &mut runtime.tools,
-        &runtime.agent_config,
+        &mut runtime.shared.tools,
+        &runtime.shared.agent_config,
         provider.clone(),
     )?;
     crate::runtime::rebuild_prompt_assembly(&mut runtime);
 
     let status = crate::context::build_status_text(
         options.model.as_deref(),
-        runtime.project_root.as_deref(),
-        &runtime.context,
+        runtime.shared.project_root.as_deref(),
+        &runtime.shared.context,
     );
     eprintln!("{status}");
     eprintln!("Type prompts (Ctrl+D or /quit to exit).\n");
 
-    let mut session = AgentSession::new(runtime.agent_config.clone())?;
-    let tools = runtime.tools;
-    let memory = runtime.memory_store;
+    let mut session = AgentSession::new(runtime.shared.agent_config.clone())?;
+    let tools = runtime.shared.tools;
+    let memory = runtime.shared.memory_store;
     let billing = config.billing.clone();
 
     let stdin = io::stdin();

@@ -4163,6 +4163,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "telos-runtime",
  "telos_agent",
  "tempfile",
  "tokio",
@@ -4187,12 +4188,30 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
- "telos-cli",
+ "telos-runtime",
  "telos_agent",
  "tempfile",
  "tokio",
  "tokio-util",
  "toml 0.8.2",
+]
+
+[[package]]
+name = "telos-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "dirs 5.0.1",
+ "glob",
+ "rpassword",
+ "serde",
+ "serde_json",
+ "telos_agent",
+ "tempfile",
+ "tokio",
+ "toml 0.8.2",
+ "tracing",
 ]
 
 [[package]]

@@ -3,8 +3,6 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 pub use telos_agent::DefaultShell;
 
-/// Configuration loaded from toml files (user-level ~/.config/telos/config.toml
-/// and project-level .telos.toml).
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct FileConfig {
     pub agent: Option<AgentSection>,
@@ -13,17 +11,14 @@ pub struct FileConfig {
     pub diagnostics: Option<DiagnosticsSection>,
     pub tui: Option<TuiSection>,
     pub env: Option<HashMap<String, String>>,
-    /// Whether to auto-approve tool calls by default.
     pub auto_mode: Option<bool>,
 }
 
-/// Terminal UI configuration.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct TuiSection {
     pub density: Option<TuiDensity>,
 }
 
-/// Terminal UI density preset.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TuiDensity {
@@ -33,7 +28,6 @@ pub enum TuiDensity {
     Spacious,
 }
 
-/// Local diagnostics and optional external reporting configuration.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct DiagnosticsSection {
     pub enabled: Option<bool>,
@@ -53,7 +47,6 @@ pub struct BillingModelPricing {
     pub output_per_million: Option<f64>,
 }
 
-/// GitHub issue reporter configuration for sanitized diagnostics summaries.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct DiagnosticsGithubSection {
     pub enabled: Option<bool>,
@@ -62,7 +55,6 @@ pub struct DiagnosticsGithubSection {
     pub min_occurrences: Option<usize>,
 }
 
-/// Model routing configuration from [agent.models] TOML section.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ModelsSection {
     pub thinking: Option<String>,

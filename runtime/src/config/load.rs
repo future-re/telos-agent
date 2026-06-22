@@ -4,8 +4,6 @@ use anyhow::{Context, Result};
 
 use super::FileConfig;
 
-/// Load config from an explicit file path. Returns `Ok(None)` if the file
-/// does not exist.
 pub fn load_config_file(path: &Path) -> Result<Option<FileConfig>> {
     if !path.exists() {
         return Ok(None);
@@ -17,8 +15,6 @@ pub fn load_config_file(path: &Path) -> Result<Option<FileConfig>> {
     Ok(Some(cfg))
 }
 
-/// Load user config from the given path, or from the default
-/// `~/.config/telos/config.toml` if `config_path` is `None`.
 pub fn load_user_config(config_path: Option<&Path>) -> Result<Option<FileConfig>> {
     let path = match config_path {
         Some(p) => p.to_path_buf(),
@@ -30,7 +26,6 @@ pub fn load_user_config(config_path: Option<&Path>) -> Result<Option<FileConfig>
     load_config_file(&path)
 }
 
-/// Load config from a project `.telos.toml` located under `dir`.
 pub fn load_project_config(dir: &Path) -> Result<Option<FileConfig>> {
     let path = dir.join(".telos.toml");
     load_config_file(&path)

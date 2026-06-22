@@ -532,7 +532,7 @@ fn new_session_id() -> String {
 mod tests {
     use super::*;
     use crate::config::TaskPath;
-    use crate::message::{ContentBlock, Role, ToolCall};
+    use crate::message::{ContentBlock, Role, SystemReminder, ToolCall};
     use crate::mock::MockProvider;
     use crate::provider::{CompletionResponse, ModelHint, StopReason, TokenUsage};
     use crate::storage::{JsonlStorage, Storage};
@@ -731,5 +731,45 @@ mod tests {
         assert_eq!(AgentSession::resolve_hint(&config, 1, false, 0), ModelHint::Thinking);
         assert_eq!(AgentSession::resolve_hint(&config, 2, false, 0), ModelHint::Execution);
         assert_eq!(AgentSession::resolve_hint(&config, 4, false, 0), ModelHint::Thinking);
+    }
+
+    #[test]
+    fn push_system_reminder_appends_system_role_message() {
+        let mut session = AgentSession::new(AgentConfig::default()).unwrap();
+
+        session.push_system_reminder(SystemReminder::ProviderContext);
+
+        let reminder = session.messages.last().expect("reminder message should exist");
+        assert_eq!(reminder.role, Role::System);
+        assert!(reminder.text_content().contains("provider/model context has changed"));
+    }
+
+    #[test]
+    fn reset_preserves_first_system_message_and_clears_memory_state() {
+        let mut session = AgentSession::new(AgentConfig {
+            base_system_prompt: Some("base prompt".into()),
+            ..AgentConfig::default()
+        })
+        .unwrap();
+        session.messages.push(Message::user("user message"));
+        session.messages.push(Message::assistant("assistant message"));
+        session.last_memory_injection_fingerprint = Some(42);
+        session.memory_state_dirty = true;
+        session.current_turn_memory_injected = true;
+        session.current_turn_memory_mutation_notified = true;
+        session.cached_system_prompt = Some("cached prompt".into());
+        session.next_turn_id = 7;
+
+        session.reset();
+
+        assert_eq!(session.messages.len(), 1);
+        assert_eq!(session.messages[0].role, Role::System);
+        assert_eq!(session.messages[0].text_content(), "base prompt");
+        assert_eq!(session.next_turn_id, 1);
+        assert!(session.cached_system_prompt.is_none());
+        assert!(session.last_memory_injection_fingerprint.is_none());
+        assert!(!session.memory_state_dirty);
+        assert!(!session.current_turn_memory_injected);
+        assert!(!session.current_turn_memory_mutation_notified);
     }
 }

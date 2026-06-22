@@ -70,3 +70,64 @@ impl MemoryInjector {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::memory::format::{MemoryCategory, MemoryEntry, MemoryStatus};
+
+    fn test_entry(name: &str, body: &str) -> MemoryEntry {
+        MemoryEntry {
+            name: name.into(),
+            description: "Relevant memory".into(),
+            category: MemoryCategory::Fact,
+            tags: vec!["cache".into(), "prompt".into()],
+            created: "2026-06-23".into(),
+            updated: "2026-06-23".into(),
+            status: MemoryStatus::Working,
+            times_used: 3,
+            confidence: None,
+            related: vec![],
+            source_session: None,
+            body: body.into(),
+        }
+    }
+
+    #[test]
+    fn identical_relevant_memories_produce_stable_fingerprint() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = MemoryStore::new(dir.path().to_path_buf());
+        store
+            .write(test_entry("cache-hit-guide", "Prompt cache hit guidance for desktop runtime."))
+            .unwrap();
+        let store = Arc::new(Mutex::new(store));
+        let injector = MemoryInjector::new(Arc::clone(&store));
+
+        let first = injector
+            .inject_for_query("How do I improve prompt cache hit rate in desktop runtime?")
+            .expect("first injection should exist");
+        let second = injector
+            .inject_for_query("How do I improve prompt cache hit rate in desktop runtime?")
+            .expect("second injection should exist");
+
+        assert_eq!(first.fingerprint, second.fingerprint);
+        assert_eq!(first.reminder, second.reminder);
+    }
+
+    #[test]
+    fn injection_preview_is_truncated_to_ninety_six_chars() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = MemoryStore::new(dir.path().to_path_buf());
+        let long_body = "a".repeat(140);
+        store.write(test_entry("long-memory", &long_body)).unwrap();
+        let store = Arc::new(Mutex::new(store));
+        let injector = MemoryInjector::new(store);
+
+        let injection =
+            injector.inject_for_query("long memory prompt cache").expect("injection should exist");
+
+        let rendered = injection.reminder.render();
+        assert!(rendered.contains(&"a".repeat(96)));
+        assert!(!rendered.contains(&"a".repeat(97)));
+    }
+}

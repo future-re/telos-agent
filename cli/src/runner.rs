@@ -3,6 +3,7 @@ use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::pin::pin;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use telos_agent::{
     AgentSession, ApprovalHandler, CompletionResponse, MemoryStore, Message, MockProvider,
@@ -204,38 +205,16 @@ pub async fn run_tui(
         runtime.project_root.as_deref(),
         &runtime.context,
     );
-    let auto_mode = config.auto_mode.unwrap_or(false);
-    let project_root_or_cwd = runtime.project_root.clone().unwrap_or_else(|| {
-        options.cwd.clone().unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-        })
-    });
+    let auto_mode = Arc::new(AtomicBool::new(config.auto_mode.unwrap_or(false)));
 
-    let result = crate::tui::run(
+    crate::tui::spawn::run_with_agent(
         runtime.agent_config,
         provider,
         runtime.tools,
         status,
-        runtime.project_root.as_deref(),
-        &project_root_or_cwd,
         auto_mode,
-        runtime.memory_store,
-        crate::tui::app::ModelSwitchConfig {
-            deepseek_api_key: crate::deepseek_api_key_for_switch(
-                options,
-                config,
-                onboarding.as_ref(),
-            ),
-        },
-        crate::tui::app::TuiLayoutSettings::from_density(
-            config.tui.as_ref().and_then(|tui| tui.density).unwrap_or_default(),
-        ),
-        config.billing.clone(),
     )
-    .await;
-
-    crate::runtime::process_diagnostics(&runtime.diagnostics, config).await;
-    result
+    .await
 }
 
 async fn run_interactive_turn(

@@ -177,20 +177,6 @@ fn generate_completion(shell: clap_complete::Shell) {
     clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
 }
 
-pub(crate) fn deepseek_api_key_for_switch(
-    options: &cli::SharedOptions,
-    config: &config::FileConfig,
-    onboarding: Option<&onboarding::OnboardingResult>,
-) -> Option<String> {
-    options
-        .api_key
-        .clone()
-        .or_else(|| onboarding.map(|result| result.api_key.clone()))
-        .or_else(|| std::env::var("DEEPSEEK_API_KEY").ok())
-        .or_else(|| config.env.as_ref()?.get("DEEPSEEK_API_KEY").cloned())
-        .filter(|key| !key.trim().is_empty())
-}
-
 pub(crate) fn build_erased_provider(
     options: &cli::SharedOptions,
     config: &config::FileConfig,

@@ -103,11 +103,15 @@ impl MemoryStore {
     /// Score cached memories against a user query and return the top-K by
     /// keyword-overlap relevance. Non-deprecated entries only.
     ///
+    /// `min_relevance` (0.0-1.0) discards entries whose composite score falls
+    /// below the threshold.  A value around 0.10 filters out false-positive
+    /// matches from very common tokens.
+    ///
     /// This is the primary method for dynamic memory injection — unlike
     /// `query()` + `MemorySort::Relevance` (which sorts by metadata), this
     /// uses the actual content of the user's prompt to find semantically
     /// relevant memories via simple token overlap.
-    pub fn search_relevant(&self, query: &str, limit: usize) -> Vec<MemoryEntry> {
+    pub fn search_relevant(&self, query: &str, limit: usize, min_relevance: f64) -> Vec<MemoryEntry> {
         let query_tokens = tokenize(query);
         if query_tokens.is_empty() || self.cache.is_empty() {
             return Vec::new();
@@ -122,6 +126,9 @@ impl MemoryStore {
                 (raw_score, entry)
             })
             .collect();
+
+        // Drop entries below the relevance floor before ranking.
+        scored.retain(|(score, _)| *score >= min_relevance);
 
         // Sort descending by score, stable for deterministic output.
         scored.sort_by(|a, b| {
@@ -162,18 +169,36 @@ fn tokenize_entry(entry: &MemoryEntry) -> Vec<String> {
     tokens
 }
 
-/// Fraction of `query_tokens` that appear (partially) in `entry_tokens`.
+/// Fraction of `query_tokens` that exactly match a token in `entry_tokens`.
+///
+/// Exact match only, with one exception: a query token that is the prefix of a
+/// longer entry token and the boundary character is `-` or `_` counts as a match
+/// (e.g. `error` matches `error-handling`).  This prevents noisy substring
+/// matches like `hi` matching `think`.
 fn token_overlap(query_tokens: &[String], entry_tokens: &[String]) -> f64 {
     if query_tokens.is_empty() || entry_tokens.is_empty() {
         return 0.0;
     }
     let matches = query_tokens
         .iter()
-        .filter(|qt| {
-            entry_tokens.iter().any(|et| et.contains(qt.as_str()) || qt.contains(et.as_str()))
-        })
+        .filter(|qt| entry_tokens.iter().any(|et| token_match(qt, et)))
         .count();
     matches as f64 / query_tokens.len() as f64
+}
+
+/// Returns true when `query_token` exactly equals `entry_token`, or when
+/// `query_token` is a prefix of a compound `entry_token` whose next character
+/// is a hyphen or underscore.
+fn token_match(query_token: &str, entry_token: &str) -> bool {
+    if query_token == entry_token {
+        return true;
+    }
+    if query_token.len() < entry_token.len() {
+        let next_byte = entry_token.as_bytes()[query_token.len()];
+        (next_byte == b'-' || next_byte == b'_') && entry_token.starts_with(query_token)
+    } else {
+        false
+    }
 }
 
 /// Score a single memory entry against the tokenized user query.
@@ -187,10 +212,10 @@ fn compute_relevance(query_tokens: &[String], entry: &MemoryEntry) -> f64 {
     let tag_tokens: Vec<String> = entry.tags.iter().flat_map(|t| tokenize(t)).collect();
     let body_tokens = tokenize(&entry.body);
 
-    let name_score = token_overlap(query_tokens, &name_tokens) * 0.30;
-    let desc_score = token_overlap(query_tokens, &desc_tokens) * 0.25;
-    let tag_score = token_overlap(query_tokens, &tag_tokens) * 0.20;
-    let body_score = token_overlap(query_tokens, &body_tokens) * 0.15;
+    let name_score = token_overlap(query_tokens, &name_tokens) * 0.35;
+    let desc_score = token_overlap(query_tokens, &desc_tokens) * 0.30;
+    let tag_score = token_overlap(query_tokens, &tag_tokens) * 0.25;
+    let body_score = token_overlap(query_tokens, &body_tokens) * 0.05;
 
     let status_mult = match entry.status {
         MemoryStatus::Working => 1.0,

@@ -62,7 +62,7 @@ export function AgentStatusRail({
               <span className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                 Runtime
               </span>
-              <span className="rounded-md border bg-background px-1.5 py-0.5 text-[0.68rem] text-muted-foreground">
+              <span className="min-w-0 max-w-24 truncate rounded-md border bg-background px-1.5 py-0.5 text-[0.68rem] text-muted-foreground" title={phase.label}>
                 {phase.label}
               </span>
             </div>
@@ -381,6 +381,8 @@ function statusLabel(status: string): string {
     case "tool failed":
       return "失败";
     default:
-      return status || "就绪";
+      if (status.startsWith("provider error")) return "接口错误";
+      if (status.startsWith("error")) return "错误";
+      return status.length > 48 ? `${status.slice(0, 45)}…` : (status || "就绪");
   }
 }

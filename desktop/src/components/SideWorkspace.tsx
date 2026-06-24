@@ -1,5 +1,5 @@
 import { Activity, Bot } from "lucide-react";
-import { DeepSeekBrowserPanel } from "@/components/DeepSeekBrowserPanel";
+import { DeepSeekBrowserPanel, DeepSeekExtractResult } from "@/components/DeepSeekBrowserPanel";
 import { RunInspector } from "@/components/RunInspector";
 import { ToolActivity } from "@/chatState";
 import { SettingsSection } from "@/desktopTypes";
@@ -14,6 +14,7 @@ interface SideWorkspaceProps {
   onChooseDirectory: () => void;
   onConfigure: (section: SettingsSection) => void;
   onOpenMemory: () => void;
+  onSyncDeepSeek?: (result: DeepSeekExtractResult) => void;
   onTabChange: (tab: SideWorkspaceTab) => void;
   running: boolean;
   status: string;
@@ -26,6 +27,7 @@ export function SideWorkspace({
   onChooseDirectory,
   onConfigure,
   onOpenMemory,
+  onSyncDeepSeek,
   onTabChange,
   running,
   status,
@@ -63,7 +65,7 @@ export function SideWorkspace({
             tools={tools}
           />
         ) : (
-          <DeepSeekBrowserPanel />
+          <DeepSeekBrowserPanel onSyncToAgent={onSyncDeepSeek} />
         )}
       </div>
     </aside>

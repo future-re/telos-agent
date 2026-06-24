@@ -21,6 +21,7 @@ import { Composer } from "@/components/Composer";
 import { Conversation } from "@/components/Conversation";
 import { MemoryOverviewDialog } from "@/components/MemoryOverviewDialog";
 import { SideWorkspace, SideWorkspaceTab } from "@/components/SideWorkspace";
+import { DeepSeekExtractResult } from "@/components/DeepSeekBrowserPanel";
 import { TopBar } from "@/components/TopBar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
@@ -127,6 +128,7 @@ export function App() {
   const [settings, setSettings] = useState<ResolvedDesktopSettings>(fallbackSettings);
   const [overrides, setOverrides] = useState<DesktopSettingsOverrides>({});
   const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const syncedContextRef = useRef("");
   const [savingKey, setSavingKey] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
@@ -333,18 +335,26 @@ export function App() {
       return;
     }
     setPrompt("");
+
+    const pendingContext = syncedContextRef.current;
+    syncedContextRef.current = "";
+
+    const fullPrompt = pendingContext
+      ? `以下是从 DeepSeek 同步的上下文，请在回答时参考：\n\n${pendingContext}\n\n---\n用户消息：${text}`
+      : text;
+
     setSessions((current) =>
       updateSessionState(current, activeSessionId, (chatState) =>
-        reduceChatAction(chatState, { type: "start", prompt: text }),
+        reduceChatAction(chatState, { type: "start", prompt: fullPrompt }),
       ).map((session) =>
-        session.id === activeSessionId ? renameSessionFromPrompt(session, text) : session,
+        session.id === activeSessionId ? renameSessionFromPrompt(session, fullPrompt) : session,
       ),
     );
     try {
       await invoke<PromptResult>("send_prompt", {
         request: {
           sessionId: activeSessionId,
-          prompt: text,
+          prompt: fullPrompt,
           settings: normalizeOverrides(overrides, settings),
         },
       });
@@ -471,6 +481,39 @@ export function App() {
   function openDeepSeekPanel() {
     setInspectorOpen(true);
     setSideWorkspaceTab("deepseek");
+  }
+
+  async function handleSyncDeepSeek(result: DeepSeekExtractResult) {
+    if (deepseekNeedsKey) {
+      return;
+    }
+
+    const text = (result.text ?? "").trim();
+    if (!text) return;
+
+    const charCount = text.length;
+    syncedContextRef.current = text;
+
+    setSessions((current) =>
+      updateSessionState(current, activeSessionId, (chatState) => ({
+        ...chatState,
+        messages: [
+          ...chatState.messages,
+          {
+            id: `dsync-${Date.now()}`,
+            role: "system",
+            content: `从 DeepSeek 同步了 ${charCount} 个字符`,
+            turnId: "deepseek-sync",
+          },
+          {
+            id: `dsync-content-${Date.now()}`,
+            role: "assistant",
+            content: text,
+            turnId: "deepseek-sync",
+          },
+        ],
+      })),
+    );
   }
 
   async function chooseDirectory() {
@@ -635,6 +678,7 @@ export function App() {
               onChooseDirectory={chooseDirectory}
               onConfigure={openSettings}
               onOpenMemory={openMemoryOverview}
+              onSyncDeepSeek={handleSyncDeepSeek}
               onTabChange={setSideWorkspaceTab}
               running={state.running}
               status={state.status}

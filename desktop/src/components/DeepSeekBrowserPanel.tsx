@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ArrowLeftToLine,
   ArrowRight,
   ExternalLink,
   Globe,
@@ -10,6 +11,7 @@ import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { Webview } from "@tauri-apps/api/webview";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -28,10 +30,25 @@ type PanelBounds = {
   height: number;
 };
 
-export function DeepSeekBrowserPanel() {
+export interface SyncedDeepSeekMessage {
+  role: string;
+  content: string;
+}
+
+export interface DeepSeekExtractResult {
+  text: string;
+  messages: SyncedDeepSeekMessage[];
+}
+
+interface DeepSeekBrowserPanelProps {
+  onSyncToAgent?: (result: DeepSeekExtractResult) => void;
+}
+
+export function DeepSeekBrowserPanel({ onSyncToAgent }: DeepSeekBrowserPanelProps) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [panelError, setPanelError] = useState("");
+  const [syncingDeepSeek, setSyncingDeepSeek] = useState(false);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -114,6 +131,22 @@ export function DeepSeekBrowserPanel() {
     }
   }
 
+  async function syncToAgent() {
+    if (!isTauriRuntime() || !onSyncToAgent) {
+      return;
+    }
+
+    setSyncingDeepSeek(true);
+    try {
+      const result = await invoke<DeepSeekExtractResult>("extract_deepseek_text");
+      onSyncToAgent(result);
+    } catch (error) {
+      setPanelError(`同步失败：${String(error)}`);
+    } finally {
+      setSyncingDeepSeek(false);
+    }
+  }
+
   return (
     <div className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-muted/40">
       <div className="border-b bg-background px-3 py-2.5">
@@ -129,6 +162,9 @@ export function DeepSeekBrowserPanel() {
             <p className="mt-0.5 truncate text-xs text-muted-foreground">{DEEPSEEK_URL}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            <BrowserIconButton label="同步到 Agent" disabled={syncingDeepSeek} onClick={syncToAgent}>
+              <ArrowLeftToLine className="size-4" aria-hidden="true" />
+            </BrowserIconButton>
             <BrowserIconButton label="后退" disabled>
               <ArrowLeft className="size-4" aria-hidden="true" />
             </BrowserIconButton>

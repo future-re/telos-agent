@@ -96,7 +96,7 @@ function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsa
   if (turn.role === "system") {
     return (
       <div className="flex min-w-0 justify-center">
-        <p className="max-w-2xl rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs leading-5 text-amber-950">
+        <p className="max-w-2xl rounded-full border border-border bg-secondary/60 px-3 py-1.5 text-xs leading-5 text-muted-foreground">
           {turn.content}
         </p>
       </div>

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{Emitter, State, Window};
+use tauri::{Emitter, Manager, State, Window};
 use tokio::sync::{Mutex, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -47,6 +47,20 @@ struct PromptResult {
 #[serde(rename_all = "camelCase")]
 struct ResolveSettingsRequest {
     cwd: Option<std::path::PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncedMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtractResult {
+    text: String,
+    messages: Vec<SyncedMessage>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -149,6 +163,46 @@ fn memory_summary(request: Option<ResolveSettingsRequest>) -> Result<MemoryOverv
         cwd: request.and_then(|request| request.cwd),
         ..DesktopSettingsOverrides::default()
     })
+}
+
+#[tauri::command]
+async fn extract_deepseek_text(window: Window) -> Result<ExtractResult, String> {
+    let webview = window
+        .get_webview("deepseek-panel")
+        .ok_or_else(|| "DeepSeek 面板未打开".to_string())?;
+
+    let (tx, rx) = oneshot::channel();
+    let tx = Arc::new(std::sync::Mutex::new(Some(tx)));
+
+    let js = r#"(function() {
+    try {
+        var text = document.body.innerText.trim().substring(0, 50000);
+        return {text: text, messages: []};
+    } catch(e) {
+        return {text: 'ERR: ' + e.message, messages: []};
+    }
+})();"#;
+
+    webview
+        .eval_with_callback(js, move |result| {
+            if let Some(tx) = tx.lock().unwrap().take() {
+                let _ = tx.send(result);
+            }
+        })
+        .map_err(|e| format!("无法注入提取脚本：{}", e))?;
+
+    let json_text = tokio::time::timeout(std::time::Duration::from_secs(10), rx)
+        .await
+        .map_err(|_| "提取超时，请确保 DeepSeek 面板已加载完毕".to_string())?
+        .unwrap_or_else(|_| "\"\"".to_string());
+
+    let extract: ExtractResult = serde_json::from_str(&json_text)
+        .unwrap_or_else(|_| ExtractResult {
+            text: json_text.trim_matches('"').to_string(),
+            messages: vec![],
+        });
+
+    Ok(extract)
 }
 
 #[tauri::command]
@@ -288,6 +342,7 @@ pub fn run() {
             resolved_settings,
             save_deepseek_key,
             memory_summary,
+            extract_deepseek_text,
             reset_all_sessions,
             reset_session,
             cancel_current_task,

@@ -16,6 +16,7 @@ use crate::message::SystemReminder;
 pub struct MemoryInjector {
     store: Arc<Mutex<MemoryStore>>,
     max_memories: usize,
+    min_relevance: f64,
 }
 
 pub struct MemoryInjection {
@@ -25,12 +26,19 @@ pub struct MemoryInjection {
 
 impl MemoryInjector {
     pub fn new(store: Arc<Mutex<MemoryStore>>) -> Self {
-        Self { store, max_memories: 8 }
+        Self { store, max_memories: 5, min_relevance: 0.10 }
     }
 
-    /// Override the default maximum number of injected memories (8).
+    /// Override the default maximum number of injected memories (5).
     pub fn with_max_memories(mut self, max: usize) -> Self {
         self.max_memories = max;
+        self
+    }
+
+    /// Set a minimum relevance score (0.0–1.0) for inclusion.
+    /// Entries below this threshold are silently dropped.
+    pub fn with_min_relevance(mut self, threshold: f64) -> Self {
+        self.min_relevance = threshold.clamp(0.0, 1.0);
         self
     }
 
@@ -41,7 +49,7 @@ impl MemoryInjector {
     /// no matches, or all deprecated).
     pub fn inject_for_query(&self, query: &str) -> Option<MemoryInjection> {
         let store = self.store.lock().ok()?;
-        let memories = store.search_relevant(query, self.max_memories);
+        let memories = store.search_relevant(query, self.max_memories, self.min_relevance);
         if memories.is_empty() {
             return None;
         }
@@ -56,7 +64,7 @@ impl MemoryInjector {
                 "- **{}** ({:?}{}): {}",
                 entry.name, entry.category, status_tag, entry.description,
             ));
-            let preview: String = entry.body.chars().take(96).collect();
+            let preview: String = entry.body.chars().take(80).collect();
             if !preview.is_empty() {
                 lines.push(format!("  {}", preview));
             }
@@ -115,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn injection_preview_is_truncated_to_ninety_six_chars() {
+    fn injection_preview_is_truncated_to_eighty_chars() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = MemoryStore::new(dir.path().to_path_buf());
         let long_body = "a".repeat(140);
@@ -127,7 +135,7 @@ mod tests {
             injector.inject_for_query("long memory prompt cache").expect("injection should exist");
 
         let rendered = injection.reminder.render();
-        assert!(rendered.contains(&"a".repeat(96)));
-        assert!(!rendered.contains(&"a".repeat(97)));
+        assert!(rendered.contains(&"a".repeat(80)));
+        assert!(!rendered.contains(&"a".repeat(81)));
     }
 }

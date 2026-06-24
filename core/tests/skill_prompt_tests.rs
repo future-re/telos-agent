@@ -366,7 +366,7 @@ async fn builtin_prompt_sections_render_without_error() {
     assert!(result.contains("telos-agent"));
     assert!(result.contains("Tone and style"));
     assert!(result.contains("Doing tasks"));
-    assert!(result.contains("Executing actions with care"));
+    assert!(result.contains("# Safety"));
     assert!(result.contains("Using your tools"));
     assert!(result.contains("Today's date"));
     assert!(result.contains("Working directory"));
@@ -389,7 +389,7 @@ async fn default_coding_assembly_is_minimal() {
     assert!(result.contains("You are telos-agent"));
     assert!(result.contains("IMPORTANT: Assist with authorized security testing"));
     assert!(result.contains("# System"));
-    assert!(result.contains("# Executing actions with care"));
+    assert!(result.contains("# Safety"));
     assert!(result.contains("Today's date"));
     assert!(result.contains("Working directory"));
     assert!(!result.contains("# Tone and style"));
@@ -416,7 +416,7 @@ async fn full_coding_assembly_renders_extended_sections() {
     assert!(result.contains("# Output efficiency"));
     assert!(result.contains("# Doing tasks"));
     assert!(result.contains("# Using your tools"));
-    assert!(result.contains("Do NOT use the Bash tool to run commands"));
+    assert!(result.contains("Prefer dedicated tools over the Bash tool"));
 }
 
 #[tokio::test]

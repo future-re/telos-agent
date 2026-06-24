@@ -43,11 +43,9 @@ impl Tool for ShellTool {
 
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
-            "Use the Bash tool for shell commands, build/test runners, git operations, and other tasks that genuinely require a shell. \
-Prefer Read, Edit, Write, Glob, or Grep for file operations. \
-Provide a short `description` summarizing the command's intent. \
-Commands run with a clean environment; pass required env vars explicitly. \
-Avoid commands that require superuser privileges unless explicitly instructed.",
+            "Use Bash for shell commands, build/test runners, and git operations. \
+Prefer Read, Edit, Write, Glob, Grep for file operations. \
+Provide a short `description` of the command's intent. Avoid superuser commands unless instructed.",
         )
     }
 

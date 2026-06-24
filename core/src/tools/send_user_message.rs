@@ -32,9 +32,7 @@ impl Tool for SendUserMessageTool {
         ToolDefinition {
             name: "SendUserMessage".into(),
             description:
-                "Send a message the user will read. Use this as your primary output channel \
-when you need to communicate results, status updates, or ask questions. \
-Supports markdown formatting and optional file attachments (images, diffs, logs, screenshots)."
+                "Primary output channel. Sends a markdown message to the user with optional file attachments (images, diffs, logs)."
                     .into(),
             input_schema: json!({
                 "type": "object",

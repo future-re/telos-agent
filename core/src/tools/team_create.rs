@@ -37,9 +37,7 @@ impl Tool for TeamCreateTool {
         ToolDefinition {
             name: "TeamCreate".into(),
             description: "Create a collaboration team for parallel multi-agent work. \
-Use when a task is complex enough that it would benefit from multiple agents \
-working on different subtasks in parallel. Creates a shared task list and team \
-config file. You can only manage one team at a time."
+Use when a task can be split into independent subtasks. Creates shared task list and config. One team at a time."
                 .into(),
             input_schema: json!({
                 "type": "object",

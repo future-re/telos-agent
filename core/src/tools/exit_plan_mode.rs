@@ -28,10 +28,8 @@ impl Tool for ExitPlanModeTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "ExitPlanMode".into(),
-            description: "Submit the implementation plan for approval. Reads the plan from disk \
-(e.g. the plan.md file you wrote) and presents it. Call this after writing the plan \
-file with FileWrite. Do NOT use for exploration-only tasks — only when you have a \
-written plan to submit."
+            description: "Submit the implementation plan for approval. Reads from plan file or inline `plan` argument. \
+Use only after writing a complete plan."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -111,18 +109,6 @@ written plan to submit."
     }
 }
 
-const EXIT_PLAN_MODE_PROMPT: &str = r#"ExitPlanMode submits your implementation plan for approval.
+const EXIT_PLAN_MODE_PROMPT: &str = r#"ExitPlanMode submits your plan for approval.
 
-**When to use:**
-- After you have written a complete plan to the plan file using FileWrite
-- The plan should include: problem summary, context, approach, implementation steps, affected files, risks
-- Do NOT use ExitPlanMode for exploration-only tasks with no plan
-
-**How it works:**
-1. Write your plan to the plan file (path given by EnterPlanMode) using FileWrite
-2. Call ExitPlanMode (no arguments needed — it reads from disk)
-3. Alternatively, pass the plan inline via the `plan` argument
-
-**After approval:**
-You will exit plan mode and can immediately begin implementing the plan.
-Start with the first step — don't re-explain the plan unless asked."#;
+Call after writing a complete plan to the plan file (via Write). Include: problem, context, approach, steps, affected files, risks. Pass the plan inline via `plan` argument or let it read from disk. After approval, begin implementing — don't re-explain the plan unless asked."#;

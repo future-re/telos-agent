@@ -103,13 +103,4 @@ Stop or wait for them to finish, then retry.",
 
 const TEAM_DELETE_PROMPT: &str = r#"TeamDelete cleans up a completed collaboration team.
 
-**When to use:**
-- All team tasks are complete
-- The user indicates the collaborative work is done
-- Before creating a new team to replace the current one
-
-**Safety:** Will fail with an error if there are still active teammates.
-Stop them first (use TaskStop or signal them to exit), then retry.
-
-**After deletion:** The team config file and shared task directory are removed.
-You can then create a new team if needed."#;
+Use when all tasks are done or the user signals completion. Fails if active teammates remain — stop them first. Removes team config and shared task directory."#;

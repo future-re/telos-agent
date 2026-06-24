@@ -42,9 +42,8 @@ provide the original file text (without line-number prefixes) to `Edit` when edi
 
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
-            "Use Read to inspect UTF-8 text files. Always Read a file before editing or overwriting it. \
-Use `offset`/`limit` to read large files in chunks. The returned content prefixes lines with 1-indexed line numbers; \
-provide the original file text (without line-number prefixes) to Edit.",
+            "Use Read to inspect UTF-8 text files. Always read a file before editing it. \
+Use `offset`/`limit` for large files. Content includes 1-indexed line numbers; provide original text to Edit.",
         )
     }
 

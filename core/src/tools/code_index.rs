@@ -31,8 +31,7 @@ impl Tool for CodeSearchTool {
 
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
-            "Use CodeSearch to search the indexed repository before broad filesystem reads. \
-Results include path, 1-indexed line number, and matching line text.",
+            "Use CodeSearch for indexed repository search before broad filesystem reads.",
         )
     }
 

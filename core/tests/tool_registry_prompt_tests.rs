@@ -160,7 +160,7 @@ fn default_assembly_is_minimal_by_default() {
         assert!(!text.contains("Use the PowerShell tool for shell commands"));
         assert!(!text.contains("### PowerShell"));
         assert!(text.contains("You are telos-agent"));
-        assert!(text.contains("Executing actions with care"));
+        assert!(text.contains("# Safety"));
     });
 }
 

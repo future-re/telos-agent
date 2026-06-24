@@ -273,7 +273,7 @@ pub fn resolve_desktop_settings(
     Ok(ResolvedDesktopSettings {
         provider,
         model,
-        cwd,
+        cwd: project_root_or_cwd.clone(),
         project_root,
         project_root_or_cwd,
         memory_root,
@@ -437,7 +437,7 @@ fn settings_from_config(
             .as_ref()
             .and_then(|agent| agent.model.clone())
             .unwrap_or_else(|| "auto".into()),
-        cwd,
+        cwd: project_root_or_cwd.clone(),
         project_root,
         project_root_or_cwd,
         memory_root,
@@ -584,6 +584,7 @@ max_iterations = 9
         let provider = Arc::new(MockProvider::new(vec![]));
         shared_runtime::register_subagent_tool(&mut runtime.tools, &runtime.agent_config, provider)
             .unwrap();
+        runtime.agent_config.prompt_profile = telos_agent::prompt::PromptProfile::Full;
         shared_runtime::rebuild_prompt_assembly(&mut runtime);
         let prompt = runtime.agent_config.prompt_assembly.unwrap().build().await;
 

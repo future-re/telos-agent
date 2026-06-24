@@ -47,39 +47,8 @@ impl Tool for TodoWriteTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "TodoWrite".into(),
-            description: "Use this tool to create and manage a structured task list for your current coding session. \
-This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user. \
-It also helps the user understand the progress of the task and overall progress of their requests.\n\n\
-**When to Use**\n\
-- Complex multi-step tasks (3+ distinct steps)\n\
-- Non-trivial tasks requiring careful planning\n\
-- User explicitly requests todo list\n\
-- User provides multiple tasks (numbered/comma-separated)\n\
-- After receiving new instructions — capture requirements as todos (merge with existing)\n\n\
-**When NOT to Use**\n\
-- Single, straightforward tasks\n\
-- Trivial tasks with no organizational benefit\n\
-- Tasks completable in < 3 trivial steps\n\
-- Purely conversational/informational requests\n\
-- Todo items should NOT include operational actions from other tools\n\n\
-**Task Management Rules**\n\
-- Exactly ONE item can be `in_progress` at a time — finish or pause others first.\n\
-- Update status in real-time — mark complete right after finishing, not in batches.\n\
-- When claiming new work: mark it `in_progress` BEFORE starting.\n\
-- Don't keep stale items — remove tasks that are no longer relevant.\n\
-- Always provide `active_form` (present continuous) alongside `content` (imperative).\n\
-- Before completing the turn, verify all todos are accurate.\n\
-- Keep the list focused — only the current task has details.\n\n\
-**Completion Criteria**\n\
-Only mark as `completed` when FULLY accomplished:\n\
-- No failing tests\n\
-- No partial implementation\n\
-- No unresolved errors\n\
-- All acceptance criteria met\n\
-- If verification failed, keep as `in_progress` or add a new verification todo.\n\n\
-**Batch Todo Completes**\n\
-When finishing the final task before handing off to the user, you may batch-update \
-all remaining items to `completed` in one call."
+            description: "Creates and manages a structured task list for tracking progress. Use for multi-step tasks (3+ steps), complex work, or when user provides multiple tasks. Skip for single straightforward tasks or conversational requests. \
+Rules: one item in_progress at a time; update status in real-time; mark in_progress before starting; always include active_form; mark completed only when fully done (no failing tests, no partial work)."
                     .into(),
             input_schema: json!({
                 "type": "object",

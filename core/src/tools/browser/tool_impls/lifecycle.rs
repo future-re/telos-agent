@@ -40,9 +40,8 @@ impl Tool for BrowserStartTool {
 
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
-            "Use BrowserStart when a task needs a dynamic page or full browser automation. \
-The managed browser uses an isolated profile by default. Prefer allowed_domains for scoped tasks. \
-Do not use browser automation to bypass CAPTCHA, bot checks, paywalls, or access controls.",
+            "Use BrowserStart for dynamic page or full browser automation. Uses isolated profile. \
+Don't bypass CAPTCHA, bot checks, paywalls, or access controls.",
         )
     }
 

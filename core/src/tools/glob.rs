@@ -37,8 +37,7 @@ impl Tool for GlobTool {
 
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
-            "Use Glob to list files matching a pattern under the working directory. \
-Patterns are relative to cwd; absolute patterns must stay under cwd. Use a literal extension or subdirectory anchor (e.g. `src/**/*.rs`).",
+            "Use Glob to list files matching a pattern. Patterns are relative to cwd; absolute patterns must stay under cwd.",
         )
     }
 

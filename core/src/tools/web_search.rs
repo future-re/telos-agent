@@ -53,12 +53,9 @@ impl Tool for WebSearchTool {
 
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
-            "Use WebSearch when you need up-to-date information not present in the codebase or conversation. \
-Prefer source-first browsing: use WebFetch directly when you know a likely official/source URL, and use WebSearch only when you need discovery. \
-WebSearch does not use an API key; it tries Bing China first, then DuckDuckGo Lite. \
-Use `allowed_domains` or `blocked_domains` when the task should be scoped to specific sources. \
-If WebSearch fails because DuckDuckGo reports a bot challenge or blocked automated search, do not retry WebSearch in the same turn; \
-switch to WebFetch with known official/source URLs, use available context, or ask the user for a source/search provider.",
+            "Use WebSearch for discovery of up-to-date information not in the codebase. \
+Prefer WebFetch when you know the URL. Use `allowed_domains`/`blocked_domains` to scope results. \
+If blocked, switch to WebFetch with known URLs or ask the user for sources.",
         )
     }
 
@@ -202,10 +199,8 @@ mod tests {
     #[test]
     fn prompt_discourages_retrying_after_bot_challenge() {
         let prompt = WebSearchTool.prompt_text().unwrap();
-        assert!(prompt.contains("bot challenge"));
-        assert!(prompt.contains("do not retry WebSearch"));
         assert!(prompt.contains("WebFetch"));
-        assert!(prompt.contains("Bing China"));
+        assert!(prompt.contains("blocked"));
         assert!(!prompt.contains("BRAVE_SEARCH_API_KEY"));
     }
 

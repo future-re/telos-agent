@@ -48,7 +48,7 @@ impl Tool for SubagentTool {
         ToolDefinition {
             name: "subagent".into(),
             description:
-                "Run an in-process subagent with its own turn loop or execute fork lenses concurrently."
+                "Delegate to a specialized subagent with its own turn loop. Run in parallel or background."
                     .into(),
             input_schema: json!({
                 "type": "object",
@@ -103,15 +103,12 @@ impl Tool for SubagentTool {
 
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
-            "Use the Subagent tool to delegate self-contained tasks, run parallel explore lenses, or protect the main context window. \
-Provide a clear 3-5 word description and a self-contained prompt with scope, relevant files, constraints, and expected output. \
-Use subagent_type to choose a specialized agent when appropriate: general-purpose, Explore, Plan, or Verification. \
-Prefer subagents whose declared skills match the work; the child agent will load those skills with the Skill tool. \
-For independent research or verification, launch multiple subagent calls in the same assistant message so they can run in parallel. \
-Use run_in_background for long-running work, then inspect results with task_output or stop it with task_stop. \
-Use isolation: worktree for write-heavy work that should not touch the parent checkout. \
-Ask subagents to return reusable learning when the result contains durable memory-worthy facts, commands, workflows, or preferences. \
-Do not duplicate work already being performed in the parent session.",
+            "Use Subagent to delegate self-contained tasks or protect the main context window. \
+Provide a short description and a self-contained prompt with scope, files, constraints, and expected output. \
+Use subagent_type (general-purpose, Explore, Plan, Verification) matching the task's needs. \
+Launch multiple independent subagent calls in one message for parallel execution. \
+Use run_in_background for long work and isolation: worktree for write-heavy tasks. \
+Don't duplicate work already being done in the parent session.",
         )
     }
 
@@ -347,25 +344,21 @@ mod tests {
         );
         let prompt = tool.prompt_text().unwrap();
         assert!(prompt.contains("self-contained prompt"));
-        assert!(prompt.contains("multiple subagent calls"));
+        assert!(prompt.contains("independent subagent calls"));
         assert!(prompt.contains("run_in_background"));
-        assert!(prompt.contains("task_output"));
-        assert!(prompt.contains("task_stop"));
         assert!(prompt.contains("isolation: worktree"));
     }
 
     #[test]
-    fn subagent_prompt_text_describes_skill_and_learning_controls() {
+    fn subagent_prompt_text_names_supported_agent_types_and_mode() {
         let tool = SubagentTool::new(
             Arc::new(MockProvider::new(vec![])),
             ToolRegistry::new(),
             AgentConfig::default(),
         );
         let prompt = tool.prompt_text().unwrap();
-        assert!(prompt.contains("skills"));
-        assert!(prompt.contains("Skill"));
-        assert!(prompt.contains("learning"));
-        assert!(prompt.contains("memory"));
+        assert!(prompt.contains("Subagent"));
+        assert!(prompt.contains("subagent_type"));
     }
 
     #[tokio::test]

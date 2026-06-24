@@ -41,9 +41,8 @@ impl Tool for GrepTool {
 
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
-            "Use Grep to search UTF-8 files for a literal text pattern. Searches are substring matches, not regex. \
-Results include path, 1-indexed line number, and matched line. Use `glob` to scope the search; default is `**/*`. \
-Absolute globs must stay under the working directory.",
+            "Use Grep for literal substring search in files (not regex). Results include path, line number, and matched line. \
+Use `glob` to scope; absolute globs must stay under the working directory.",
         )
     }
 

@@ -47,11 +47,8 @@ impl Tool for EnterPlanModeTool {
         ToolDefinition {
             name: "EnterPlanMode".into(),
             description:
-                "Enter plan mode for complex tasks requiring exploration and design before coding. \
-Use when: task spans 3+ files, multiple approaches exist, requirements are ambiguous, \
-or restructuring is needed. In plan mode you will explore, design, and write an \
-implementation plan to a file, then call ExitPlanMode to submit it for approval. \
-Do NOT write to any other files while in plan mode."
+                "Enter read-only plan mode for complex tasks (3+ files, ambiguous requirements, restructuring). \
+Explore, design, write a plan, then call ExitPlanMode to submit. Do NOT modify files while in plan mode."
                     .into(),
             input_schema: json!({"type": "object", "properties": {}, "additionalProperties": false}),
         }

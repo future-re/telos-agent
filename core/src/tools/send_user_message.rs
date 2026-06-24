@@ -161,28 +161,10 @@ fn chrono_now() -> String {
     format!("{secs}")
 }
 
-const SEND_USER_MESSAGE_PROMPT: &str = r#"SendUserMessage is your primary output channel for communicating with the user.
+const SEND_USER_MESSAGE_PROMPT: &str = r#"SendUserMessage is your primary output channel.
 
-**This is where your replies go.** Every time the user says something, the reply they
-actually read comes through SendUserMessage. Even for simple acknowledgments like "hi" or
-"thanks", use this tool to respond.
+Use this for all replies to the user. Pattern: acknowledge what you understood → do the work → SendUserMessage with the result. For long work, send checkpoint messages.
 
-**Pattern**: ack → work → result
-1. Acknowledge what you understood
-2. Do the work (tools, exploration, implementation)
-3. SendUserMessage with the result
-
-For longer work, send checkpoint messages so the user knows you're making progress.
-
-**Parameters:**
-- `message` (required): Your message in markdown. Be concise. Use second person ("you").
-- `status` (required): "normal" when replying to user, "proactive" when surfacing
-  unsolicited info (task completed while user away, blocker hit, status update).
-- `attachments` (optional): File paths for images, diffs, logs, or other files the
-  user should see alongside your message.
-
-**Message style:**
-- Lead with the answer, not with meta-commentary
-- Use markdown for structure (headers, lists, code blocks)
-- Reference specific files with paths
-- Be brief — the user can ask for details"#;
+- `status`: "normal" when replying, "proactive" for unsolicited updates (task completed while user away, blocker hit)
+- `message`: markdown. Lead with the answer, be concise, reference file paths.
+- `attachments` (optional): paths for images, diffs, logs."#;

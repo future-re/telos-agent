@@ -59,6 +59,48 @@ impl SkillRegistry {
         self.skills.values().collect()
     }
 
+    /// Retrieve the most relevant skills for a free-text query.
+    pub fn retrieve(&self, query: &str, limit: usize) -> Vec<&Skill> {
+        if limit == 0 {
+            return Vec::new();
+        }
+
+        let query_terms = tokenize(query);
+        if query_terms.is_empty() {
+            return Vec::new();
+        }
+
+        let mut ranked = self
+            .skills
+            .values()
+            .filter_map(|skill| {
+                let score = score_skill(skill, &query_terms);
+                (score > 0).then_some((score, skill))
+            })
+            .collect::<Vec<_>>();
+
+        ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
+        ranked.into_iter().take(limit).map(|(_, skill)| skill).collect()
+    }
+
+    /// Render a compact skill index for lightweight prompt injection.
+    pub fn render_index_for_prompt(&self) -> String {
+        if self.skills.is_empty() {
+            return String::new();
+        }
+
+        let mut lines = vec![
+            "## Skill Index".to_string(),
+            "Use the Skill tool only for skills listed as available or recommended below.".to_string(),
+        ];
+        let mut skills: Vec<&Skill> = self.skills.values().collect();
+        skills.sort_by(|a, b| a.name.cmp(&b.name));
+        for skill in skills {
+            lines.push(format!("- **{}**: {}", skill.name, skill.description));
+        }
+        lines.join("\n")
+    }
+
     /// Render the skills list for injection into the system prompt.
     pub fn render_for_prompt(&self) -> String {
         if self.skills.is_empty() {
@@ -75,4 +117,28 @@ impl SkillRegistry {
         }
         lines.join("\n")
     }
+}
+
+fn tokenize(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .map(|part| part.to_ascii_lowercase())
+        .collect()
+}
+
+fn score_skill(skill: &Skill, query_terms: &[String]) -> usize {
+    let name = skill.name.to_ascii_lowercase();
+    let description = skill.description.to_ascii_lowercase();
+    let when = skill.when_to_use.as_deref().unwrap_or("").to_ascii_lowercase();
+    let body = skill.body.to_ascii_lowercase();
+    let prompt = skill.prompt.to_ascii_lowercase();
+
+    query_terms.iter().fold(0usize, |score, term| {
+        score
+            + if name.contains(term) { 6 } else { 0 }
+            + if description.contains(term) { 4 } else { 0 }
+            + if when.contains(term) { 3 } else { 0 }
+            + if prompt.contains(term) { 2 } else { 0 }
+            + if body.contains(term) { 1 } else { 0 }
+    })
 }

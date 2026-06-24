@@ -195,47 +195,9 @@ all remaining items to `completed` in one call."
 
 const TODO_WRITE_PROMPT: &str = r#"TodoWrite manages your session task list.
 
-**Why use it:**
-- Keeps you organized across multi-step work
-- Shows the user your progress
-- Prevents forgetting steps
-- Demonstrates thoroughness
-
-**Rules (MUST follow):**
+**Rules:**
 1. Exactly ONE item `in_progress` at a time.
-2. Update status in real-time — mark complete IMMEDIATELY after finishing.
-3. Mark new work `in_progress` BEFORE starting.
-4. Remove stale/unnecessary items promptly.
-5. Always include `active_form` (present continuous) for each todo.
-6. Only mark `completed` when FULLY done — no failing tests, no partial work.
-
-**Examples:**
-
-Good:
-```json
-{"todos": [
-  {"content": "Fix authentication bug", "status": "in_progress", "active_form": "Fixing authentication bug"},
-  {"content": "Add unit tests", "status": "pending", "active_form": "Adding unit tests"}
-]}
-```
-
-Bad:
-```json
-{"todos": [
-  {"content": "Fix auth", "status": "in_progress", "active_form": ""},
-  {"content": "Write tests", "status": "in_progress", "active_form": "Writing tests"}
-]}
-// Error: Two items in_progress at once, missing active_form
-```
-
-Good (update after fixing):
-```json
-{"todos": [
-  {"content": "Fix authentication bug", "status": "completed", "active_form": "Fixing authentication bug"},
-  {"content": "Add unit tests", "status": "in_progress", "active_form": "Adding unit tests"}
-]}
-```
-
-**Task merging:**
-When the user gives new instructions, merge them into the existing todo list.
-Call TodoWrite with the COMPLETE desired list (existing + new items)."#;
+2. Update status immediately after finishing — mark new work `in_progress` before starting.
+3. Always include `active_form` (present continuous) for each item.
+4. Only mark `completed` when fully done (no failing tests, no partial work).
+5. Remove stale items promptly. Merge new user instructions into the full list."#;

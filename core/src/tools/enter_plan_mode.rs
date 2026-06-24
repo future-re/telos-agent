@@ -97,49 +97,12 @@ While in plan mode:\n\
 
 const PLAN_MODE_PROMPT: &str = r#"EnterPlanMode puts you in a read-only exploration and design mode.
 
-**When to use EnterPlanMode:**
-Use proactively for:
-- Multi-file changes (3+ files affected)
-- New feature implementation
-- Cross-module refactoring
-- Unclear or ambiguous requirements
-- High-impact restructuring
-- Tasks where the approach isn't obvious
+**When to use:** Multi-file changes (3+ files), new features, cross-module refactoring, ambiguous requirements, or high-impact restructuring. Skip for single-file trivial fixes or when the user shows exactly what to do.
 
-Don't use for:
-- Single-file trivial fixes (typos, one-line changes)
-- Tasks the user explicitly asked you to do immediately
-- When the user is clearly showing you exactly what to do
+**Workflow:**
+1. Call EnterPlanMode → get plan file path
+2. Explore codebase with Read, Grep, Glob, WebSearch
+3. Write plan to plan file using Write (cover: Problem, Context, Approach, Implementation Steps, Affected Files, Risks)
+4. Call ExitPlanMode to submit for approval
 
-**How plan mode works:**
-1. Call EnterPlanMode — you'll get a plan file path
-2. Explore the codebase using Read, Grep, Glob, CodeSearch, WebSearch
-3. Design the solution and write a plan using FileWrite to the plan file
-4. Call ExitPlanMode to submit the plan for approval
-
-**Plan file format (plan.md):**
-```markdown
-## Problem
-[What needs to be solved]
-
-## Context & Constraints
-[Key findings from exploration, dependencies, edge cases]
-
-## Approach
-[Chosen approach with justification; mention alternatives considered]
-
-## Implementation Steps
-1. [Step 1 — specific file, specific change]
-2. [Step 2 — ...]
-...
-
-## Affected Files
-- `path/to/file.rs` — [what changes]
-...
-
-## Risks & Mitigations
-- [Risk]: [How to mitigate]
-```
-
-The plan should be detailed enough that another agent could follow it.
-Remember: explore first, then design, then exit."#;
+Do NOT use file edit or shell while in plan mode. The plan should be detailed enough that another agent could follow it."#;

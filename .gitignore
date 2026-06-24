@@ -16,3 +16,4 @@ cobertura.xml
 .venv-pypi-build/
 dist
 __pycache__/
+desktop/src-tauri/%SystemDrive%/

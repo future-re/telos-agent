@@ -1,22 +1,8 @@
-import {
-  Activity,
-  Bot,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Circle,
-  Folder,
-  KeyRound,
-  Library,
-  Play,
-  Wrench,
-  XCircle,
-} from "lucide-react";
+import { Activity, Bot, Check, Circle, Folder, KeyRound, Library, Wrench } from "lucide-react";
 import { ToolActivity } from "@/chatState";
 import { SettingsSection } from "@/desktopTypes";
 import { RunDisplay } from "@/runDisplay";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -40,7 +26,7 @@ export function RunInspector({
   tools,
 }: RunInspectorProps) {
   return (
-    <aside className="grid h-screen min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-2.5 overflow-hidden border-l bg-muted/40 p-3 max-[920px]:h-auto max-[920px]:min-h-0 max-[920px]:border-l-0 max-[920px]:border-t">
+    <div className="grid h-full min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-2.5 overflow-hidden bg-muted/40 p-3">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-mono text-xs font-bold uppercase text-muted-foreground">运行状态</p>
@@ -123,30 +109,32 @@ export function RunInspector({
         <CardHeader className="flex-row items-center justify-between space-y-0 p-3 pb-2">
           <CardTitle className="flex items-center gap-2 text-sm">
             <Activity className="size-4" aria-hidden="true" />
-            工具活动
+            执行视图
           </CardTitle>
           <span className="font-mono text-xs font-bold uppercase text-muted-foreground">
             {tools.length} 条
           </span>
         </CardHeader>
         <CardContent className="min-h-0 min-w-0 p-3 pt-0">
-          <div className="no-scrollbar h-full min-w-0 overflow-y-auto pr-3">
+          <div className="grid gap-3">
+            <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+              主对话区现在会直接展示执行步骤和结果摘要。这里保留运行概览，不再作为主要日志视图。
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <MetricSummary label="执行中" value={tools.filter((tool) => tool.status === "running").length} />
+              <MetricSummary label="完成" value={tools.filter((tool) => tool.status === "completed").length} />
+              <MetricSummary label="失败" value={tools.filter((tool) => tool.status === "failed").length} />
+            </div>
             {tools.length === 0 ? (
               <div className="flex items-center gap-2 rounded-md border border-dashed bg-muted/40 p-3 text-sm text-muted-foreground">
                 <Wrench className="size-4" aria-hidden="true" />
-                运行任务时，工具调用会显示在这里。
+                当前还没有工具步骤。
               </div>
-            ) : (
-              <div className="grid min-w-0 gap-2">
-                {tools.map((tool) => (
-                  <ToolItem key={tool.id} tool={tool} />
-                ))}
-              </div>
-            )}
+            ) : null}
           </div>
         </CardContent>
       </Card>
-    </aside>
+    </div>
   );
 }
 
@@ -204,58 +192,12 @@ function Metric({
   );
 }
 
-function ToolItem({ tool }: { tool: ToolActivity }) {
-  const hasDetail = Boolean(tool.detail.trim());
-  const statusText = statusLabel(tool.status);
-  const summary = tool.detail || statusText;
-
+function MetricSummary({ label, value }: { label: string; value: number }) {
   return (
-    <details
-      className={cn(
-        "group min-w-0 overflow-hidden rounded-md border bg-background",
-        tool.status === "failed" && "border-red-200 bg-red-50",
-        tool.status === "completed" && "border-emerald-200 bg-emerald-50",
-      )}
-    >
-      <summary className="flex min-h-14 min-w-0 cursor-pointer list-none items-center gap-2 p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background">
-          {tool.status === "failed" ? (
-            <XCircle className="size-4 text-red-600" aria-hidden="true" />
-          ) : tool.status === "completed" ? (
-            <Check className="size-4 text-emerald-700" aria-hidden="true" />
-          ) : (
-            <Play className="size-4 text-muted-foreground" aria-hidden="true" />
-          )}
-        </span>
-        <div className="min-w-0 flex-1 overflow-hidden">
-          <strong className="block min-w-0 truncate text-sm" title={tool.name}>
-            {tool.name}
-          </strong>
-          <span className="block min-w-0 truncate text-xs text-muted-foreground" title={summary}>
-            {summary}
-          </span>
-        </div>
-        <em className="ml-auto shrink-0 text-xs not-italic text-muted-foreground">
-          {statusText}
-        </em>
-        {hasDetail ? (
-          <>
-            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground group-open:hidden" aria-hidden="true" />
-            <ChevronDown className="hidden size-3.5 shrink-0 text-muted-foreground group-open:block" aria-hidden="true" />
-          </>
-        ) : null}
-      </summary>
-      {hasDetail && (
-        <div className="border-t bg-background/70 px-3 py-2">
-          <p className="mb-1 text-[11px] font-semibold uppercase text-muted-foreground">
-            执行详情
-          </p>
-          <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted px-2 py-1.5 text-xs leading-5 text-foreground">
-            {tool.detail}
-          </pre>
-        </div>
-      )}
-    </details>
+    <div className="rounded-md border bg-background px-3 py-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <strong className="mt-1 block font-mono text-lg text-foreground">{value}</strong>
+    </div>
   );
 }
 

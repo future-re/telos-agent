@@ -3,6 +3,19 @@ use crate::prompt::section::{PromptBlock, PromptStability};
 use std::collections::HashMap;
 use tokio::sync::Mutex;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptSectionStat {
+    pub name: String,
+    pub chars: usize,
+    pub stability: PromptStability,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptStats {
+    pub total_chars: usize,
+    pub sections: Vec<PromptSectionStat>,
+}
+
 /// Assembles a system prompt from ordered sections with caching.
 /// Static sections are rendered once and cached; dynamic re-render each time.
 pub struct PromptAssembly {
@@ -52,6 +65,20 @@ impl PromptAssembly {
             }
         }
         blocks
+    }
+
+    pub async fn build_stats(&self) -> PromptStats {
+        let blocks = self.build_blocks().await;
+        let sections = blocks
+            .iter()
+            .map(|block| PromptSectionStat {
+                name: block.name.clone(),
+                chars: block.text.chars().count(),
+                stability: block.stability,
+            })
+            .collect::<Vec<_>>();
+        let total_chars = sections.iter().map(|section| section.chars).sum();
+        PromptStats { total_chars, sections }
     }
 
     async fn render_section(&self, section: &dyn PromptSection) -> String {

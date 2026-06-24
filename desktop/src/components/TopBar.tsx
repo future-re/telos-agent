@@ -2,6 +2,7 @@
   Bot,
   Check,
   Folder,
+  Globe,
   KeyRound,
   Palette,
   PanelRightClose,
@@ -43,6 +44,7 @@ import {
   fontOptions,
   themeOptions,
 } from "@/appearance";
+import { SideWorkspaceTab } from "@/components/SideWorkspace";
 import {
   DesktopSettingsOverrides,
   ResolvedDesktopSettings,
@@ -76,8 +78,10 @@ interface TopBarProps {
   onSettingsOpenChange: (open: boolean) => void;
   onSettingsSectionChange: (section: SettingsSection) => void;
   onSaveApiKey: () => void;
+  onOpenDeepSeek: () => void;
   onTogglePanel: () => void;
   onReset: () => void;
+  sideWorkspaceTab: SideWorkspaceTab;
   turnUsage?: TokenUsage;
   turnModel?: string | null;
 }
@@ -94,6 +98,7 @@ export function TopBar({
   onSettingsOpenChange,
   onSettingsSectionChange,
   onTogglePanel,
+  onOpenDeepSeek,
   overrides,
   panelOpen,
   savingKey,
@@ -101,6 +106,7 @@ export function TopBar({
   settings,
   settingsOpen,
   settingsSection,
+  sideWorkspaceTab,
   todayUsage,
   tokenHistory,
   turnUsage,
@@ -149,9 +155,23 @@ export function TopBar({
           <TooltipTrigger asChild>
             <Button
               type="button"
+              variant={panelOpen && sideWorkspaceTab === "deepseek" ? "default" : "outline"}
+              size="icon"
+              aria-label="打开 DeepSeek 面板"
+              onClick={onOpenDeepSeek}
+            >
+              <Globe className="size-4" aria-hidden="true" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>打开 DeepSeek 面板</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
               variant="outline"
               size="icon"
-              aria-label={panelOpen ? "隐藏运行状态" : "显示运行状态"}
+              aria-label={panelOpen ? "隐藏侧边栏" : "显示侧边栏"}
               onClick={onTogglePanel}
             >
               {panelOpen ? (
@@ -161,7 +181,7 @@ export function TopBar({
               )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{panelOpen ? "隐藏运行状态" : "显示运行状态"}</TooltipContent>
+          <TooltipContent>{panelOpen ? "隐藏侧边栏" : "显示侧边栏"}</TooltipContent>
         </Tooltip>
         <Button type="button" variant="outline" onClick={onReset}>
           <Plus className="size-4" aria-hidden="true" />

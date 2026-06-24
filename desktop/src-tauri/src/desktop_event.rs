@@ -1,4 +1,5 @@
 use serde::Serialize;
+use serde_json::Value;
 use telos_agent::TurnEvent;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -19,6 +20,7 @@ pub struct DesktopEvent {
     pub detail: Option<String>,
     pub is_error: Option<bool>,
     pub message: Option<String>,
+    pub tool_result_content: Option<Value>,
 }
 
 impl DesktopEvent {
@@ -39,6 +41,7 @@ impl DesktopEvent {
             detail: None,
             is_error: None,
             message: None,
+            tool_result_content: None,
         }
     }
 }
@@ -125,6 +128,7 @@ pub fn map_turn_event(session_id: &str, event: TurnEvent) -> DesktopEvent {
             is_error: Some(true),
             ..DesktopEvent::new("token_budget_exceeded")
         },
+        TurnEvent::ToolResult(_) => DesktopEvent::new("ignored"),
         _ => DesktopEvent::new("ignored"),
     }
 }

@@ -73,6 +73,18 @@ impl AgentSession {
                 && let Some(assembly) = &self.config.prompt_assembly
             {
                 let blocks = assembly.build_blocks().await;
+                let section_stats = blocks
+                    .iter()
+                    .map(|block| format!("{}:{} chars", block.name, block.text.chars().count()))
+                    .collect::<Vec<_>>();
+                let total_chars: usize = blocks.iter().map(|block| block.text.chars().count()).sum();
+                info!(
+                    prompt_profile = ?self.config.prompt_profile,
+                    prompt_sections = blocks.len(),
+                    prompt_total_chars = total_chars,
+                    prompt_section_stats = ?section_stats,
+                    "built system prompt"
+                );
                 self.cached_system_prompt =
                     Some(blocks.into_iter().map(|b| b.text).collect::<Vec<_>>().join("\n\n"));
             }

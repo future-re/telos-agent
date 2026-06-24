@@ -227,6 +227,34 @@ fn skill_registry_render_for_prompt() {
 }
 
 #[test]
+fn skill_registry_retrieve_prefers_relevant_skills() {
+    use telos_agent::skills::{Skill, SkillRegistry, SkillSource};
+
+    let mut reg = SkillRegistry::new();
+    reg.register(Skill {
+        name: "rust-compile".into(),
+        description: "Fix Rust compile errors".into(),
+        when_to_use: Some("When cargo check fails".into()),
+        prompt: "Prompt".into(),
+        arguments: vec![],
+        body: "cargo check rust compiler".into(),
+        source: SkillSource::Bundled,
+    });
+    reg.register(Skill {
+        name: "css-layout".into(),
+        description: "Adjust CSS layout".into(),
+        when_to_use: Some("When spacing is off".into()),
+        prompt: "Prompt".into(),
+        arguments: vec![],
+        body: "flex grid css".into(),
+        source: SkillSource::Bundled,
+    });
+
+    let matches = reg.retrieve("rust compile error", 2);
+    assert_eq!(matches.first().map(|skill| skill.name.as_str()), Some("rust-compile"));
+}
+
+#[test]
 fn skill_registry_empty_renders_empty_string() {
     use telos_agent::skills::SkillRegistry;
     let reg = SkillRegistry::new();
@@ -345,7 +373,7 @@ async fn builtin_prompt_sections_render_without_error() {
 }
 
 #[tokio::test]
-async fn default_coding_assembly_renders_claude_style_sections() {
+async fn default_coding_assembly_is_minimal() {
     use telos_agent::prompt::default_coding_assembly;
     use telos_agent::tool::ToolRegistry;
 
@@ -361,15 +389,51 @@ async fn default_coding_assembly_renders_claude_style_sections() {
     assert!(result.contains("You are telos-agent"));
     assert!(result.contains("IMPORTANT: Assist with authorized security testing"));
     assert!(result.contains("# System"));
+    assert!(result.contains("# Executing actions with care"));
+    assert!(result.contains("Today's date"));
+    assert!(result.contains("Working directory"));
+    assert!(!result.contains("# Tone and style"));
+    assert!(!result.contains("# Doing tasks"));
+    assert!(!result.contains("# Using your tools"));
+}
+
+#[tokio::test]
+async fn full_coding_assembly_renders_extended_sections() {
+    use telos_agent::prompt::default_coding_assembly_for_profile;
+    use telos_agent::tool::ToolRegistry;
+
+    let tools = std::sync::Arc::new(ToolRegistry::new());
+    let assembly = default_coding_assembly_for_profile(
+        tools,
+        std::env::current_dir().unwrap(),
+        None,
+        telos_agent::TaskPath::default(),
+        telos_agent::PromptProfile::Full,
+    );
+    let result = assembly.build().await;
+
     assert!(result.contains("# Tone and style"));
     assert!(result.contains("# Output efficiency"));
     assert!(result.contains("# Doing tasks"));
-    assert!(result.contains("# Executing actions with care"));
     assert!(result.contains("# Using your tools"));
     assert!(result.contains("Do NOT use the Bash tool to run commands"));
-    assert!(result.contains("You can call multiple tools in a single response"));
-    assert!(result.contains("Today's date"));
-    assert!(result.contains("Working directory"));
+}
+
+#[tokio::test]
+async fn prompt_assembly_build_stats_reports_section_sizes() {
+    use telos_agent::prompt::builtins::{CwdSection, DateSection, IdentitySection};
+    use telos_agent::prompt::PromptAssembly;
+
+    let mut assembly = PromptAssembly::new();
+    assembly.add(IdentitySection::new(None));
+    assembly.add(DateSection);
+    assembly.add(CwdSection::new(std::env::current_dir().unwrap()));
+
+    let stats = assembly.build_stats().await;
+    assert_eq!(stats.sections.len(), 3);
+    assert!(stats.total_chars > 0);
+    assert!(stats.sections.iter().any(|section| section.name == "identity"));
+    assert!(stats.sections.iter().all(|section| section.chars > 0));
 }
 
 #[tokio::test]

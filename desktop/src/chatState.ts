@@ -1,4 +1,4 @@
-export type MessageRole = "user" | "assistant" | "thinking" | "system";
+export type MessageRole = "user" | "assistant" | "thinking" | "system" | "tool";
 
 export interface ChatMessage {
   id: string;
@@ -6,6 +6,11 @@ export interface ChatMessage {
   content: string;
   turnId?: string;
   streaming?: boolean;
+  toolName?: string;
+  toolStatus?: ToolStatus;
+  isError?: boolean;
+  toolDetail?: string;
+  toolResultContent?: unknown;
 }
 
 export interface TokenUsage {
@@ -48,6 +53,7 @@ export interface TelosEvent {
   detail?: string;
   isError?: boolean;
   message?: string;
+  toolResultContent?: unknown;
 }
 
 export interface ChatState {
@@ -86,43 +92,85 @@ export function reduceTelosEvent(state: ChatState, event: TelosEvent): ChatState
     case "thinking_delta":
       return appendStreamingMessage(state, "thinking", event.text ?? "", "thinking");
     case "tool_call":
-      return {
-        ...state,
-        status: event.detail || event.toolName || "运行工具",
-        tools: upsertTool(state.tools, {
-          id: event.toolCallId ?? `tool-${state.tools.length + 1}`,
-          name: event.toolName ?? "Tool",
-          detail: event.detail ?? "",
-          status: "running",
-          isError: false,
-        }),
-      };
+      return appendOrUpdateToolMessage(
+        {
+          ...state,
+          status: event.detail || event.toolName || "运行工具",
+          tools: upsertTool(state.tools, {
+            id: event.toolCallId ?? `tool-${state.tools.length + 1}`,
+            name: event.toolName ?? "Tool",
+            detail: event.detail ?? "",
+            status: "running",
+            isError: false,
+          }),
+        },
+        event.toolCallId ?? `tool-${state.tools.length + 1}`,
+        event.toolName ?? "Tool",
+        event.detail ?? "",
+        "running",
+        false,
+        undefined,
+      );
     case "tool_progress":
-      return {
-        ...state,
-        status: event.message ?? state.status,
-        tools: state.tools.map((tool) =>
-          tool.id === event.toolCallId
-            ? { ...tool, detail: event.message ?? tool.detail }
-            : tool,
-        ),
-      };
+      return appendOrUpdateToolMessage(
+        {
+          ...state,
+          status: event.message ?? state.status,
+          tools: state.tools.map((tool) =>
+            tool.id === event.toolCallId
+              ? { ...tool, detail: event.message ?? tool.detail }
+              : tool,
+          ),
+        },
+        event.toolCallId ?? `tool-${state.tools.length + 1}`,
+        event.toolName ??
+          state.tools.find((tool) => tool.id === event.toolCallId)?.name ??
+          "Tool",
+        event.message ?? state.tools.find((tool) => tool.id === event.toolCallId)?.detail ?? "",
+        "running",
+        false,
+        state.messages.find((message) => message.id === `tool-message-${event.toolCallId}`)?.toolResultContent,
+      );
     case "tool_completed":
-      return {
-        ...state,
-        status: event.isError ? "tool failed" : "tool completed",
-        tools: state.tools.map((tool) =>
-          tool.id === event.toolCallId
-            ? {
-                ...tool,
-                name: event.toolName ?? tool.name,
-                detail: event.detail ?? tool.detail,
-                status: event.isError ? "failed" : "completed",
-                isError: Boolean(event.isError),
-              }
-            : tool,
-        ),
-      };
+      return appendOrUpdateToolMessage(
+        {
+          ...state,
+          status: event.isError ? "tool failed" : "tool completed",
+          tools: state.tools.map((tool) =>
+            tool.id === event.toolCallId
+              ? {
+                  ...tool,
+                  name: event.toolName ?? tool.name,
+                  detail: event.detail ?? tool.detail,
+                  status: event.isError ? "failed" : "completed",
+                  isError: Boolean(event.isError),
+                }
+              : tool,
+          ),
+        },
+        event.toolCallId ?? `tool-${state.tools.length + 1}`,
+        event.toolName ??
+          state.tools.find((tool) => tool.id === event.toolCallId)?.name ??
+          "Tool",
+        event.detail ?? state.tools.find((tool) => tool.id === event.toolCallId)?.detail ?? "",
+        event.isError ? "failed" : "completed",
+        Boolean(event.isError),
+        state.messages.find((message) => message.id === `tool-message-${event.toolCallId}`)?.toolResultContent,
+      );
+    case "tool_result":
+      return appendOrUpdateToolMessage(
+        state,
+        event.toolCallId ?? `tool-${state.tools.length + 1}`,
+        event.toolName ??
+          state.tools.find((tool) => tool.id === event.toolCallId)?.name ??
+          "Tool",
+        state.tools.find((tool) => tool.id === event.toolCallId)?.detail ?? "",
+        state.messages.find((message) => message.id === `tool-message-${event.toolCallId}`)?.toolStatus ??
+          state.tools.find((tool) => tool.id === event.toolCallId)?.status ??
+          "running",
+        Boolean(event.isError),
+        event.toolResultContent,
+      );
     case "provider_usage":
       return applyProviderUsage(state, event);
     case "turn_finished":
@@ -158,11 +206,9 @@ export function reduceTelosEvent(state: ChatState, event: TelosEvent): ChatState
         status: event.message ?? "审批已处理",
       };
     case "provider_retry":
+      return appendSystemEvent(state, event.message ?? "provider retry");
     case "token_budget_exceeded":
-      return {
-        ...state,
-        status: event.message ?? state.status,
-      };
+      return appendSystemEvent(state, event.message ?? "token budget exceeded");
     default:
       return state;
   }
@@ -221,6 +267,66 @@ function appendStreamingMessage(
   };
 }
 
+function appendOrUpdateToolMessage(
+  state: ChatState,
+  toolCallId: string,
+  toolName: string,
+  detail: string,
+  toolStatus: ToolStatus,
+  isError: boolean,
+  toolResultContent: unknown,
+): ChatState {
+  const messageId = `tool-message-${toolCallId}`;
+  const summary = formatToolMessage(toolName, detail, toolStatus, toolResultContent);
+  const existingIndex = state.messages.findIndex((message) => message.id === messageId);
+  const nextMessage: ChatMessage = {
+    id: messageId,
+    role: "tool",
+    content: summary,
+    turnId: state.currentTurnId,
+    streaming: toolStatus === "running",
+    toolName,
+    toolStatus,
+    isError,
+    toolDetail: detail,
+    toolResultContent,
+  };
+
+  if (existingIndex === -1) {
+    return {
+      ...state,
+      messages: [...state.messages, nextMessage],
+    };
+  }
+
+  return {
+    ...state,
+    messages: state.messages.map((message, index) =>
+      index === existingIndex ? { ...message, ...nextMessage } : message,
+    ),
+  };
+}
+
+function appendSystemEvent(state: ChatState, content: string): ChatState {
+  if (!content.trim()) {
+    return state;
+  }
+
+  return {
+    ...state,
+    status: content,
+    messages: [
+      ...state.messages,
+      {
+        id: `system-${nextMessageId++}`,
+        role: "system",
+        content,
+        turnId: state.currentTurnId,
+      },
+    ],
+  };
+}
+
 function applyProviderUsage(state: ChatState, event: TelosEvent): ChatState {
   if (event.inputTokens === undefined || event.outputTokens === undefined) {
     return state;
@@ -271,4 +377,53 @@ function upsertTool(tools: ToolActivity[], next: ToolActivity): ToolActivity[] {
     return [...tools, next];
   }
   return tools.map((tool, current) => (current === index ? next : tool));
+}
+
+function formatToolMessage(
+  toolName: string,
+  detail: string,
+  status: ToolStatus,
+  toolResultContent: unknown,
+): string {
+  const renderedResult = summarizeToolResult(toolName, toolResultContent);
+  if (renderedResult) {
+    return renderedResult;
+  }
+  const title =
+    status === "completed"
+      ? `Completed ${toolName}`
+      : status === "failed"
+        ? `Failed ${toolName}`
+        : `Running ${toolName}`;
+  const trimmed = detail.trim();
+  return trimmed ? `${title}\n${trimmed}` : title;
+}
+
+function summarizeToolResult(toolName: string, toolResultContent: unknown): string | undefined {
+  if (!toolResultContent || typeof toolResultContent !== "object") {
+    return undefined;
+  }
+
+  const result = toolResultContent as Record<string, unknown>;
+  const normalizedName = toolName.trim().toLowerCase();
+
+  if ((normalizedName === "bash" || normalizedName === "powershell") && typeof result.stdout === "string") {
+    return result.stdout.trim() || (typeof result.stderr === "string" ? result.stderr.trim() : "");
+  }
+
+  if ((normalizedName === "read" || normalizedName === "write" || normalizedName === "edit") && typeof result.file_path === "string") {
+    return String(result.file_path);
+  }
+
+  if (typeof result.message === "string") {
+    return result.message;
+  }
+  if (typeof result.output === "string") {
+    return result.output;
+  }
+  if (typeof result.content === "string") {
+    return result.content;
+  }
+
+  return undefined;
 }

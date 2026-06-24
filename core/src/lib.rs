@@ -205,8 +205,8 @@ pub use provider::{
 };
 // Runtime — the agent session and the streaming turn loop.
 pub use runtime::{
-    AgentSession, MemoryInjector, TurnEvent, TurnInputReceiver, TurnInputSender, TurnResult,
-    turn_input_channel,
+    AgentSession, MemoryInjector, SkillInjector, TurnEvent, TurnInputReceiver, TurnInputSender,
+    TurnResult, turn_input_channel,
 };
 // Skills — user-defined slash-commands loaded from markdown files.
 pub use skills::{Skill, SkillArg, SkillLoader, SkillRegistry, SkillSource};
@@ -230,9 +230,9 @@ pub use plugin::{BUILTIN_MARKETPLACE, PluginError, PluginId, PluginPromptSection
 // Prompt system — modular, cache-aware construction of the system prompt.
 pub use prompt::{
     CwdSection, DateSection, GitStatusSection, IdentitySection, McpSection, MemorySection,
-    ProfileSection, PromptAssembly, PromptSection, PromptStability, SafetySection,
-    ShellAwareToolUsageSection, SkillsSection, TaskGuidanceSection, ToneStyleSection,
-    ToolUsageSection, ToolsSection,
+    ProfileSection, PromptAssembly, PromptProfile, PromptSection, PromptSectionStat, PromptStats,
+    PromptStability, SafetySection, ShellAwareToolUsageSection, SkillsSection,
+    TaskGuidanceSection, ToneStyleSection, ToolUsageSection, ToolsSection,
 };
 // Tool abstraction — the trait every callable capability implements, plus its registry.
 pub use tool::validate::{ValidationError, ValidationResult, validate_arguments};

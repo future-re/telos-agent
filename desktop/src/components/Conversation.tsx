@@ -1,5 +1,15 @@
-﻿import { useEffect, useMemo, useRef } from "react";
-import { KeyRound, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useRef } from "react";
+import {
+  Check,
+  Clock3,
+  FilePenLine,
+  FileSearch,
+  FileText,
+  KeyRound,
+  Sparkles,
+  TerminalSquare,
+  XCircle,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChatMessage, TokenUsage } from "@/chatState";
@@ -25,6 +35,7 @@ const roleLabels: Record<ConversationTurn["role"], string> = {
   user: "你",
   assistant: "telos",
   system: "系统",
+  tool: "执行",
 };
 
 export function Conversation({
@@ -107,6 +118,53 @@ function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsa
     );
   }
 
+  if (turn.role === "tool") {
+    return (
+      <article className="min-w-0">
+        <div
+          className={cn(
+            "rounded-xl border bg-background/90 px-4 py-3 shadow-sm",
+            turn.toolStatus === "completed" && "border-emerald-200",
+            turn.toolStatus === "failed" && "border-red-200",
+          )}
+        >
+          <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
+            <span className="flex size-7 items-center justify-center rounded-md border bg-muted/30">
+              {turn.toolStatus === "completed" ? (
+                <Check className="size-4 text-emerald-600" aria-hidden="true" />
+              ) : turn.toolStatus === "failed" ? (
+                <XCircle className="size-4 text-red-600" aria-hidden="true" />
+              ) : (
+                <Clock3 className="size-4 text-muted-foreground" aria-hidden="true" />
+              )}
+            </span>
+            <span className="flex items-center gap-2">
+              <TerminalSquare className="size-4" aria-hidden="true" />
+              {turn.toolName ?? "工具执行"}
+            </span>
+            <span
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-[11px]",
+                turn.toolStatus === "completed" &&
+                  "border-emerald-200 bg-emerald-50 text-emerald-700",
+                turn.toolStatus === "failed" && "border-red-200 bg-red-50 text-red-700",
+                turn.toolStatus === "running" && "border-slate-200 bg-slate-50 text-slate-700",
+              )}
+            >
+              {turn.toolStatus === "completed"
+                ? "完成"
+                : turn.toolStatus === "failed"
+                  ? "失败"
+                  : "执行中"}
+            </span>
+            {turn.streaming ? <span className="thinking-dots" aria-label="执行中" /> : null}
+          </div>
+          <ToolMessageBody turn={turn} />
+        </div>
+      </article>
+    );
+  }
+
   const assistantTurn = turn;
 
   return (
@@ -114,17 +172,19 @@ function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsa
       <div className="min-w-0 border-l pl-4">
         <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
           <span>{roleLabels.assistant}</span>
-          {assistantTurn.streaming && (
-            <span className="thinking-dots" aria-label="正在生成" />
-          )}
+          {assistantTurn.streaming && <span className="thinking-dots" aria-label="正在生成" />}
           {usage && (
             <span className="inline-flex items-center gap-2 rounded-full border bg-background px-2 py-0.5 font-mono text-[11px]">
               <span>{formatTokenCount(usage.totalTokens)} tokens</span>
               {usage.promptCacheHitTokens !== undefined && (
-                <span className="text-green-600">hit {formatTokenCount(usage.promptCacheHitTokens)}</span>
+                <span className="text-green-600">
+                  hit {formatTokenCount(usage.promptCacheHitTokens)}
+                </span>
               )}
               {usage.promptCacheMissTokens !== undefined && (
-                <span className="text-amber-600">miss {formatTokenCount(usage.promptCacheMissTokens)}</span>
+                <span className="text-amber-600">
+                  miss {formatTokenCount(usage.promptCacheMissTokens)}
+                </span>
               )}
               {(() => {
                 const cost = estimateCost(usage.model, usage);
@@ -153,6 +213,241 @@ function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsa
       </div>
     </article>
   );
+}
+
+function ToolMessageBody({ turn }: { turn: Extract<ConversationTurn, { role: "tool" }> }) {
+  const view = buildToolMessageView(turn);
+
+  if (!view) {
+    return (
+      <MarkdownContent
+        className="markdown-body text-[14px] leading-7 text-foreground"
+        content={turn.content}
+      />
+    );
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex min-w-0 items-start gap-3 rounded-lg border bg-muted/20 px-3 py-3">
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
+          <view.icon className="size-4" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <strong className="block text-[14px] leading-6 text-foreground">{view.title}</strong>
+          {view.subtitle ? (
+            <p className="mt-0.5 break-words text-xs leading-5 text-muted-foreground">
+              {view.subtitle}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      {view.command ? <ToolCodeBlock label="命令" content={view.command} /> : null}
+
+      {view.paths.length > 0 ? (
+        <div className="grid gap-2">
+          {view.paths.map((path) => (
+            <div
+              key={path}
+              className="rounded-md border bg-background px-3 py-2 font-mono text-xs leading-5 text-foreground"
+            >
+              {path}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {view.output ? <ToolCodeBlock label={view.outputLabel} content={view.output} /> : null}
+
+      {view.notes.length > 0 ? (
+        <div className="grid gap-2">
+          {view.notes.map((note, index) => (
+            <div
+              key={`${note}-${index}`}
+              className="rounded-md border bg-background px-3 py-2 text-sm leading-6 text-foreground"
+            >
+              {note}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {view.fallback && !view.output ? (
+        <MarkdownContent
+          className="markdown-body text-[14px] leading-7 text-foreground"
+          content={view.fallback}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ToolCodeBlock({ label, content }: { label: string; content: string }) {
+  return (
+    <div className="grid gap-1.5">
+      <span className="text-[11px] font-medium uppercase text-muted-foreground">{label}</span>
+      <pre className="max-h-80 overflow-auto rounded-lg border bg-slate-950 px-3 py-3 font-mono text-xs leading-5 text-slate-50">
+        {content}
+      </pre>
+    </div>
+  );
+}
+
+type ToolMessageView = {
+  icon: typeof TerminalSquare;
+  title: string;
+  subtitle?: string;
+  command?: string;
+  paths: string[];
+  output?: string;
+  outputLabel: string;
+  notes: string[];
+  fallback?: string;
+};
+
+function buildToolMessageView(
+  turn: Extract<ConversationTurn, { role: "tool" }>,
+): ToolMessageView | undefined {
+  const toolName = (turn.toolName ?? "").trim();
+  const detail = (turn.toolDetail ?? "").trim();
+  const result = asObject(turn.toolResultContent);
+  const normalizedName = toolName.toLowerCase();
+
+  if (normalizedName === "bash" || normalizedName === "powershell") {
+    const stdout = stringField(result, "stdout");
+    const stderr = stringField(result, "stderr");
+    const command = detail || undefined;
+    const title = command ? `Ran ${command}` : `Ran ${toolName || "command"}`;
+    const output = [stdout, stderr].filter((item) => item && item.trim()).join("\n\n");
+    return {
+      icon: TerminalSquare,
+      title,
+      subtitle: command ? undefined : detail || undefined,
+      command,
+      paths: [],
+      output: output || (turn.toolStatus === "running" ? turn.content : undefined),
+      outputLabel: stderr && !stdout ? "错误输出" : "输出",
+      notes: collectToolNotes(result),
+      fallback: turn.content,
+    };
+  }
+
+  if (normalizedName === "edit") {
+    const path = stringField(result, "file_path") ?? detail;
+    return {
+      icon: FilePenLine,
+      title: path ? `Edited ${path}` : "Edited file",
+      subtitle: boolField(result, "replace_all") ? "Applied replace_all" : undefined,
+      command: undefined,
+      paths: path ? [path] : [],
+      output: undefined,
+      outputLabel: "结果",
+      notes: collectToolNotes(result),
+      fallback: turn.content,
+    };
+  }
+
+  if (normalizedName === "write") {
+    const path = stringField(result, "file_path") ?? detail;
+    return {
+      icon: FileText,
+      title: path ? `Wrote ${path}` : "Wrote file",
+      subtitle: undefined,
+      command: undefined,
+      paths: path ? [path] : [],
+      output: undefined,
+      outputLabel: "结果",
+      notes: collectToolNotes(result),
+      fallback: turn.content,
+    };
+  }
+
+  if (normalizedName === "read") {
+    const path = stringField(result, "file_path") ?? detail;
+    return {
+      icon: FileSearch,
+      title: path ? `Read ${path}` : "Read file",
+      subtitle: lineRangeSummary(result),
+      command: undefined,
+      paths: path ? [path] : [],
+      output: stringField(result, "content") ?? turn.content,
+      outputLabel: "文件内容",
+      notes: collectToolNotes(result),
+      fallback: turn.content,
+    };
+  }
+
+  return undefined;
+}
+
+function asObject(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function stringField(
+  value: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
+  return typeof value?.[key] === "string" ? (value[key] as string) : undefined;
+}
+
+function boolField(value: Record<string, unknown> | undefined, key: string): boolean {
+  return value?.[key] === true;
+}
+
+function numberField(
+  value: Record<string, unknown> | undefined,
+  key: string,
+): number | undefined {
+  return typeof value?.[key] === "number" ? (value[key] as number) : undefined;
+}
+
+function lineRangeSummary(value: Record<string, unknown> | undefined): string | undefined {
+  const startLine = numberField(value, "start_line");
+  const totalLines = numberField(value, "total_lines");
+  if (startLine === undefined && totalLines === undefined) {
+    return undefined;
+  }
+  if (startLine !== undefined && totalLines !== undefined) {
+    return `From line ${startLine} · ${totalLines} lines total`;
+  }
+  if (startLine !== undefined) {
+    return `From line ${startLine}`;
+  }
+  return `${totalLines} lines total`;
+}
+
+function collectToolNotes(value: Record<string, unknown> | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+
+  const skip = new Set([
+    "stdout",
+    "stderr",
+    "content",
+    "file_path",
+    "path",
+    "start_line",
+    "total_lines",
+    "replace_all",
+  ]);
+
+  return Object.entries(value)
+    .filter(([key]) => !skip.has(key))
+    .flatMap(([key, entryValue]) => {
+      if (
+        typeof entryValue === "string" ||
+        typeof entryValue === "number" ||
+        typeof entryValue === "boolean"
+      ) {
+        return [`${key}: ${String(entryValue)}`];
+      }
+      return [];
+    });
 }
 
 function MarkdownContent({ className, content }: { className?: string; content: string }) {
@@ -212,7 +507,11 @@ function OnboardingCard({
             placeholder="DeepSeek API Key"
           />
         </div>
-        <Button type="button" onClick={onConfigureApiKey} disabled={savingKey || !apiKeyDraft.trim()}>
+        <Button
+          type="button"
+          onClick={onConfigureApiKey}
+          disabled={savingKey || !apiKeyDraft.trim()}
+        >
           保存并开始
         </Button>
       </div>

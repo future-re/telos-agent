@@ -47,6 +47,9 @@ pub struct AgentSession {
     /// Fingerprint of the last injected memory reminder, used to skip
     /// identical re-injections that only add prompt churn.
     pub(super) last_memory_injection_fingerprint: Option<u64>,
+    /// Fingerprint of the last injected skill reminder, used to skip
+    /// identical re-injections that only add prompt churn.
+    pub(super) last_skill_injection_fingerprint: Option<u64>,
     /// Whether persistent memory changed since the last effective injection.
     pub(super) memory_state_dirty: bool,
     /// Tracks whether the current turn already injected memory context.
@@ -80,6 +83,7 @@ impl AgentSession {
             consecutive_compaction_failures: 0,
             cached_system_prompt: None,
             last_memory_injection_fingerprint: None,
+            last_skill_injection_fingerprint: None,
             memory_state_dirty: false,
             current_turn_memory_injected: false,
             current_turn_memory_mutation_notified: false,
@@ -114,6 +118,7 @@ impl AgentSession {
         self.read_file_state = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
         self.cached_system_prompt = None;
         self.last_memory_injection_fingerprint = None;
+        self.last_skill_injection_fingerprint = None;
         self.memory_state_dirty = false;
         self.current_turn_memory_injected = false;
         self.current_turn_memory_mutation_notified = false;
@@ -179,11 +184,12 @@ impl AgentSession {
             // usage instructions.
             if self.config.prompt_assembly.is_none() && self.config.base_system_prompt.is_none() {
                 self.config.prompt_assembly = Some(Arc::new(
-                    crate::prompt::default_coding_assembly(
+                    crate::prompt::default_coding_assembly_for_profile(
                         Arc::new(tools.clone()),
                         self.config.cwd.clone(),
                         self.config.skill_registry.clone(),
                         self.config.path,
+                        self.config.prompt_profile,
                     ),
                 ));
             }
@@ -299,6 +305,32 @@ impl AgentSession {
                         );
                     }
                     self.memory_state_dirty = false;
+                }
+
+                if iterations == 1
+                    && self.config.prompt_profile == crate::prompt::PromptProfile::Minimal
+                    && let Some(injector) = &self.config.skill_injector
+                    && let Some(injection) = injector.inject_for_query(&user_input_for_memory)
+                {
+                    let unchanged =
+                        self.last_skill_injection_fingerprint == Some(injection.fingerprint);
+                    if !unchanged {
+                        debug!(
+                            session_id = %self.session_id,
+                            turn_id,
+                            fingerprint = injection.fingerprint,
+                            "injecting skill discovery reminder"
+                        );
+                        self.push_system_reminder(injection.reminder);
+                        self.last_skill_injection_fingerprint = Some(injection.fingerprint);
+                    } else {
+                        debug!(
+                            session_id = %self.session_id,
+                            turn_id,
+                            fingerprint = injection.fingerprint,
+                            "skipping unchanged skill discovery reminder"
+                        );
+                    }
                 }
 
                 let hint = if force_thinking_next_iteration {

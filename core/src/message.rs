@@ -200,6 +200,9 @@ pub enum SystemReminder {
     /// Dynamic memory injection — relevant memories scored against the
     /// current user query are presented as a system reminder.
     MemoryInjection { content: String },
+    /// Dynamic skill discovery — top matching skills are suggested for
+    /// the current user query without loading the full skill catalog.
+    SkillDiscovery { content: String },
 }
 
 impl SystemReminder {
@@ -222,6 +225,9 @@ impl SystemReminder {
                 format!("Tool `{tool_name}` reported: {note}")
             }
             SystemReminder::MemoryInjection { content } => {
+                content.clone()
+            }
+            SystemReminder::SkillDiscovery { content } => {
                 content.clone()
             }
         };

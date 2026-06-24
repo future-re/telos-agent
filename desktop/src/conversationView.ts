@@ -17,6 +17,18 @@ export type ConversationTurn =
     }
   | {
       id: string;
+      role: "tool";
+      turnId?: string;
+      content: string;
+      streaming?: boolean;
+      toolName?: string;
+      toolStatus?: "running" | "completed" | "failed";
+      isError?: boolean;
+      toolDetail?: string;
+      toolResultContent?: unknown;
+    }
+  | {
+      id: string;
       role: "assistant";
       turnId?: string;
       content: string;
@@ -84,6 +96,15 @@ export function groupConversationMessages(messages: ChatMessage[]): Conversation
       ...(message.turnId ? { turnId: message.turnId } : {}),
       content: message.content,
       streaming: message.streaming,
+      ...(message.role === "tool"
+        ? {
+            toolName: message.toolName,
+            toolStatus: message.toolStatus,
+            isError: message.isError,
+            toolDetail: message.toolDetail,
+            toolResultContent: message.toolResultContent,
+          }
+        : {}),
     });
   }
 

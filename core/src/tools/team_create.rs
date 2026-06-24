@@ -157,24 +157,8 @@ fn short_id() -> String {
 
 const TEAM_CREATE_PROMPT: &str = r#"TeamCreate initializes a multi-agent collaboration team.
 
-**When to use:**
-- The user asks for team/swarm/collaboration/parallel work
-- The task is complex enough for parallel decomposition (3+ independent subtasks)
-- You need different agent types working on different aspects (explorer + implementer + verifier)
+Use when the task has 3+ independent subtasks or when different agent types should work in parallel.
 
-**Workflow:**
-1. TeamCreate → initialize the team
-2. TaskCreate (with team context) → create tasks for the shared task list
-3. Subagent tool → spawn teammates, pointing them at the team's task list
-4. Teammates claim tasks, work independently, communicate via SendUserMessage
-5. TeamDelete → when all work is complete
+Workflow: TeamCreate → create tasks → spawn teammates via Subagent → collect results → TeamDelete.
 
-**Choosing agent_type for teammates:**
-- 'Explore' — for codebase research, dependency analysis
-- 'general-purpose' — for implementation, bug fixes
-- 'Plan' — for architecture decisions
-- 'Debug' — for debugging specific issues
-- Read-only tools for explorers, full tools for implementers
-
-**Important:** You can only manage ONE team at a time. TeamDelete the current team
-before creating a new one."#;
+Agent types: 'Explore' (codebase research), 'general-purpose' (implementation), 'Plan' (architecture), 'Debug' (debugging). Only ONE team at a time."#;

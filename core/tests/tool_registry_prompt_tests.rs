@@ -143,7 +143,7 @@ async fn tool_prompts_section_renders_registered_prompts() {
 }
 
 #[test]
-fn default_assembly_includes_tool_prompts() {
+fn default_assembly_is_minimal_by_default() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
         let mut tools = ToolRegistry::new();
@@ -155,8 +155,31 @@ fn default_assembly_includes_tool_prompts() {
             telos_agent::TaskPath::default(),
         );
         let text = assembly.build().await;
+        assert!(!text.contains("## Tool-specific guidance"));
+        assert!(!text.contains("## Available Tools"));
+        assert!(!text.contains("Use the PowerShell tool for shell commands"));
+        assert!(!text.contains("### PowerShell"));
+        assert!(text.contains("You are telos-agent"));
+        assert!(text.contains("Executing actions with care"));
+    });
+}
+
+#[test]
+fn full_assembly_includes_tool_prompts() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let mut tools = ToolRegistry::new();
+        register_core_tools_with_shell(&mut tools, DefaultShell::PowerShell);
+        let assembly = telos_agent::prompt::default_coding_assembly_for_profile(
+            Arc::new(tools),
+            std::env::current_dir().unwrap(),
+            None,
+            telos_agent::TaskPath::default(),
+            telos_agent::PromptProfile::Full,
+        );
+        let text = assembly.build().await;
         assert!(text.contains("## Tool-specific guidance"));
-        assert!(text.contains("Use the PowerShell tool for shell commands"));
+        assert!(text.contains("## Available Tools"));
         assert!(text.contains("Use PowerShell syntax, not Bash syntax"));
         assert!(text.contains("### PowerShell"));
         assert!(text.contains("### Read"));

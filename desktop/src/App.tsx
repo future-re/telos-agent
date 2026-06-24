@@ -20,7 +20,7 @@ import { AgentStatusRail } from "@/components/AgentStatusRail";
 import { Composer } from "@/components/Composer";
 import { Conversation } from "@/components/Conversation";
 import { MemoryOverviewDialog } from "@/components/MemoryOverviewDialog";
-import { RunInspector } from "@/components/RunInspector";
+import { SideWorkspace, SideWorkspaceTab } from "@/components/SideWorkspace";
 import { TopBar } from "@/components/TopBar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
@@ -115,6 +115,10 @@ const fallbackSettings: ResolvedDesktopSettings = {
   maxIterations: 30,
 };
 
+const SIDE_WORKSPACE_MIN_WIDTH = 360;
+const SIDE_WORKSPACE_MAX_WIDTH = 760;
+const SIDE_WORKSPACE_DEFAULT_WIDTH = 420;
+
 export function App() {
   const initialSession = useMemo(() => createConversationSession("session-1"), []);
   const [sessions, setSessions] = useState<ConversationSession[]>([initialSession]);
@@ -126,6 +130,9 @@ export function App() {
   const [savingKey, setSavingKey] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [sideWorkspaceTab, setSideWorkspaceTab] = useState<SideWorkspaceTab>("run");
+  const [sideWorkspaceWidth, setSideWorkspaceWidth] = useState(SIDE_WORKSPACE_DEFAULT_WIDTH);
+  const [resizingSideWorkspace, setResizingSideWorkspace] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
   const [appearance, setAppearance] = useState<AppearanceSettings>(() => loadAppearance());
@@ -203,6 +210,31 @@ export function App() {
       setApprovalError("");
     }
   }, [pendingApproval?.approvalId]);
+
+  useEffect(() => {
+    if (!resizingSideWorkspace) {
+      return;
+    }
+
+    const handlePointerMove = (event: MouseEvent) => {
+      setSideWorkspaceWidth(clampSideWorkspaceWidth(window.innerWidth - event.clientX));
+    };
+    const handlePointerUp = () => {
+      setResizingSideWorkspace(false);
+    };
+
+    window.addEventListener("mousemove", handlePointerMove);
+    window.addEventListener("mouseup", handlePointerUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    return () => {
+      window.removeEventListener("mousemove", handlePointerMove);
+      window.removeEventListener("mouseup", handlePointerUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [resizingSideWorkspace]);
 
   const effectiveSettings = useMemo(
     () => ({
@@ -432,6 +464,13 @@ export function App() {
   function openSettings(section: SettingsSection) {
     setSettingsSection(section);
     setSettingsOpen(true);
+    setInspectorOpen(true);
+    setSideWorkspaceTab("run");
+  }
+
+  function openDeepSeekPanel() {
+    setInspectorOpen(true);
+    setSideWorkspaceTab("deepseek");
   }
 
   async function chooseDirectory() {
@@ -504,10 +543,17 @@ export function App() {
   return (
     <TooltipProvider delayDuration={250}>
       <main
+        style={
+          inspectorOpen
+            ? ({
+                "--side-workspace-width": `${sideWorkspaceWidth}px`,
+              } as React.CSSProperties)
+            : undefined
+        }
         className={cn(
           "grid h-screen w-full overflow-hidden bg-muted/40 text-foreground",
           inspectorOpen
-            ? "lg:grid-cols-[minmax(0,1fr)_minmax(300px,336px)]"
+            ? "lg:grid-cols-[minmax(0,1fr)_8px_var(--side-workspace-width)]"
             : "grid-cols-1",
         )}
       >
@@ -520,6 +566,7 @@ export function App() {
             onAppearanceChange={setAppearance}
             onReset={resetSession}
             onSaveApiKey={saveApiKey}
+            onOpenDeepSeek={openDeepSeekPanel}
             onTogglePanel={() => setInspectorOpen((open) => !open)}
             overrides={overrides}
             panelOpen={inspectorOpen}
@@ -532,6 +579,7 @@ export function App() {
             onSettingsOpenChange={setSettingsOpen}
             settingsSection={settingsSection}
             onSettingsSectionChange={setSettingsSection}
+            sideWorkspaceTab={sideWorkspaceTab}
             appearance={appearance}
             turnUsage={state.currentTurnUsage}
             turnModel={state.currentTurnUsage?.model}
@@ -573,15 +621,26 @@ export function App() {
         </section>
 
         {inspectorOpen && (
-          <RunInspector
-            display={display}
-            onChooseDirectory={chooseDirectory}
-            onConfigure={openSettings}
-            onOpenMemory={openMemoryOverview}
-            running={state.running}
-            status={state.status}
-            tools={state.tools}
-          />
+          <>
+            <div
+              className="hidden bg-border/70 transition-colors hover:bg-ring/50 lg:block"
+              role="separator"
+              aria-label="调整侧边栏宽度"
+              aria-orientation="vertical"
+              onMouseDown={() => setResizingSideWorkspace(true)}
+            />
+            <SideWorkspace
+              activeTab={sideWorkspaceTab}
+              display={display}
+              onChooseDirectory={chooseDirectory}
+              onConfigure={openSettings}
+              onOpenMemory={openMemoryOverview}
+              onTabChange={setSideWorkspaceTab}
+              running={state.running}
+              status={state.status}
+              tools={state.tools}
+            />
+          </>
         )}
       </main>
       <MemoryOverviewDialog
@@ -735,4 +794,11 @@ function formatJson(value: unknown): string {
   } catch {
     return "{}";
   }
+}
+
+function clampSideWorkspaceWidth(width: number): number {
+  return Math.max(
+    SIDE_WORKSPACE_MIN_WIDTH,
+    Math.min(SIDE_WORKSPACE_MAX_WIDTH, Math.round(width)),
+  );
 }

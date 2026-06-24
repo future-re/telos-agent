@@ -323,6 +323,30 @@ cargo clippy --workspace --all-targets
 cd cli && cargo install --path .
 ```
 
+### 运行 desktop
+
+```bash
+# 启动桌面端开发模式
+cd desktop
+npm run tauri dev
+```
+
+如果只需要调试前端界面，不启动 Tauri 壳层：
+
+```bash
+cd desktop
+npm run dev
+```
+
+默认前端开发地址为 `http://127.0.0.1:1420`。
+
+### 构建 desktop
+
+```bash
+cd desktop
+npm run build
+```
+
 ## License
 
 MIT

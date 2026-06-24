@@ -14,6 +14,7 @@ use crate::compaction::{CompactionStrategy, SummaryCompaction};
 use crate::diagnostics::ToolDiagnosticsSink;
 use crate::error::AgentError;
 use crate::hooks::HookRegistry;
+use crate::prompt::PromptProfile;
 use crate::storage::Storage;
 
 /// Return the small set of host environment variables needed for tools to
@@ -152,6 +153,9 @@ pub struct AgentConfig {
     /// Optional pre-built prompt assembly. When set, the runtime uses this
     /// instead of constructing the prompt from `base_system_prompt` alone.
     pub prompt_assembly: Option<std::sync::Arc<crate::prompt::PromptAssembly>>,
+    /// Controls how much built-in prompt guidance is injected when the runtime
+    /// constructs the default prompt assembly.
+    pub prompt_profile: PromptProfile,
     /// Optional maximum number of model ⇄ tool round-trips per turn before the
     /// loop aborts with [`AgentError::MaxIterations`].
     ///
@@ -217,6 +221,10 @@ pub struct AgentConfig {
     /// and injected as system reminders before the first provider call
     /// of each turn.
     pub memory_injector: Option<Arc<crate::runtime::MemoryInjector>>,
+    /// Optional skill injector for dynamic per-turn skill discovery.
+    /// When set, top matching skills are injected as system reminders
+    /// before the first provider call of each turn.
+    pub skill_injector: Option<Arc<crate::runtime::SkillInjector>>,
 }
 
 impl std::fmt::Debug for AgentConfig {
@@ -228,6 +236,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("path", &self.path)
             .field("base_system_prompt", &self.base_system_prompt)
             .field("prompt_assembly", &self.prompt_assembly.as_ref().map(|_| "<set>"))
+            .field("prompt_profile", &self.prompt_profile)
             .field("max_iterations", &self.max_iterations)
             .field("cwd", &self.cwd)
             .field("env", &format!("{} keys: [REDACTED]", env_keys.len()))
@@ -250,6 +259,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("plugin_registry", &self.plugin_registry.as_ref().map(|_| "<set>"))
             .field("task_manager", &self.task_manager.as_ref().map(|_| "<set>"))
             .field("memory_injector", &self.memory_injector.as_ref().map(|_| "<set>"))
+            .field("skill_injector", &self.skill_injector.as_ref().map(|_| "<set>"))
             .finish()
     }
 }
@@ -260,6 +270,7 @@ impl Default for AgentConfig {
             path: TaskPath::default(),
             base_system_prompt: None,
             prompt_assembly: None,
+            prompt_profile: PromptProfile::default(),
             max_iterations: None,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             // Start with a minimal platform environment for shell tools. Callers
@@ -286,6 +297,7 @@ impl Default for AgentConfig {
             plugin_registry: None,
             task_manager: None,
             memory_injector: None,
+            skill_injector: None,
         }
     }
 }
@@ -412,11 +424,12 @@ impl AgentConfig {
         mut self,
         tools: Arc<crate::tool::ToolRegistry>,
     ) -> Result<Self, AgentError> {
-        let assembly = crate::prompt::default_coding_assembly(
+        let assembly = crate::prompt::default_coding_assembly_for_profile(
             tools,
             self.cwd.clone(),
             self.skill_registry.clone(),
             self.path,
+            self.prompt_profile,
         );
         self.base_system_prompt = None;
         self.prompt_assembly = Some(Arc::new(assembly));
@@ -462,7 +475,11 @@ impl AgentConfig {
     pub fn with_bundled_skills(mut self) -> Self {
         let mut registry = crate::skills::SkillRegistry::new();
         registry.load_bundled_skills();
-        self.skill_registry = Some(Arc::new(registry));
+        let registry = Arc::new(registry);
+        self.skill_injector = Some(Arc::new(crate::runtime::SkillInjector::new(Arc::clone(
+            &registry,
+        ))));
+        self.skill_registry = Some(registry);
         self
     }
 

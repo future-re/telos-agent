@@ -572,7 +572,49 @@ fn compaction_emits_system_reminder() {
 
         let _ = session.run_turn(&provider, &tools, "hello").await.unwrap();
         let has_reminder = session.messages().iter().any(|m| {
-            m.role == telos_agent::Role::User && m.text_content().contains("<system-reminder>")
+            m.role == telos_agent::Role::System && m.text_content().contains("<system-reminder>")
+        });
+        assert!(has_reminder);
+    });
+}
+
+#[test]
+fn skill_discovery_emits_system_reminder() {
+    use telos_agent::provider::{CompletionResponse, StopReason};
+    use telos_agent::skills::{Skill, SkillRegistry, SkillSource};
+
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let provider = MockProvider::new(vec![CompletionResponse {
+            message: Message::assistant("done"),
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+            model: None,
+        }]);
+        let tools = ToolRegistry::new();
+        let mut registry = SkillRegistry::new();
+        registry.register(Skill {
+            name: "rust-fix".into(),
+            description: "Fix Rust compiler errors".into(),
+            when_to_use: Some("When cargo check fails".into()),
+            prompt: "Prompt".into(),
+            arguments: vec![],
+            body: "rust compile".into(),
+            source: SkillSource::Bundled,
+        });
+        let registry = Arc::new(registry);
+        let mut session = AgentSession::new(AgentConfig {
+            skill_registry: Some(Arc::clone(&registry)),
+            skill_injector: Some(Arc::new(telos_agent::SkillInjector::new(registry))),
+            ..AgentConfig::default()
+        })
+        .unwrap();
+
+        let _ = session.run_turn(&provider, &tools, "fix rust compile error").await.unwrap();
+        let has_reminder = session.messages().iter().any(|m| {
+            m.role == telos_agent::Role::System
+                && m.text_content().contains("Recommended Skills")
+                && m.text_content().contains("rust-fix")
         });
         assert!(has_reminder);
     });

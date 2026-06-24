@@ -41,7 +41,7 @@ impl Tool for SkillTool {
 
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
-            "Use the Skill tool to invoke loaded skills by name. Only invoke skills listed as available; do not guess. \
+            "Use the Skill tool to invoke loaded skills by name. Only invoke skills that were explicitly listed in the prompt or recommended via system reminders; do not guess. \
 Pass `args` when the skill expects arguments. The skill returns its prompt and body for you to follow.",
         )
     }

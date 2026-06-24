@@ -170,6 +170,28 @@ impl AgentHost {
                 if let telos_agent::TurnEvent::TurnFinished { final_text: text, .. } = &event {
                     final_text = text.clone();
                 }
+                if let telos_agent::TurnEvent::ToolResult(message) = &event {
+                    for result in message.tool_results_iter() {
+                        on_event(DesktopEvent {
+                            kind: "tool_result".into(),
+                            session_id: Some(session_id.to_string()),
+                            text: None,
+                            input_tokens: None,
+                            output_tokens: None,
+                            total_tokens: None,
+                            prompt_cache_hit_tokens: None,
+                            prompt_cache_miss_tokens: None,
+                            reasoning_tokens: None,
+                            model: None,
+                            tool_call_id: Some(result.tool_call_id.clone()),
+                            tool_name: Some(result.name.clone()),
+                            detail: None,
+                            is_error: Some(result.is_error),
+                            message: None,
+                            tool_result_content: Some(result.content.clone()),
+                        });
+                    }
+                }
                 let desktop_event = map_turn_event(session_id, event);
                 if desktop_event.kind != "ignored" {
                     on_event(desktop_event);

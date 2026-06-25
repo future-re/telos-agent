@@ -53,6 +53,7 @@ export interface TelosEvent {
   detail?: string;
   isError?: boolean;
   message?: string;
+  data?: unknown;
   toolResultContent?: unknown;
 }
 
@@ -112,25 +113,7 @@ export function reduceTelosEvent(state: ChatState, event: TelosEvent): ChatState
         undefined,
       );
     case "tool_progress":
-      return appendOrUpdateToolMessage(
-        {
-          ...state,
-          status: event.message ?? state.status,
-          tools: state.tools.map((tool) =>
-            tool.id === event.toolCallId
-              ? { ...tool, detail: event.message ?? tool.detail }
-              : tool,
-          ),
-        },
-        event.toolCallId ?? `tool-${state.tools.length + 1}`,
-        event.toolName ??
-          state.tools.find((tool) => tool.id === event.toolCallId)?.name ??
-          "Tool",
-        event.message ?? state.tools.find((tool) => tool.id === event.toolCallId)?.detail ?? "",
-        "running",
-        false,
-        state.messages.find((message) => message.id === `tool-message-${event.toolCallId}`)?.toolResultContent,
-      );
+      return reduceToolProgress(state, event);
     case "tool_completed":
       return appendOrUpdateToolMessage(
         {
@@ -408,7 +391,10 @@ function summarizeToolResult(toolName: string, toolResultContent: unknown): stri
   const normalizedName = toolName.trim().toLowerCase();
 
   if ((normalizedName === "bash" || normalizedName === "powershell") && typeof result.stdout === "string") {
-    return result.stdout.trim() || (typeof result.stderr === "string" ? result.stderr.trim() : "");
+    return (
+      stripAnsi(result.stdout).trim() ||
+      (typeof result.stderr === "string" ? stripAnsi(result.stderr).trim() : "")
+    );
   }
 
   if ((normalizedName === "read" || normalizedName === "write" || normalizedName === "edit") && typeof result.file_path === "string") {
@@ -426,4 +412,78 @@ function summarizeToolResult(toolName: string, toolResultContent: unknown): stri
   }
 
   return undefined;
+}
+
+function reduceToolProgress(state: ChatState, event: TelosEvent): ChatState {
+  const toolCallId = resolveToolCallId(state, event.toolCallId);
+  const status = event.message ?? state.status;
+
+  if (!toolCallId) {
+    return {
+      ...state,
+      status,
+    };
+  }
+
+  const existingTool = state.tools.find((tool) => tool.id === toolCallId);
+  const existingMessage = state.messages.find((message) => message.id === `tool-message-${toolCallId}`);
+  const progressOutput = extractProgressOutput(event.data);
+  const nextToolResultContent =
+    progressOutput !== undefined
+      ? mergeProgressResult(existingMessage?.toolResultContent, progressOutput)
+      : existingMessage?.toolResultContent;
+
+  return appendOrUpdateToolMessage(
+    {
+      ...state,
+      status,
+      tools: state.tools.map((tool) =>
+        tool.id === toolCallId ? { ...tool, detail: event.message ?? tool.detail } : tool,
+      ),
+    },
+    toolCallId,
+    event.toolName ?? existingTool?.name ?? "Tool",
+    event.message ?? existingTool?.detail ?? "",
+    "running",
+    false,
+    nextToolResultContent,
+  );
+}
+
+function resolveToolCallId(state: ChatState, toolCallId?: string): string | undefined {
+  if (toolCallId) {
+    return toolCallId;
+  }
+  const runningTools = state.tools.filter((tool) => tool.status === "running");
+  return runningTools[runningTools.length - 1]?.id;
+}
+
+function stripAnsi(value: string): string {
+  return value
+    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "")
+    .replace(/\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
+}
+
+function extractProgressOutput(data: unknown): string | undefined {
+  if (!data || typeof data !== "object") {
+    return undefined;
+  }
+  const output = (data as Record<string, unknown>).output;
+  return typeof output === "string" ? output : undefined;
+}
+
+function mergeProgressResult(current: unknown, output: string): unknown {
+  const normalizedOutput = stripAnsi(output);
+  if (!normalizedOutput) {
+    return current;
+  }
+
+  const result =
+    current && typeof current === "object" && !Array.isArray(current)
+      ? { ...(current as Record<string, unknown>) }
+      : {};
+
+  const previous = typeof result.stdout === "string" ? result.stdout : "";
+  result.stdout = previous ? `${previous}${normalizedOutput}` : normalizedOutput;
+  return result;
 }

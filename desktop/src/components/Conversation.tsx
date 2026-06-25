@@ -313,11 +313,12 @@ function buildToolMessageView(
   const normalizedName = toolName.toLowerCase();
 
   if (normalizedName === "bash" || normalizedName === "powershell") {
-    const stdout = stringField(result, "stdout");
-    const stderr = stringField(result, "stderr");
-    const command = detail || undefined;
-    const title = command ? `Ran ${command}` : `Ran ${toolName || "command"}`;
-    const output = [stdout, stderr].filter((item) => item && item.trim()).join("\n\n");
+    const stdout = cleanTerminalText(stringField(result, "stdout"));
+    const stderr = cleanTerminalText(stringField(result, "stderr"));
+    const errorMessage = cleanTerminalText(nestedErrorMessage(result));
+    const command = cleanTerminalText(detail) || undefined;
+    const title = command ? `Ran ${truncateSingleLine(command, 120)}` : `Ran ${toolName || "command"}`;
+    const output = [stdout, stderr, errorMessage].filter((item) => item && item.trim()).join("\n\n");
     return {
       icon: TerminalSquare,
       title,
@@ -424,6 +425,9 @@ function collectToolNotes(value: Record<string, unknown> | undefined): string[] 
   }
 
   const skip = new Set([
+    "status",
+    "success",
+    "error",
     "stdout",
     "stderr",
     "content",
@@ -446,6 +450,28 @@ function collectToolNotes(value: Record<string, unknown> | undefined): string[] 
       }
       return [];
     });
+}
+
+function cleanTerminalText(value?: string): string | undefined {
+  if (!value) {
+    return value;
+  }
+  return value
+    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "")
+    .replace(/\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
+}
+
+function truncateSingleLine(value: string, maxLength: number): string {
+  const singleLine = value.replace(/\s+/g, " ").trim();
+  return singleLine.length > maxLength ? `${singleLine.slice(0, maxLength)}...` : singleLine;
+}
+
+function nestedErrorMessage(value: Record<string, unknown> | undefined): string | undefined {
+  const error =
+    value?.error && typeof value.error === "object" && !Array.isArray(value.error)
+      ? (value.error as Record<string, unknown>)
+      : undefined;
+  return typeof error?.message === "string" ? error.message : undefined;
 }
 
 function MarkdownContent({ className, content }: { className?: string; content: string }) {

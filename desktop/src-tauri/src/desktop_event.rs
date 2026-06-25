@@ -20,6 +20,7 @@ pub struct DesktopEvent {
     pub detail: Option<String>,
     pub is_error: Option<bool>,
     pub message: Option<String>,
+    pub data: Option<Value>,
     pub tool_result_content: Option<Value>,
 }
 
@@ -41,6 +42,7 @@ impl DesktopEvent {
             detail: None,
             is_error: None,
             message: None,
+            data: None,
             tool_result_content: None,
         }
     }
@@ -65,10 +67,12 @@ pub fn map_turn_event(session_id: &str, event: TurnEvent) -> DesktopEvent {
             detail: Some(detail),
             ..DesktopEvent::new("tool_call")
         },
-        TurnEvent::ToolProgress { tool_call_id, message, .. } => DesktopEvent {
+        TurnEvent::ToolProgress { tool_call_id, name, message, data } => DesktopEvent {
             session_id: Some(session_id.to_string()),
             tool_call_id,
+            tool_name: Some(name),
             message: Some(message),
+            data,
             ..DesktopEvent::new("tool_progress")
         },
         TurnEvent::ToolCompleted { tool_call_id, name, is_error, detail } => DesktopEvent {

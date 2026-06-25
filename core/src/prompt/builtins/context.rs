@@ -97,7 +97,10 @@ impl PromptSection for GitStatusSection {
     }
 
     async fn render(&self, _ctx: &()) -> String {
-        match std::process::Command::new("git").args(["status", "--short"]).output() {
+        let mut command = std::process::Command::new("git");
+        command.args(["status", "--short"]);
+        hide_console_window(&mut command);
+        match command.output() {
             Ok(output) if output.status.success() => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if stdout.trim().is_empty() {
@@ -108,6 +111,16 @@ impl PromptSection for GitStatusSection {
             }
             _ => String::new(),
         }
+    }
+}
+
+fn hide_console_window(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
     }
 }
 

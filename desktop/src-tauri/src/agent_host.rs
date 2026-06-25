@@ -188,6 +188,7 @@ impl AgentHost {
                             detail: None,
                             is_error: Some(result.is_error),
                             message: None,
+                            data: None,
                             tool_result_content: Some(result.content.clone()),
                         });
                     }

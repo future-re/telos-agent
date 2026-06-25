@@ -89,4 +89,103 @@ describe("reduceTelosEvent", () => {
       reasoningTokens: 2,
     });
   });
+
+  it("does not create a duplicate tool entry for progress without toolCallId", () => {
+    const started = reduceTelosEvent(initialChatState, {
+      kind: "tool_call",
+      toolCallId: "call-1",
+      toolName: "PowerShell",
+      detail: "Get-ChildItem",
+    });
+    const progressed = reduceTelosEvent(started, {
+      kind: "tool_progress",
+      message: "running PowerShell command with 120000ms timeout",
+    });
+
+    expect(progressed.tools).toHaveLength(1);
+    expect(progressed.tools[0]).toMatchObject({
+      id: "call-1",
+      detail: "running PowerShell command with 120000ms timeout",
+      status: "running",
+    });
+    expect(progressed.messages.filter((message) => message.role === "tool")).toHaveLength(1);
+  });
+
+  it("strips ansi escapes from PowerShell tool summaries", () => {
+    const finished = reduceTelosEvent(initialChatState, {
+      kind: "tool_result",
+      toolCallId: "call-1",
+      toolName: "PowerShell",
+      toolResultContent: {
+        stdout: "\u001b[32;1m名称\u001b[0m\r\n中文输出",
+        stderr: "",
+      },
+    });
+
+    expect(finished.messages[0]?.content).toBe("名称\r\n中文输出");
+  });
+
+  it("appends streaming tool output from progress events", () => {
+    const started = reduceTelosEvent(initialChatState, {
+      kind: "tool_call",
+      toolCallId: "call-1",
+      toolName: "PowerShell",
+      detail: "Get-ChildItem",
+    });
+    const progressed = reduceTelosEvent(started, {
+      kind: "tool_progress",
+      toolCallId: "call-1",
+      toolName: "PowerShell",
+      message: "stdout update",
+      data: { stream: "stdout", output: "line 1\n" },
+    });
+
+    expect(progressed.messages[0]).toMatchObject({
+      role: "tool",
+      toolName: "PowerShell",
+      streaming: true,
+    });
+    expect(String(progressed.messages[0]?.toolResultContent && (progressed.messages[0]?.toolResultContent as { stdout?: string }).stdout)).toContain("line 1");
+  });
+
+  it("preserves status and success in tool result content but they can be hidden by the view", () => {
+    const finished = reduceTelosEvent(initialChatState, {
+      kind: "tool_result",
+      toolCallId: "call-1",
+      toolName: "PowerShell",
+      toolResultContent: {
+        status: 0,
+        success: true,
+        stdout: "done",
+      },
+    });
+
+    expect(finished.messages[0]?.toolResultContent).toMatchObject({
+      status: 0,
+      success: true,
+      stdout: "done",
+    });
+  });
+
+  it("stores execution errors as tool result content for UI extraction", () => {
+    const finished = reduceTelosEvent(initialChatState, {
+      kind: "tool_result",
+      toolCallId: "call-1",
+      toolName: "PowerShell",
+      isError: true,
+      toolResultContent: {
+        error: {
+          kind: "execution_error",
+          message: "tool PowerShell failed: ParserError",
+        },
+      },
+    });
+
+    expect(finished.messages[0]?.toolResultContent).toMatchObject({
+      error: {
+        kind: "execution_error",
+        message: "tool PowerShell failed: ParserError",
+      },
+    });
+  });
 });

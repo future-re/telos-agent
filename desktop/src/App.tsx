@@ -153,6 +153,8 @@ export function App() {
   );
   const state = activeSession?.state ?? initialChatState;
   const pendingApproval = pendingApprovals[activeSessionId];
+  const eventQueueRef = useRef<Array<{ sessionId: string; event: TelosEvent }>>([]);
+  const eventFrameRef = useRef<number | null>(null);
 
   function dispatch(action: Action, sessionId = activeSessionId) {
     if (action.type === "event" && action.event.kind === "provider_usage") {
@@ -169,6 +171,25 @@ export function App() {
     setSessions((current) =>
       updateSessionState(current, sessionId, (chatState) => reduceChatAction(chatState, action)),
     );
+  }
+
+  function flushQueuedEvents() {
+    eventFrameRef.current = null;
+    const queued = eventQueueRef.current;
+    if (queued.length === 0) {
+      return;
+    }
+    eventQueueRef.current = [];
+
+    setSessions((current) => {
+      let next = current;
+      for (const item of queued) {
+        next = updateSessionState(next, item.sessionId, (chatState) =>
+          reduceChatAction(chatState, { type: "event", event: item.event }),
+        );
+      }
+      return next;
+    });
   }
 
   useEffect(() => {
@@ -188,9 +209,28 @@ export function App() {
         setActiveSessionId(targetSessionId);
         setApprovalError("");
       }
-      dispatch({ type: "event", event: payload }, targetSessionId);
+      if (payload.kind === "provider_usage") {
+        const usage = usageFromEvent(payload);
+        if (usage) {
+          setUsageHistory((current) => {
+            const next = addUsageToHistory(current, usage);
+            saveTokenUsageHistory(next);
+            return next;
+          });
+        }
+      }
+      eventQueueRef.current.push({ sessionId: targetSessionId, event: payload });
+      if (eventFrameRef.current === null) {
+        eventFrameRef.current = window.requestAnimationFrame(() => {
+          flushQueuedEvents();
+        });
+      }
     });
     return () => {
+      if (eventFrameRef.current !== null) {
+        window.cancelAnimationFrame(eventFrameRef.current);
+        eventFrameRef.current = null;
+      }
       unlisten.then((fn) => fn());
     };
   }, []);

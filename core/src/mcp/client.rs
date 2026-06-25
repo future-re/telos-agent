@@ -72,6 +72,7 @@ impl McpClient {
         if let Some(cwd) = &self.config.cwd {
             cmd.current_dir(cwd);
         }
+        hide_console_window(&mut cmd);
 
         let mut child = cmd.spawn().map_err(|e| AgentError::ToolExecution {
             tool: "McpClient".into(),
@@ -243,6 +244,16 @@ impl McpClient {
                     .collect()
             })
             .unwrap_or_default()
+    }
+}
+
+fn hide_console_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
     }
 }
 

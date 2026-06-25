@@ -3,9 +3,11 @@
 use async_trait::async_trait;
 use base64::Engine;
 use serde_json::{Value, json};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 use crate::error::AgentError;
 use crate::tool::{PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput};
@@ -39,7 +41,16 @@ pub fn encode_powershell_command(command: &str) -> String {
 }
 
 pub fn build_powershell_args(command: &str) -> Vec<String> {
-    vec!["-NoProfile".into(), "-NonInteractive".into(), "-Command".into(), command.into()]
+    let wrapped = format!(
+        concat!(
+            "$OutputEncoding = [System.Text.UTF8Encoding]::new($false); ",
+            "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false); ",
+            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); ",
+            "{command}"
+        ),
+        command = command
+    );
+    vec!["-NoProfile".into(), "-NonInteractive".into(), "-Command".into(), wrapped]
 }
 
 pub fn find_powershell_executable() -> Option<String> {
@@ -54,13 +65,14 @@ pub fn find_powershell_executable() -> Option<String> {
 }
 
 fn executable_exists(candidate: &str) -> bool {
-    std::process::Command::new(candidate)
+    let mut command = std::process::Command::new(candidate);
+    command
         .arg("-NoProfile")
         .arg("-NonInteractive")
         .arg("-Command")
-        .arg("$PSVersionTable.PSVersion")
-        .output()
-        .is_ok()
+        .arg("$PSVersionTable.PSVersion");
+    hide_console_window_std(&mut command);
+    command.output().is_ok()
 }
 
 #[async_trait]
@@ -139,8 +151,13 @@ Provide a short `description` summarizing the command's intent.",
             .current_dir(&context.cwd)
             .env_clear()
             .envs(context.env.iter());
+        hide_console_window(&mut child);
         child.kill_on_drop(true);
-        let output = timeout(Duration::from_millis(timeout_ms), run_powershell_child(child))
+        let progress = context.progress.clone();
+        let output = timeout(
+            Duration::from_millis(timeout_ms),
+            run_powershell_child(child, progress, context.tool_call_id.clone()),
+        )
             .await
             .map_err(|_| AgentError::ToolExecution {
                 tool: "PowerShell".into(),
@@ -173,20 +190,23 @@ Provide a short `description` summarizing the command's intent.",
     }
 }
 
-async fn run_powershell_child(mut command: Command) -> std::io::Result<std::process::Output> {
+async fn run_powershell_child(
+    mut command: Command,
+    progress: Option<tokio::sync::mpsc::UnboundedSender<crate::tool::ToolProgress>>,
+    tool_call_id: Option<String>,
+) -> std::io::Result<std::process::Output> {
     command.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     let mut child = command.spawn()?;
-    let mut stdout = child.stdout.take().expect("stdout was piped");
-    let mut stderr = child.stderr.take().expect("stderr was piped");
+    let stdout = child.stdout.take().expect("stdout was piped");
+    let stderr = child.stderr.take().expect("stderr was piped");
 
+    let stdout_progress = progress.clone();
+    let stdout_tool_call_id = tool_call_id.clone();
     let stdout_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
-        stdout.read_to_end(&mut buf).await.map(|_| buf)
+        read_stream_with_progress(stdout, stdout_progress, stdout_tool_call_id, "stdout").await
     });
-    let stderr_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
-        stderr.read_to_end(&mut buf).await.map(|_| buf)
-    });
+    let stderr_task =
+        tokio::spawn(async move { read_stream_with_progress(stderr, progress, tool_call_id, "stderr").await });
 
     let status = child.wait().await?;
     let stdout = stdout_task.await.map_err(std::io::Error::other)??;
@@ -201,6 +221,71 @@ fn trim_large_output(output: &str) -> String {
     }
     let preview = output.chars().take(MAX_CHARS).collect::<String>();
     format!("{preview}\n<truncated output after {MAX_CHARS} chars>")
+}
+
+fn hide_console_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
+fn hide_console_window_std(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
+async fn read_stream_with_progress(
+    stream: impl tokio::io::AsyncRead + Unpin,
+    progress: Option<tokio::sync::mpsc::UnboundedSender<crate::tool::ToolProgress>>,
+    tool_call_id: Option<String>,
+    stream_name: &'static str,
+) -> std::io::Result<Vec<u8>> {
+    let mut reader = BufReader::new(stream);
+    let mut buf = Vec::new();
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        let bytes_read = reader.read_line(&mut line).await?;
+        if bytes_read == 0 {
+            break;
+        }
+        buf.extend_from_slice(line.as_bytes());
+        if let Some(tx) = &progress {
+            let _ = tx.send(crate::tool::ToolProgress {
+                tool_call_id: tool_call_id.clone(),
+                message: format!("{stream_name} update"),
+                data: Some(json!({
+                    "stream": stream_name,
+                    "output": line,
+                })),
+            });
+        }
+    }
+
+    let mut tail = Vec::new();
+    reader.read_to_end(&mut tail).await?;
+    if !tail.is_empty() {
+      if let Ok(text) = String::from_utf8(tail.clone()) {
+          if let Some(tx) = &progress {
+              let _ = tx.send(crate::tool::ToolProgress {
+                  tool_call_id,
+                  message: format!("{stream_name} update"),
+                  data: Some(json!({
+                      "stream": stream_name,
+                      "output": text,
+                  })),
+              });
+          }
+      }
+      buf.extend_from_slice(&tail);
+    }
+    Ok(buf)
 }
 
 #[cfg(test)]

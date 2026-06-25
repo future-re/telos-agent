@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn main() {
     telos_desktop_lib::run();

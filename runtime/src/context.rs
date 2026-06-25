@@ -39,12 +39,21 @@ fn load_instructions_file(root: &Path) -> Option<(String, String)> {
 }
 
 fn load_git_status(root: &Path) -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["status", "--short"])
-        .current_dir(root)
-        .output()
-        .ok()?;
+    let mut command = std::process::Command::new("git");
+    command.args(["status", "--short"]).current_dir(root);
+    hide_console_window(&mut command);
+    let output = command.output().ok()?;
     if output.status.success() { String::from_utf8(output.stdout).ok() } else { None }
+}
+
+fn hide_console_window(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
 }
 
 #[derive(Debug)]

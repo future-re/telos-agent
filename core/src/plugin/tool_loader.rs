@@ -11,6 +11,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command as TokioCommand;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 use crate::error::AgentError;
 use crate::plugin::PluginError;
@@ -178,7 +180,8 @@ impl Tool for CommandTool {
         let args_json = serde_json::to_vec(&arguments)
             .map_err(|e| AgentError::Validation(format!("failed to serialize arguments: {e}")))?;
 
-        let mut child = TokioCommand::new(&self.command)
+        let mut command = TokioCommand::new(&self.command);
+        command
             .args(&self.args)
             .current_dir(&context.cwd)
             .env_clear()
@@ -187,7 +190,9 @@ impl Tool for CommandTool {
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+        hide_console_window(&mut command);
+        let mut child = command
             .spawn()
             .map_err(|e| AgentError::ToolExecution {
                 tool: self.definition.name.clone(),
@@ -243,6 +248,14 @@ fn resolve_plugin_command(command: &str, plugin_root: &Path) -> String {
 
 fn is_bare_executable(command: &str) -> bool {
     !command.starts_with('.') && !command.contains('/') && !command.contains('\\')
+}
+
+fn hide_console_window(command: &mut TokioCommand) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
 }
 
 #[cfg(test)]

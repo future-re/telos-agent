@@ -39,3 +39,7 @@ commit_parsers = [
 bump_major = ["BREAKING CHANGE"]
 bump_minor = ["feat"]
 bump_patch = ["fix", "perf", "refactor"]
+
+[git.github]
+owner = "future-re"
+repo = "tiny_agent_core"

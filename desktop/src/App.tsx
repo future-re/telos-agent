@@ -648,7 +648,6 @@ export function App() {
                 onApiKeyChange={setApiKeyDraft}
                 apiKeyDraft={apiKeyDraft}
                 savingKey={savingKey}
-                onPickPrompt={setPrompt}
               />
               <Composer
                 value={prompt}

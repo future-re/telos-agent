@@ -28,7 +28,6 @@ interface ConversationProps {
   savingKey: boolean;
   onApiKeyChange: (value: string) => void;
   onConfigureApiKey: () => void;
-  onPickPrompt: (prompt: string) => void;
 }
 
 const roleLabels: Record<ConversationTurn["role"], string> = {
@@ -45,7 +44,6 @@ export function Conversation({
   usageByTurnId,
   onApiKeyChange,
   onConfigureApiKey,
-  onPickPrompt,
   savingKey,
 }: ConversationProps) {
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -70,7 +68,7 @@ export function Conversation({
                     savingKey={savingKey}
                   />
                 ) : (
-                  <PromptStarter onPickPrompt={onPickPrompt} />
+                  <PromptStarter />
                 )}
               </div>
             </div>
@@ -519,7 +517,7 @@ function OnboardingCard({
   );
 }
 
-function PromptStarter({ onPickPrompt }: { onPickPrompt: (prompt: string) => void }) {
+function PromptStarter() {
   return (
     <div className="mx-auto grid w-full max-w-2xl justify-items-center gap-4 text-center">
       <div className="flex size-11 items-center justify-center rounded-xl border bg-background/75 text-muted-foreground shadow-sm">
@@ -529,29 +527,9 @@ function PromptStarter({ onPickPrompt }: { onPickPrompt: (prompt: string) => voi
         <h2 className="text-3xl font-semibold leading-tight tracking-normal text-foreground">
           给 telos 一个明确任务
         </h2>
-        <p className="text-[15px] leading-7 text-muted-foreground">
-          可以检查当前工作区、解释变更、修改代码或执行验证。
-        </p>
+
       </div>
-      <div className="flex flex-wrap justify-center gap-2">
-        <Button type="button" variant="outline" onClick={() => onPickPrompt("检查这个仓库")}>
-          检查这个仓库
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => onPickPrompt("解释当前 desktop 变更")}
-        >
-          解释 desktop 变更
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => onPickPrompt("运行相关桌面端测试")}
-        >
-          运行桌面端测试
-        </Button>
-      </div>
+
     </div>
   );
 }

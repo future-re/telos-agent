@@ -470,19 +470,6 @@ export function App() {
     setApprovalError("");
   }
 
-  async function resetSession() {
-    await invoke("reset_session", {
-      request: { sessionId: activeSessionId },
-    }).catch(() => undefined);
-    dispatch({ type: "reset" });
-    setPendingApprovals((current) => {
-      const next = { ...current };
-      delete next[activeSessionId];
-      return next;
-    });
-    setApprovalError("");
-  }
-
   async function resolveApproval(decision: "allow" | "deny" | "modify") {
     if (!pendingApproval) {
       return;
@@ -698,7 +685,7 @@ export function App() {
             onApiKeyDraftChange={setApiKeyDraft}
             onOverridesChange={updateOverrides}
             onAppearanceChange={setAppearance}
-            onReset={resetSession}
+            onNewConversation={createNewConversation}
             onSaveApiKey={saveApiKey}
             onOpenDeepSeek={openDeepSeekPanel}
             onTogglePanel={() => setInspectorOpen((open) => !open)}

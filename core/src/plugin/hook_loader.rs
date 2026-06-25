@@ -2,8 +2,6 @@
 
 use async_trait::async_trait;
 use serde_json::json;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 

@@ -25,7 +25,7 @@ pub enum ProviderKind {
     Mock,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopSettingsOverrides {
     pub provider: Option<ProviderKind>,

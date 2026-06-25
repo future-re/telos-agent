@@ -8,8 +8,6 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command as TokioCommand;

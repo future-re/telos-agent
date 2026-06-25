@@ -12,9 +12,14 @@ use crate::agent_host::{
     resolve_desktop_settings, save_deepseek_api_key,
 };
 
-type HostMap = Mutex<HashMap<String, Arc<Mutex<AgentHost>>>>;
+type HostMap = Mutex<HashMap<String, HostEntry>>;
 type CancelMap = Mutex<HashMap<String, CancellationToken>>;
 type PendingApprovalMap = Arc<Mutex<HashMap<String, PendingApprovalEntry>>>;
+
+struct HostEntry {
+    settings: DesktopSettingsOverrides,
+    host: Arc<Mutex<AgentHost>>,
+}
 
 struct PendingApprovalEntry {
     session_id: String,
@@ -169,6 +174,10 @@ fn memory_summary(request: Option<ResolveSettingsRequest>) -> Result<MemoryOverv
 async fn extract_deepseek_text(window: Window) -> Result<ExtractResult, String> {
     let webview =
         window.get_webview("deepseek-panel").ok_or_else(|| "DeepSeek 面板未打开".to_string())?;
+    let url = webview.url().map_err(|e| format!("无法读取 DeepSeek 面板地址：{}", e))?;
+    if url.scheme() != "https" || url.host_str() != Some("chat.deepseek.com") {
+        return Err("DeepSeek 面板地址不可信，已拒绝同步".to_string());
+    }
 
     let (tx, rx) = oneshot::channel();
     let tx = Arc::new(std::sync::Mutex::new(Some(tx)));
@@ -288,19 +297,22 @@ async fn send_prompt(
         if request.reset.unwrap_or(false) {
             hosts.remove(&session_id);
         }
-        if let Some(existing) = hosts.get(&session_id) {
-            existing.clone()
+        if let Some(existing) = hosts.get(&session_id)
+            && existing.settings == request.settings
+        {
+            existing.host.clone()
         } else {
             let manual_approval_handler = Arc::new(DesktopApprovalHandler {
                 session_id: session_id.clone(),
                 window: window.clone(),
                 approvals: state.approvals.clone(),
             });
+            let settings = request.settings.clone();
             let host = Arc::new(Mutex::new(AgentHost::new(
-                request.settings,
+                settings.clone(),
                 Some(manual_approval_handler),
             )?));
-            hosts.insert(session_id.clone(), host.clone());
+            hosts.insert(session_id.clone(), HostEntry { settings, host: host.clone() });
             host
         }
     };

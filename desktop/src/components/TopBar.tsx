@@ -80,7 +80,7 @@ interface TopBarProps {
   onSaveApiKey: () => void;
   onOpenDeepSeek: () => void;
   onTogglePanel: () => void;
-  onReset: () => void;
+  onNewConversation: () => void;
   sideWorkspaceTab: SideWorkspaceTab;
   turnUsage?: TokenUsage;
   turnModel?: string | null;
@@ -93,7 +93,7 @@ export function TopBar({
   onAppearanceChange,
   onApiKeyDraftChange,
   onOverridesChange,
-  onReset,
+  onNewConversation,
   onSaveApiKey,
   onSettingsOpenChange,
   onSettingsSectionChange,
@@ -193,7 +193,7 @@ export function TopBar({
             {panelOpen ? "隐藏侧边栏" : "显示侧边栏"}
           </TooltipContent>
         </Tooltip>
-        <Button type="button" variant="outline" onClick={onReset}>
+        <Button type="button" variant="outline" onClick={onNewConversation}>
           <Plus className="size-4" aria-hidden="true" />
           新对话
         </Button>

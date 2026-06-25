@@ -16,6 +16,7 @@ fn read_line_impl(stdin: &io::Stdin) -> io::Result<InputLine> {
 
 #[cfg(windows)]
 fn read_line_impl(stdin: &io::Stdin) -> io::Result<InputLine> {
+    use std::io::IsTerminal;
     if stdin.is_terminal() {
         windows_console::read_interactive_line()
     } else {

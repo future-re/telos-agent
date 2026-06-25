@@ -1,5 +1,8 @@
 import { Activity, Bot } from "lucide-react";
-import { DeepSeekBrowserPanel, DeepSeekExtractResult } from "@/components/DeepSeekBrowserPanel";
+import {
+  DeepSeekBrowserPanel,
+  DeepSeekExtractResult,
+} from "@/components/DeepSeekBrowserPanel";
 import { RunInspector } from "@/components/RunInspector";
 import { ToolActivity } from "@/chatState";
 import { SettingsSection } from "@/desktopTypes";
@@ -34,9 +37,13 @@ export function SideWorkspace({
   tools,
 }: SideWorkspaceProps) {
   return (
-    <aside className="grid h-screen min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden border-l bg-muted/40 max-[920px]:h-auto max-[920px]:min-h-0 max-[920px]:border-l-0 max-[920px]:border-t">
+    <aside className="grid h-screen min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden border-l bg-muted max-[920px]:h-auto max-[920px]:min-h-0 max-[920px]:border-l-0 max-[920px]:border-t">
       <div className="border-b bg-background px-3 py-2">
-        <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-1" role="tablist" aria-label="侧边工作区">
+        <div
+          className="grid grid-cols-2 gap-1 rounded-md bg-muted p-1"
+          role="tablist"
+          aria-label="侧边工作区"
+        >
           <WorkspaceTabButton
             active={activeTab === "run"}
             icon={<Activity className="size-3.5" />}
@@ -90,7 +97,9 @@ function WorkspaceTabButton({
       type="button"
       className={cn(
         "relative inline-flex min-h-8 items-center justify-center gap-1.5 rounded-sm px-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+        active
+          ? "bg-background text-foreground shadow-sm"
+          : "text-muted-foreground hover:text-foreground",
       )}
       role="tab"
       aria-selected={active}

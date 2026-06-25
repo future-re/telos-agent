@@ -25,15 +25,18 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --font-sans: var(--app-font-sans);
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, "Liberation Mono",
+  --font-mono:
+    "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, "Liberation Mono",
     monospace;
 }
 
 :root {
   --radius: 0.5rem;
-  --app-font-sans: "Noto Sans SC Variable", "Microsoft YaHei UI", "Microsoft YaHei",
-    "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC", Inter, "Segoe UI",
-    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --app-font-sans:
+    "Noto Sans SC Variable", "Microsoft YaHei UI", "Microsoft YaHei",
+    "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC",
+    Inter, "Segoe UI", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, sans-serif;
   --background: #f8fafc;
   --foreground: #172027;
   --card: #ffffff;
@@ -63,24 +66,29 @@
 }
 
 :root[data-font="system"] {
-  --app-font-sans: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB",
-    "Noto Sans CJK SC", "Noto Sans SC", Inter, "Segoe UI", ui-sans-serif, system-ui,
-    -apple-system, BlinkMacSystemFont, sans-serif;
+  --app-font-sans:
+    "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB",
+    "Noto Sans CJK SC", "Noto Sans SC", Inter, "Segoe UI", ui-sans-serif,
+    system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 :root[data-font="noto-sans"] {
-  --app-font-sans: "Noto Sans SC Variable", "Microsoft YaHei UI", "Microsoft YaHei",
-    "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC", Inter, "Segoe UI",
-    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --app-font-sans:
+    "Noto Sans SC Variable", "Microsoft YaHei UI", "Microsoft YaHei",
+    "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC",
+    Inter, "Segoe UI", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, sans-serif;
 }
 
 :root[data-font="wenkai"] {
-  --app-font-sans: "LXGW WenKai", "Noto Sans SC Variable", "Microsoft YaHei UI",
+  --app-font-sans:
+    "LXGW WenKai", "Noto Sans SC Variable", "Microsoft YaHei UI",
     "Microsoft YaHei", "PingFang SC", ui-sans-serif, system-ui, sans-serif;
 }
 
 :root[data-font="serif"] {
-  --app-font-sans: "Noto Serif SC", "Songti SC", SimSun, "Noto Sans SC Variable",
+  --app-font-sans:
+    "Noto Serif SC", "Songti SC", SimSun, "Noto Sans SC Variable",
     "Microsoft YaHei UI", serif;
 }
 
@@ -343,7 +351,9 @@ button:disabled {
   height: 0.28rem;
   border-radius: 999px;
   background: currentColor;
-  box-shadow: 0.48rem 0 0 currentColor, 0.96rem 0 0 currentColor;
+  box-shadow:
+    0.48rem 0 0 currentColor,
+    0.96rem 0 0 currentColor;
   animation: thinking-dots 1.1s ease-in-out infinite;
   opacity: 0.55;
 }

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { addUsageToHistory, dateKey, parseTokenUsageHistory } from "@/tokenUsageHistory";
+import {
+  addUsageToHistory,
+  dateKey,
+  parseTokenUsageHistory,
+} from "@/tokenUsageHistory";
 
 describe("token usage history", () => {
   it("uses a local calendar date key", () => {
@@ -28,6 +32,8 @@ describe("token usage history", () => {
 
   it("ignores invalid persisted payloads", () => {
     expect(parseTokenUsageHistory("{bad json")).toEqual({});
-    expect(parseTokenUsageHistory(JSON.stringify({ bad: { inputTokens: "x" } }))).toEqual({});
+    expect(
+      parseTokenUsageHistory(JSON.stringify({ bad: { inputTokens: "x" } })),
+    ).toEqual({});
   });
 });

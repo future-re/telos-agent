@@ -1,4 +1,13 @@
-import { Activity, Bot, Check, Circle, Folder, KeyRound, Library, Wrench } from "lucide-react";
+import {
+  Activity,
+  Bot,
+  Check,
+  Circle,
+  Folder,
+  KeyRound,
+  Library,
+  Wrench,
+} from "lucide-react";
 import { ToolActivity } from "@/chatState";
 import { SettingsSection } from "@/desktopTypes";
 import { RunDisplay } from "@/runDisplay";
@@ -29,12 +38,20 @@ export function RunInspector({
     <div className="grid h-full min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-2.5 overflow-hidden bg-muted/40 p-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="font-mono text-xs font-bold uppercase text-muted-foreground">运行状态</p>
-          <h2 className="mt-1 truncate text-xl font-semibold leading-tight tracking-normal" title={display.activityLabel}>
+          <p className="font-mono text-xs font-bold uppercase text-muted-foreground">
+            运行状态
+          </p>
+          <h2
+            className="mt-1 truncate text-xl font-semibold leading-tight tracking-normal"
+            title={display.activityLabel}
+          >
             {display.activityLabel}
           </h2>
         </div>
-        <Badge variant={running ? "success" : "outline"} className="max-w-28 shrink-0 truncate">
+        <Badge
+          variant={running ? "success" : "outline"}
+          className="max-w-28 shrink-0 truncate"
+        >
           <Circle className="size-2" aria-hidden="true" />
           {statusLabel(status)}
         </Badge>
@@ -94,7 +111,10 @@ export function RunInspector({
           </CardHeader>
           <CardContent className="p-3 pt-0">
             <div className="rounded-md border bg-background px-3 py-2">
-              <strong className="block truncate text-sm" title={display.modelLabel}>
+              <strong
+                className="block truncate text-sm"
+                title={display.modelLabel}
+              >
                 {display.modelLabel}
               </strong>
               <span className="mt-1 block text-xs text-muted-foreground">
@@ -121,9 +141,20 @@ export function RunInspector({
               主对话区现在会直接展示执行步骤和结果摘要。这里保留运行概览，不再作为主要日志视图。
             </div>
             <div className="grid grid-cols-3 gap-2">
-              <MetricSummary label="执行中" value={tools.filter((tool) => tool.status === "running").length} />
-              <MetricSummary label="完成" value={tools.filter((tool) => tool.status === "completed").length} />
-              <MetricSummary label="失败" value={tools.filter((tool) => tool.status === "failed").length} />
+              <MetricSummary
+                label="执行中"
+                value={tools.filter((tool) => tool.status === "running").length}
+              />
+              <MetricSummary
+                label="完成"
+                value={
+                  tools.filter((tool) => tool.status === "completed").length
+                }
+              />
+              <MetricSummary
+                label="失败"
+                value={tools.filter((tool) => tool.status === "failed").length}
+              />
             </div>
             {tools.length === 0 ? (
               <div className="flex items-center gap-2 rounded-md border border-dashed bg-muted/40 p-3 text-sm text-muted-foreground">
@@ -185,18 +216,16 @@ function Metric({
     );
   }
 
-  return (
-    <Card className={cn("min-w-0", className)}>
-      {content}
-    </Card>
-  );
+  return <Card className={cn("min-w-0", className)}>{content}</Card>;
 }
 
 function MetricSummary({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-md border bg-background px-3 py-2">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <strong className="mt-1 block font-mono text-lg text-foreground">{value}</strong>
+      <strong className="mt-1 block font-mono text-lg text-foreground">
+        {value}
+      </strong>
     </div>
   );
 }

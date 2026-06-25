@@ -53,7 +53,10 @@ export function buildRunDisplay(input: RunDisplayInput): RunDisplay {
   };
 }
 
-function normalizeModel(model?: string): { label: string; description: string } {
+function normalizeModel(model?: string): {
+  label: string;
+  description: string;
+} {
   const value = model?.trim().toLowerCase();
   switch (value) {
     case "":
@@ -65,8 +68,14 @@ function normalizeModel(model?: string): { label: string; description: string } 
       return { label: "DeepSeek V4 Pro", description: "适合复杂推理和规划" };
     case "flash":
     case "deepseek-v4-flash":
-      return { label: "DeepSeek V4 Flash", description: "适合快速响应和轻量任务" };
+      return {
+        label: "DeepSeek V4 Flash",
+        description: "适合快速响应和轻量任务",
+      };
     default:
-      return { label: model?.trim() || "自动路由", description: "来自配置文件的自定义模型" };
+      return {
+        label: model?.trim() || "自动路由",
+        description: "来自配置文件的自定义模型",
+      };
   }
 }

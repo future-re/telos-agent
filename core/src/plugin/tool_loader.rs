@@ -8,11 +8,11 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command as TokioCommand;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
 use crate::error::AgentError;
 use crate::plugin::PluginError;
@@ -192,12 +192,10 @@ impl Tool for CommandTool {
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
         hide_console_window(&mut command);
-        let mut child = command
-            .spawn()
-            .map_err(|e| AgentError::ToolExecution {
-                tool: self.definition.name.clone(),
-                message: format!("failed to spawn command '{}': {e}", self.command),
-            })?;
+        let mut child = command.spawn().map_err(|e| AgentError::ToolExecution {
+            tool: self.definition.name.clone(),
+            message: format!("failed to spawn command '{}': {e}", self.command),
+        })?;
 
         // Write JSON arguments to stdin
         let mut stdin = child.stdin.take().ok_or_else(|| AgentError::ToolExecution {

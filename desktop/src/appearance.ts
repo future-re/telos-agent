@@ -13,7 +13,11 @@ export const defaultAppearance: AppearanceSettings = {
   theme: "light",
 };
 
-export const fontOptions: Array<{ value: FontChoice; label: string; description: string }> = [
+export const fontOptions: Array<{
+  value: FontChoice;
+  label: string;
+  description: string;
+}> = [
   { value: "noto-sans", label: "Noto Sans SC", description: "内嵌，清晰稳重" },
   { value: "system", label: "系统中文", description: "跟随系统 UI 字体" },
   { value: "wenkai", label: "霞鹜文楷", description: "更轻松，适合阅读" },

@@ -2,10 +2,10 @@
 
 use async_trait::async_trait;
 use serde_json::json;
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
 
 use crate::error::AgentError;
 use crate::hooks::{Hook, HookContext, HookPhase};
@@ -70,12 +70,10 @@ impl Hook for CommandHook {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         hide_console_window(&mut command);
-        let mut child = command
-            .spawn()
-            .map_err(|e| AgentError::ToolExecution {
-                tool: self.name.clone(),
-                message: format!("hook command failed to spawn: {e}"),
-            })?;
+        let mut child = command.spawn().map_err(|e| AgentError::ToolExecution {
+            tool: self.name.clone(),
+            message: format!("hook command failed to spawn: {e}"),
+        })?;
 
         if let Some(mut stdin) = child.stdin.take() {
             let mut all = input_str.into_bytes();

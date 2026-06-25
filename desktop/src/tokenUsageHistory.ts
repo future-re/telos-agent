@@ -23,7 +23,9 @@ export function addUsageToHistory(
   };
 }
 
-export function loadTokenUsageHistory(storage: Storage = window.localStorage): TokenUsageHistory {
+export function loadTokenUsageHistory(
+  storage: Storage = window.localStorage,
+): TokenUsageHistory {
   return parseTokenUsageHistory(storage.getItem(STORAGE_KEY));
 }
 
@@ -47,7 +49,10 @@ export function parseTokenUsageHistory(raw: string | null): TokenUsageHistory {
 
     return Object.fromEntries(
       Object.entries(parsed)
-        .filter(([key, value]) => /^\d{4}-\d{2}-\d{2}$/.test(key) && isTokenUsage(value))
+        .filter(
+          ([key, value]) =>
+            /^\d{4}-\d{2}-\d{2}$/.test(key) && isTokenUsage(value),
+        )
         .map(([key, value]) => [key, value as TokenUsage]),
     );
   } catch {

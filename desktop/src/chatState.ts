@@ -86,12 +86,25 @@ export function userMessage(content: string, turnId?: string): ChatMessage {
   };
 }
 
-export function reduceTelosEvent(state: ChatState, event: TelosEvent): ChatState {
+export function reduceTelosEvent(
+  state: ChatState,
+  event: TelosEvent,
+): ChatState {
   switch (event.kind) {
     case "assistant_delta":
-      return appendStreamingMessage(state, "assistant", event.text ?? "", "streaming");
+      return appendStreamingMessage(
+        state,
+        "assistant",
+        event.text ?? "",
+        "streaming",
+      );
     case "thinking_delta":
-      return appendStreamingMessage(state, "thinking", event.text ?? "", "thinking");
+      return appendStreamingMessage(
+        state,
+        "thinking",
+        event.text ?? "",
+        "thinking",
+      );
     case "tool_call":
       return appendOrUpdateToolMessage(
         {
@@ -135,10 +148,14 @@ export function reduceTelosEvent(state: ChatState, event: TelosEvent): ChatState
         event.toolName ??
           state.tools.find((tool) => tool.id === event.toolCallId)?.name ??
           "Tool",
-        event.detail ?? state.tools.find((tool) => tool.id === event.toolCallId)?.detail ?? "",
+        event.detail ??
+          state.tools.find((tool) => tool.id === event.toolCallId)?.detail ??
+          "",
         event.isError ? "failed" : "completed",
         Boolean(event.isError),
-        state.messages.find((message) => message.id === `tool-message-${event.toolCallId}`)?.toolResultContent,
+        state.messages.find(
+          (message) => message.id === `tool-message-${event.toolCallId}`,
+        )?.toolResultContent,
       );
     case "tool_result":
       return appendOrUpdateToolMessage(
@@ -148,7 +165,9 @@ export function reduceTelosEvent(state: ChatState, event: TelosEvent): ChatState
           state.tools.find((tool) => tool.id === event.toolCallId)?.name ??
           "Tool",
         state.tools.find((tool) => tool.id === event.toolCallId)?.detail ?? "",
-        state.messages.find((message) => message.id === `tool-message-${event.toolCallId}`)?.toolStatus ??
+        state.messages.find(
+          (message) => message.id === `tool-message-${event.toolCallId}`,
+        )?.toolStatus ??
           state.tools.find((tool) => tool.id === event.toolCallId)?.status ??
           "running",
         Boolean(event.isError),
@@ -161,10 +180,16 @@ export function reduceTelosEvent(state: ChatState, event: TelosEvent): ChatState
         ...state,
         status: "idle",
         running: false,
-        messages: state.messages.map((message) => ({ ...message, streaming: false })),
+        messages: state.messages.map((message) => ({
+          ...message,
+          streaming: false,
+        })),
         usageByTurnId:
           state.currentTurnId && state.currentTurnUsage
-            ? { ...state.usageByTurnId, [state.currentTurnId]: state.currentTurnUsage }
+            ? {
+                ...state.usageByTurnId,
+                [state.currentTurnId]: state.currentTurnUsage,
+              }
             : state.usageByTurnId,
       };
     case "cancelled":
@@ -172,9 +197,14 @@ export function reduceTelosEvent(state: ChatState, event: TelosEvent): ChatState
         ...state,
         status: "idle",
         running: false,
-        messages: state.messages.map((message) => ({ ...message, streaming: false })),
+        messages: state.messages.map((message) => ({
+          ...message,
+          streaming: false,
+        })),
         tools: state.tools.map((tool) =>
-          tool.status === "running" ? { ...tool, status: "failed", detail: "已停止" } : tool,
+          tool.status === "running"
+            ? { ...tool, status: "failed", detail: "已停止" }
+            : tool,
         ),
       };
     case "approval_required":
@@ -260,8 +290,15 @@ function appendOrUpdateToolMessage(
   toolResultContent: unknown,
 ): ChatState {
   const messageId = `tool-message-${toolCallId}`;
-  const summary = formatToolMessage(toolName, detail, toolStatus, toolResultContent);
-  const existingIndex = state.messages.findIndex((message) => message.id === messageId);
+  const summary = formatToolMessage(
+    toolName,
+    detail,
+    toolStatus,
+    toolResultContent,
+  );
+  const existingIndex = state.messages.findIndex(
+    (message) => message.id === messageId,
+  );
   const nextMessage: ChatMessage = {
     id: messageId,
     role: "tool",
@@ -334,20 +371,35 @@ function applyProviderUsage(state: ChatState, event: TelosEvent): ChatState {
   };
 }
 
-function addUsage(current: TokenUsage | undefined, next: TokenUsage): TokenUsage {
+function addUsage(
+  current: TokenUsage | undefined,
+  next: TokenUsage,
+): TokenUsage {
   const model = next.model ?? current?.model;
   return {
     model,
     inputTokens: (current?.inputTokens ?? 0) + next.inputTokens,
     outputTokens: (current?.outputTokens ?? 0) + next.outputTokens,
     totalTokens: (current?.totalTokens ?? 0) + next.totalTokens,
-    promptCacheHitTokens: addOptional(current?.promptCacheHitTokens, next.promptCacheHitTokens),
-    promptCacheMissTokens: addOptional(current?.promptCacheMissTokens, next.promptCacheMissTokens),
-    reasoningTokens: addOptional(current?.reasoningTokens, next.reasoningTokens),
+    promptCacheHitTokens: addOptional(
+      current?.promptCacheHitTokens,
+      next.promptCacheHitTokens,
+    ),
+    promptCacheMissTokens: addOptional(
+      current?.promptCacheMissTokens,
+      next.promptCacheMissTokens,
+    ),
+    reasoningTokens: addOptional(
+      current?.reasoningTokens,
+      next.reasoningTokens,
+    ),
   };
 }
 
-function addOptional(current: number | undefined, next: number | undefined): number | undefined {
+function addOptional(
+  current: number | undefined,
+  next: number | undefined,
+): number | undefined {
   if (current === undefined && next === undefined) {
     return undefined;
   }
@@ -382,7 +434,10 @@ function formatToolMessage(
   return trimmed ? `${title}\n${trimmed}` : title;
 }
 
-function summarizeToolResult(toolName: string, toolResultContent: unknown): string | undefined {
+function summarizeToolResult(
+  toolName: string,
+  toolResultContent: unknown,
+): string | undefined {
   if (!toolResultContent || typeof toolResultContent !== "object") {
     return undefined;
   }
@@ -390,14 +445,22 @@ function summarizeToolResult(toolName: string, toolResultContent: unknown): stri
   const result = toolResultContent as Record<string, unknown>;
   const normalizedName = toolName.trim().toLowerCase();
 
-  if ((normalizedName === "bash" || normalizedName === "powershell") && typeof result.stdout === "string") {
+  if (
+    (normalizedName === "bash" || normalizedName === "powershell") &&
+    typeof result.stdout === "string"
+  ) {
     return (
       stripAnsi(result.stdout).trim() ||
       (typeof result.stderr === "string" ? stripAnsi(result.stderr).trim() : "")
     );
   }
 
-  if ((normalizedName === "read" || normalizedName === "write" || normalizedName === "edit") && typeof result.file_path === "string") {
+  if (
+    (normalizedName === "read" ||
+      normalizedName === "write" ||
+      normalizedName === "edit") &&
+    typeof result.file_path === "string"
+  ) {
     return String(result.file_path);
   }
 
@@ -426,7 +489,9 @@ function reduceToolProgress(state: ChatState, event: TelosEvent): ChatState {
   }
 
   const existingTool = state.tools.find((tool) => tool.id === toolCallId);
-  const existingMessage = state.messages.find((message) => message.id === `tool-message-${toolCallId}`);
+  const existingMessage = state.messages.find(
+    (message) => message.id === `tool-message-${toolCallId}`,
+  );
   const progressOutput = extractProgressOutput(event.data);
   const nextToolResultContent =
     progressOutput !== undefined
@@ -438,7 +503,9 @@ function reduceToolProgress(state: ChatState, event: TelosEvent): ChatState {
       ...state,
       status,
       tools: state.tools.map((tool) =>
-        tool.id === toolCallId ? { ...tool, detail: event.message ?? tool.detail } : tool,
+        tool.id === toolCallId
+          ? { ...tool, detail: event.message ?? tool.detail }
+          : tool,
       ),
     },
     toolCallId,
@@ -450,7 +517,10 @@ function reduceToolProgress(state: ChatState, event: TelosEvent): ChatState {
   );
 }
 
-function resolveToolCallId(state: ChatState, toolCallId?: string): string | undefined {
+function resolveToolCallId(
+  state: ChatState,
+  toolCallId?: string,
+): string | undefined {
   if (toolCallId) {
     return toolCallId;
   }
@@ -484,6 +554,8 @@ function mergeProgressResult(current: unknown, output: string): unknown {
       : {};
 
   const previous = typeof result.stdout === "string" ? result.stdout : "";
-  result.stdout = previous ? `${previous}${normalizedOutput}` : normalizedOutput;
+  result.stdout = previous
+    ? `${previous}${normalizedOutput}`
+    : normalizedOutput;
   return result;
 }

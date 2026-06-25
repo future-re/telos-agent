@@ -44,7 +44,9 @@ interface DeepSeekBrowserPanelProps {
   onSyncToAgent?: (result: DeepSeekExtractResult) => void;
 }
 
-export function DeepSeekBrowserPanel({ onSyncToAgent }: DeepSeekBrowserPanelProps) {
+export function DeepSeekBrowserPanel({
+  onSyncToAgent,
+}: DeepSeekBrowserPanelProps) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [panelError, setPanelError] = useState("");
@@ -110,7 +112,6 @@ export function DeepSeekBrowserPanel({ onSyncToAgent }: DeepSeekBrowserPanelProp
       const existing = await WebviewWindow.getByLabel(DEEPSEEK_WINDOW_LABEL);
       if (existing) {
         await existing.show();
-        await existing.setFocus();
         return;
       }
 
@@ -121,10 +122,12 @@ export function DeepSeekBrowserPanel({ onSyncToAgent }: DeepSeekBrowserPanelProp
         height: 760,
         minWidth: 860,
         minHeight: 620,
-        focus: true,
+        focus: false,
       });
       webview.once("tauri://error", (event) => {
-        setPanelError(`DeepSeek 窗口打开失败：${String(event.payload ?? "unknown error")}`);
+        setPanelError(
+          `DeepSeek 窗口打开失败：${String(event.payload ?? "unknown error")}`,
+        );
       });
     } catch (error) {
       setPanelError(`DeepSeek 窗口打开失败：${String(error)}`);
@@ -138,7 +141,9 @@ export function DeepSeekBrowserPanel({ onSyncToAgent }: DeepSeekBrowserPanelProp
 
     setSyncingDeepSeek(true);
     try {
-      const result = await invoke<DeepSeekExtractResult>("extract_deepseek_text");
+      const result = await invoke<DeepSeekExtractResult>(
+        "extract_deepseek_text",
+      );
       onSyncToAgent(result);
     } catch (error) {
       setPanelError(`同步失败：${String(error)}`);
@@ -148,7 +153,7 @@ export function DeepSeekBrowserPanel({ onSyncToAgent }: DeepSeekBrowserPanelProp
   }
 
   return (
-    <div className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-muted/40">
+    <div className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-muted">
       <div className="border-b bg-background px-3 py-2.5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -159,10 +164,16 @@ export function DeepSeekBrowserPanel({ onSyncToAgent }: DeepSeekBrowserPanelProp
             <h2 className="mt-1 truncate text-base font-semibold leading-tight tracking-normal">
               官方网页
             </h2>
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">{DEEPSEEK_URL}</p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              {DEEPSEEK_URL}
+            </p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <BrowserIconButton label="同步到 Agent" disabled={syncingDeepSeek} onClick={syncToAgent}>
+            <BrowserIconButton
+              label="同步到 Agent"
+              disabled={syncingDeepSeek}
+              onClick={syncToAgent}
+            >
               <ArrowLeftToLine className="size-4" aria-hidden="true" />
             </BrowserIconButton>
             <BrowserIconButton label="后退" disabled>
@@ -171,10 +182,16 @@ export function DeepSeekBrowserPanel({ onSyncToAgent }: DeepSeekBrowserPanelProp
             <BrowserIconButton label="前进" disabled>
               <ArrowRight className="size-4" aria-hidden="true" />
             </BrowserIconButton>
-            <BrowserIconButton label="重新加载" onClick={() => setReloadToken((value) => value + 1)}>
+            <BrowserIconButton
+              label="重新加载"
+              onClick={() => setReloadToken((value) => value + 1)}
+            >
               <RotateCw className="size-4" aria-hidden="true" />
             </BrowserIconButton>
-            <BrowserIconButton label="独立窗口打开" onClick={openDeepSeekWindow}>
+            <BrowserIconButton
+              label="独立窗口打开"
+              onClick={openDeepSeekWindow}
+            >
               <ExternalLink className="size-4" aria-hidden="true" />
             </BrowserIconButton>
           </div>
@@ -186,10 +203,14 @@ export function DeepSeekBrowserPanel({ onSyncToAgent }: DeepSeekBrowserPanelProp
         ) : null}
       </div>
 
-      <div ref={bodyRef} className="relative min-h-0 min-w-0 overflow-hidden bg-background">
+      <div
+        ref={bodyRef}
+        className="relative min-h-0 min-w-0 overflow-hidden bg-background"
+      >
         {!isTauriRuntime() ? (
           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-            浏览器预览模式下不会创建原生 WebView。请用 `npm run tauri dev` 启动桌面端。
+            浏览器预览模式下不会创建原生 WebView。请用 `npm run tauri dev`
+            启动桌面端。
           </div>
         ) : (
           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
@@ -248,7 +269,7 @@ async function ensurePanelWebview(bounds: PanelBounds, reloadToken: number) {
     y: Math.round(bounds.y),
     width: Math.max(1, Math.round(bounds.width)),
     height: Math.max(1, Math.round(bounds.height)),
-    focus: true,
+    focus: false,
   });
 
   return await waitForWebview(webview);

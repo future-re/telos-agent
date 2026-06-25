@@ -15,8 +15,12 @@ describe("conversation sessions", () => {
       startUserTurn(state, "重新设计桌面 UI"),
     );
 
-    expect(updated.find((session) => session.id === "session-1")?.state.messages).toHaveLength(1);
-    expect(updated.find((session) => session.id === "session-2")?.state).toEqual(initialChatState);
+    expect(
+      updated.find((session) => session.id === "session-1")?.state.messages,
+    ).toHaveLength(1);
+    expect(
+      updated.find((session) => session.id === "session-2")?.state,
+    ).toEqual(initialChatState);
   });
 
   it("uses the first prompt as a compact conversation title", () => {
@@ -33,9 +37,16 @@ describe("conversation sessions", () => {
     const second = createConversationSession("session-2", 2);
     const third = createConversationSession("session-3", 3);
 
-    const result = deleteConversationSession([first, second, third], "session-2", "session-2");
+    const result = deleteConversationSession(
+      [first, second, third],
+      "session-2",
+      "session-2",
+    );
 
-    expect(result.sessions.map((session) => session.id)).toEqual(["session-1", "session-3"]);
+    expect(result.sessions.map((session) => session.id)).toEqual([
+      "session-1",
+      "session-3",
+    ]);
     expect(result.activeSessionId).toBe("session-3");
   });
 

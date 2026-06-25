@@ -36,9 +36,13 @@ export type ConversationTurn =
       streaming?: boolean;
     };
 
-export function groupConversationMessages(messages: ChatMessage[]): ConversationTurn[] {
+export function groupConversationMessages(
+  messages: ChatMessage[],
+): ConversationTurn[] {
   const turns: ConversationTurn[] = [];
-  let pendingAssistant: Extract<ConversationTurn, { role: "assistant" }> | undefined;
+  let pendingAssistant:
+    | Extract<ConversationTurn, { role: "assistant" }>
+    | undefined;
 
   function flushAssistant() {
     if (pendingAssistant) {
@@ -62,7 +66,9 @@ export function groupConversationMessages(messages: ChatMessage[]): Conversation
         pendingAssistant = {
           ...pendingAssistant,
           turnId: pendingAssistant.turnId ?? message.turnId,
-          thinking: [pendingAssistant.thinking, message.content].filter(Boolean).join("\n"),
+          thinking: [pendingAssistant.thinking, message.content]
+            .filter(Boolean)
+            .join("\n"),
           streaming: pendingAssistant.streaming || message.streaming,
         };
       }
@@ -82,7 +88,9 @@ export function groupConversationMessages(messages: ChatMessage[]): Conversation
         pendingAssistant = {
           ...pendingAssistant,
           turnId: pendingAssistant.turnId ?? message.turnId,
-          content: [pendingAssistant.content, message.content].filter(Boolean).join("\n"),
+          content: [pendingAssistant.content, message.content]
+            .filter(Boolean)
+            .join("\n"),
           streaming: pendingAssistant.streaming || message.streaming,
         };
       }

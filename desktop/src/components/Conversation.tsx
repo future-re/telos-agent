@@ -16,7 +16,10 @@ import { ChatMessage, TokenUsage } from "@/chatState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ConversationTurn, groupConversationMessages } from "@/conversationView";
+import {
+  ConversationTurn,
+  groupConversationMessages,
+} from "@/conversationView";
 import { cn } from "@/lib/utils";
 import { estimateCost, formatCost, formatTokenCount } from "@/tokenUsage";
 
@@ -54,7 +57,7 @@ export function Conversation({
   }, [turns]);
 
   return (
-    <section className="h-full min-h-0 overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.08),transparent_32rem),linear-gradient(180deg,var(--background),var(--muted))]">
+    <section className="h-full min-h-0 overflow-hidden bg-background">
       <ScrollArea className="h-full w-full">
         <div className="mx-auto flex min-h-full w-full min-w-0 max-w-4xl flex-col px-4 py-6 md:px-6 md:py-8">
           {turns.length === 0 ? (
@@ -90,11 +93,17 @@ export function Conversation({
   );
 }
 
-function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsage }) {
+function MessageTurn({
+  turn,
+  usage,
+}: {
+  turn: ConversationTurn;
+  usage?: TokenUsage;
+}) {
   if (turn.role === "system") {
     return (
       <div className="flex min-w-0 justify-center">
-        <p className="max-w-2xl rounded-full border border-border bg-secondary/60 px-3 py-1.5 text-xs leading-5 text-muted-foreground">
+        <p className="max-w-2xl rounded-full border border-border bg-secondary px-3 py-1.5 text-xs leading-5 text-muted-foreground">
           {turn.content}
         </p>
       </div>
@@ -108,8 +117,11 @@ function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsa
           <div className="mb-1.5 pr-1 text-right text-[13px] font-medium text-muted-foreground">
             {roleLabels.user}
           </div>
-          <div className="min-w-0 overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-3 text-[15px] leading-7 text-primary-foreground shadow-[0_10px_24px_rgba(15,23,42,0.14)]">
-            <MarkdownContent className="markdown-body markdown-body-user" content={turn.content} />
+          <div className="min-w-0 overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-3 text-[15px] leading-7 text-primary-foreground shadow-sm">
+            <MarkdownContent
+              className="markdown-body markdown-body-user"
+              content={turn.content}
+            />
           </div>
         </div>
       </article>
@@ -121,19 +133,22 @@ function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsa
       <article className="min-w-0">
         <div
           className={cn(
-            "rounded-xl border bg-background/90 px-4 py-3 shadow-sm",
+            "rounded-xl border bg-background px-4 py-3 shadow-sm",
             turn.toolStatus === "completed" && "border-emerald-200",
             turn.toolStatus === "failed" && "border-red-200",
           )}
         >
           <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
-            <span className="flex size-7 items-center justify-center rounded-md border bg-muted/30">
+            <span className="flex size-7 items-center justify-center rounded-md border bg-muted">
               {turn.toolStatus === "completed" ? (
                 <Check className="size-4 text-emerald-600" aria-hidden="true" />
               ) : turn.toolStatus === "failed" ? (
                 <XCircle className="size-4 text-red-600" aria-hidden="true" />
               ) : (
-                <Clock3 className="size-4 text-muted-foreground" aria-hidden="true" />
+                <Clock3
+                  className="size-4 text-muted-foreground"
+                  aria-hidden="true"
+                />
               )}
             </span>
             <span className="flex items-center gap-2">
@@ -145,8 +160,10 @@ function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsa
                 "rounded-full border px-2 py-0.5 text-[11px]",
                 turn.toolStatus === "completed" &&
                   "border-emerald-200 bg-emerald-50 text-emerald-700",
-                turn.toolStatus === "failed" && "border-red-200 bg-red-50 text-red-700",
-                turn.toolStatus === "running" && "border-slate-200 bg-slate-50 text-slate-700",
+                turn.toolStatus === "failed" &&
+                  "border-red-200 bg-red-50 text-red-700",
+                turn.toolStatus === "running" &&
+                  "border-slate-200 bg-slate-50 text-slate-700",
               )}
             >
               {turn.toolStatus === "completed"
@@ -155,7 +172,9 @@ function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsa
                   ? "失败"
                   : "执行中"}
             </span>
-            {turn.streaming ? <span className="thinking-dots" aria-label="执行中" /> : null}
+            {turn.streaming ? (
+              <span className="thinking-dots" aria-label="执行中" />
+            ) : null}
           </div>
           <ToolMessageBody turn={turn} />
         </div>
@@ -170,7 +189,9 @@ function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsa
       <div className="min-w-0 border-l pl-4">
         <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
           <span>{roleLabels.assistant}</span>
-          {assistantTurn.streaming && <span className="thinking-dots" aria-label="正在生成" />}
+          {assistantTurn.streaming && (
+            <span className="thinking-dots" aria-label="正在生成" />
+          )}
           {usage && (
             <span className="inline-flex items-center gap-2 rounded-full border bg-background px-2 py-0.5 font-mono text-[11px]">
               <span>{formatTokenCount(usage.totalTokens)} tokens</span>
@@ -187,7 +208,9 @@ function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsa
               {(() => {
                 const cost = estimateCost(usage.model, usage);
                 return cost && cost.totalCost > 0 ? (
-                  <span className="text-muted-foreground">{formatCost(cost.totalCost)}</span>
+                  <span className="text-muted-foreground">
+                    {formatCost(cost.totalCost)}
+                  </span>
                 ) : null;
               })()}
             </span>
@@ -206,14 +229,21 @@ function MessageTurn({ turn, usage }: { turn: ConversationTurn; usage?: TokenUsa
         )}
         <MarkdownContent
           className="markdown-body text-[15px] leading-8 text-foreground"
-          content={assistantTurn.content || (assistantTurn.streaming ? "正在生成..." : "")}
+          content={
+            assistantTurn.content ||
+            (assistantTurn.streaming ? "正在生成..." : "")
+          }
         />
       </div>
     </article>
   );
 }
 
-function ToolMessageBody({ turn }: { turn: Extract<ConversationTurn, { role: "tool" }> }) {
+function ToolMessageBody({
+  turn,
+}: {
+  turn: Extract<ConversationTurn, { role: "tool" }>;
+}) {
   const view = buildToolMessageView(turn);
 
   if (!view) {
@@ -227,12 +257,14 @@ function ToolMessageBody({ turn }: { turn: Extract<ConversationTurn, { role: "to
 
   return (
     <div className="grid gap-3">
-      <div className="flex min-w-0 items-start gap-3 rounded-lg border bg-muted/20 px-3 py-3">
+      <div className="flex min-w-0 items-start gap-3 rounded-lg border bg-muted px-3 py-3">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
           <view.icon className="size-4" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
-          <strong className="block text-[14px] leading-6 text-foreground">{view.title}</strong>
+          <strong className="block text-[14px] leading-6 text-foreground">
+            {view.title}
+          </strong>
           {view.subtitle ? (
             <p className="mt-0.5 break-words text-xs leading-5 text-muted-foreground">
               {view.subtitle}
@@ -241,7 +273,9 @@ function ToolMessageBody({ turn }: { turn: Extract<ConversationTurn, { role: "to
         </div>
       </div>
 
-      {view.command ? <ToolCodeBlock label="命令" content={view.command} /> : null}
+      {view.command ? (
+        <ToolCodeBlock label="命令" content={view.command} />
+      ) : null}
 
       {view.paths.length > 0 ? (
         <div className="grid gap-2">
@@ -256,7 +290,9 @@ function ToolMessageBody({ turn }: { turn: Extract<ConversationTurn, { role: "to
         </div>
       ) : null}
 
-      {view.output ? <ToolCodeBlock label={view.outputLabel} content={view.output} /> : null}
+      {view.output ? (
+        <ToolCodeBlock label={view.outputLabel} content={view.output} />
+      ) : null}
 
       {view.notes.length > 0 ? (
         <div className="grid gap-2">
@@ -284,7 +320,9 @@ function ToolMessageBody({ turn }: { turn: Extract<ConversationTurn, { role: "to
 function ToolCodeBlock({ label, content }: { label: string; content: string }) {
   return (
     <div className="grid gap-1.5">
-      <span className="text-[11px] font-medium uppercase text-muted-foreground">{label}</span>
+      <span className="text-[11px] font-medium uppercase text-muted-foreground">
+        {label}
+      </span>
       <pre className="max-h-80 overflow-auto rounded-lg border bg-slate-950 px-3 py-3 font-mono text-xs leading-5 text-slate-50">
         {content}
       </pre>
@@ -317,15 +355,20 @@ function buildToolMessageView(
     const stderr = cleanTerminalText(stringField(result, "stderr"));
     const errorMessage = cleanTerminalText(nestedErrorMessage(result));
     const command = cleanTerminalText(detail) || undefined;
-    const title = command ? `Ran ${truncateSingleLine(command, 120)}` : `Ran ${toolName || "command"}`;
-    const output = [stdout, stderr, errorMessage].filter((item) => item && item.trim()).join("\n\n");
+    const title = command
+      ? `Ran ${truncateSingleLine(command, 120)}`
+      : `Ran ${toolName || "command"}`;
+    const output = [stdout, stderr, errorMessage]
+      .filter((item) => item && item.trim())
+      .join("\n\n");
     return {
       icon: TerminalSquare,
       title,
       subtitle: command ? undefined : detail || undefined,
       command,
       paths: [],
-      output: output || (turn.toolStatus === "running" ? turn.content : undefined),
+      output:
+        output || (turn.toolStatus === "running" ? turn.content : undefined),
       outputLabel: stderr && !stdout ? "错误输出" : "输出",
       notes: collectToolNotes(result),
       fallback: turn.content,
@@ -337,7 +380,9 @@ function buildToolMessageView(
     return {
       icon: FilePenLine,
       title: path ? `Edited ${path}` : "Edited file",
-      subtitle: boolField(result, "replace_all") ? "Applied replace_all" : undefined,
+      subtitle: boolField(result, "replace_all")
+        ? "Applied replace_all"
+        : undefined,
       command: undefined,
       paths: path ? [path] : [],
       output: undefined,
@@ -393,7 +438,10 @@ function stringField(
   return typeof value?.[key] === "string" ? (value[key] as string) : undefined;
 }
 
-function boolField(value: Record<string, unknown> | undefined, key: string): boolean {
+function boolField(
+  value: Record<string, unknown> | undefined,
+  key: string,
+): boolean {
   return value?.[key] === true;
 }
 
@@ -404,7 +452,9 @@ function numberField(
   return typeof value?.[key] === "number" ? (value[key] as number) : undefined;
 }
 
-function lineRangeSummary(value: Record<string, unknown> | undefined): string | undefined {
+function lineRangeSummary(
+  value: Record<string, unknown> | undefined,
+): string | undefined {
   const startLine = numberField(value, "start_line");
   const totalLines = numberField(value, "total_lines");
   if (startLine === undefined && totalLines === undefined) {
@@ -419,7 +469,9 @@ function lineRangeSummary(value: Record<string, unknown> | undefined): string | 
   return `${totalLines} lines total`;
 }
 
-function collectToolNotes(value: Record<string, unknown> | undefined): string[] {
+function collectToolNotes(
+  value: Record<string, unknown> | undefined,
+): string[] {
   if (!value) {
     return [];
   }
@@ -463,18 +515,30 @@ function cleanTerminalText(value?: string): string | undefined {
 
 function truncateSingleLine(value: string, maxLength: number): string {
   const singleLine = value.replace(/\s+/g, " ").trim();
-  return singleLine.length > maxLength ? `${singleLine.slice(0, maxLength)}...` : singleLine;
+  return singleLine.length > maxLength
+    ? `${singleLine.slice(0, maxLength)}...`
+    : singleLine;
 }
 
-function nestedErrorMessage(value: Record<string, unknown> | undefined): string | undefined {
+function nestedErrorMessage(
+  value: Record<string, unknown> | undefined,
+): string | undefined {
   const error =
-    value?.error && typeof value.error === "object" && !Array.isArray(value.error)
+    value?.error &&
+    typeof value.error === "object" &&
+    !Array.isArray(value.error)
       ? (value.error as Record<string, unknown>)
       : undefined;
   return typeof error?.message === "string" ? error.message : undefined;
 }
 
-function MarkdownContent({ className, content }: { className?: string; content: string }) {
+function MarkdownContent({
+  className,
+  content,
+}: {
+  className?: string;
+  content: string;
+}) {
   return (
     <div className={cn("min-w-0", className)}>
       <ReactMarkdown
@@ -512,12 +576,16 @@ function OnboardingCard({
   return (
     <div className="mx-auto grid w-full max-w-xl gap-5">
       <div>
-        <p className="mb-2 text-xs font-medium text-muted-foreground">首次设置</p>
+        <p className="mb-2 text-xs font-medium text-muted-foreground">
+          首次设置
+        </p>
         <h2 className="text-2xl font-semibold leading-tight tracking-normal text-foreground">
           配置 DeepSeek API Key
         </h2>
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          密钥会写入 CLI 共用的用户配置文件。配置完成后，项目配置、记忆和工作目录会按 CLI 规则生效。
+          密钥会写入 CLI
+          共用的用户配置文件。配置完成后，项目配置、记忆和工作目录会按 CLI
+          规则生效。
         </p>
       </div>
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
@@ -546,16 +614,14 @@ function OnboardingCard({
 function PromptStarter() {
   return (
     <div className="mx-auto grid w-full max-w-2xl justify-items-center gap-4 text-center">
-      <div className="flex size-11 items-center justify-center rounded-xl border bg-background/75 text-muted-foreground shadow-sm">
+      <div className="flex size-11 items-center justify-center rounded-xl border bg-background text-muted-foreground shadow-sm">
         <Sparkles className="size-5" aria-hidden="true" />
       </div>
       <div className="grid gap-2">
         <h2 className="text-3xl font-semibold leading-tight tracking-normal text-foreground">
           给 telos 一个明确任务
         </h2>
-
       </div>
-
     </div>
   );
 }

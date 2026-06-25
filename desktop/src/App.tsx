@@ -15,7 +15,6 @@ import {
   reduceTelosEvent,
   startUserTurn,
 } from "@/chatState";
-import { defaultAgent } from "@/agentModel";
 import { AgentStatusRail } from "@/components/AgentStatusRail";
 import { Composer } from "@/components/Composer";
 import { Conversation } from "@/components/Conversation";
@@ -121,39 +120,58 @@ const SIDE_WORKSPACE_MAX_WIDTH = 760;
 const SIDE_WORKSPACE_DEFAULT_WIDTH = 420;
 
 export function App() {
-  const initialSession = useMemo(() => createConversationSession("session-1"), []);
-  const [sessions, setSessions] = useState<ConversationSession[]>([initialSession]);
+  const initialSession = useMemo(
+    () => createConversationSession("session-1"),
+    [],
+  );
+  const [sessions, setSessions] = useState<ConversationSession[]>([
+    initialSession,
+  ]);
   const [activeSessionId, setActiveSessionId] = useState(initialSession.id);
   const [prompt, setPrompt] = useState("");
-  const [settings, setSettings] = useState<ResolvedDesktopSettings>(fallbackSettings);
+  const [settings, setSettings] =
+    useState<ResolvedDesktopSettings>(fallbackSettings);
   const [overrides, setOverrides] = useState<DesktopSettingsOverrides>({});
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const syncedContextRef = useRef("");
   const [savingKey, setSavingKey] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
-  const [sideWorkspaceTab, setSideWorkspaceTab] = useState<SideWorkspaceTab>("run");
-  const [sideWorkspaceWidth, setSideWorkspaceWidth] = useState(SIDE_WORKSPACE_DEFAULT_WIDTH);
+  const [sideWorkspaceTab, setSideWorkspaceTab] =
+    useState<SideWorkspaceTab>("run");
+  const [sideWorkspaceWidth, setSideWorkspaceWidth] = useState(
+    SIDE_WORKSPACE_DEFAULT_WIDTH,
+  );
   const [resizingSideWorkspace, setResizingSideWorkspace] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
-  const [appearance, setAppearance] = useState<AppearanceSettings>(() => loadAppearance());
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSection>("appearance");
+  const [appearance, setAppearance] = useState<AppearanceSettings>(() =>
+    loadAppearance(),
+  );
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [memoryLoading, setMemoryLoading] = useState(false);
-  const [memoryOverview, setMemoryOverview] = useState<MemoryOverview | undefined>();
-  const [pendingApprovals, setPendingApprovals] = useState<Record<string, PendingApproval>>({});
+  const [memoryOverview, setMemoryOverview] = useState<
+    MemoryOverview | undefined
+  >();
+  const [pendingApprovals, setPendingApprovals] = useState<
+    Record<string, PendingApproval>
+  >({});
   const [approvalDraft, setApprovalDraft] = useState("");
   const [approvalError, setApprovalError] = useState("");
   const [usageHistory, setUsageHistory] = useState<TokenUsageHistory>(() =>
     typeof window === "undefined" ? {} : loadTokenUsageHistory(),
   );
   const activeSession = useMemo(
-    () => sessions.find((session) => session.id === activeSessionId) ?? sessions[0],
+    () =>
+      sessions.find((session) => session.id === activeSessionId) ?? sessions[0],
     [activeSessionId, sessions],
   );
   const state = activeSession?.state ?? initialChatState;
   const pendingApproval = pendingApprovals[activeSessionId];
-  const eventQueueRef = useRef<Array<{ sessionId: string; event: TelosEvent }>>([]);
+  const eventQueueRef = useRef<Array<{ sessionId: string; event: TelosEvent }>>(
+    [],
+  );
   const eventFrameRef = useRef<number | null>(null);
 
   function dispatch(action: Action, sessionId = activeSessionId) {
@@ -169,7 +187,9 @@ export function App() {
     }
 
     setSessions((current) =>
-      updateSessionState(current, sessionId, (chatState) => reduceChatAction(chatState, action)),
+      updateSessionState(current, sessionId, (chatState) =>
+        reduceChatAction(chatState, action),
+      ),
     );
   }
 
@@ -205,7 +225,10 @@ export function App() {
           cwd: payload.cwd,
           reason: payload.reason,
         };
-        setPendingApprovals((current) => ({ ...current, [targetSessionId]: nextApproval }));
+        setPendingApprovals((current) => ({
+          ...current,
+          [targetSessionId]: nextApproval,
+        }));
         setActiveSessionId(targetSessionId);
         setApprovalError("");
       }
@@ -219,7 +242,10 @@ export function App() {
           });
         }
       }
-      eventQueueRef.current.push({ sessionId: targetSessionId, event: payload });
+      eventQueueRef.current.push({
+        sessionId: targetSessionId,
+        event: payload,
+      });
       if (eventFrameRef.current === null) {
         eventFrameRef.current = window.requestAnimationFrame(() => {
           flushQueuedEvents();
@@ -259,7 +285,9 @@ export function App() {
     }
 
     const handlePointerMove = (event: MouseEvent) => {
-      setSideWorkspaceWidth(clampSideWorkspaceWidth(window.innerWidth - event.clientX));
+      setSideWorkspaceWidth(
+        clampSideWorkspaceWidth(window.innerWidth - event.clientX),
+      );
     };
     const handlePointerUp = () => {
       setResizingSideWorkspace(false);
@@ -287,7 +315,8 @@ export function App() {
   );
 
   const deepseekNeedsKey =
-    effectiveSettings.provider === "deepseek" && !effectiveSettings.apiKeyConfigured;
+    effectiveSettings.provider === "deepseek" &&
+    !effectiveSettings.apiKeyConfigured;
   const canSend = useMemo(
     () => prompt.trim().length > 0 && !deepseekNeedsKey && !loadingSettings,
     [deepseekNeedsKey, loadingSettings, prompt],
@@ -296,10 +325,7 @@ export function App() {
     () => sumTokenUsage(Object.values(state.usageByTurnId)),
     [state.usageByTurnId],
   );
-  const todayUsage = useMemo(
-    () => usageHistory[dateKey()],
-    [usageHistory],
-  );
+  const todayUsage = useMemo(() => usageHistory[dateKey()], [usageHistory]);
   const display = buildRunDisplay({
     provider: effectiveSettings.provider,
     model: effectiveSettings.model,
@@ -322,9 +348,12 @@ export function App() {
       setLoadingSettings(false);
       return;
     }
-    const resolved = await invoke<ResolvedDesktopSettings>("resolved_settings", {
-      request: nextOverrides.cwd ? { cwd: nextOverrides.cwd } : undefined,
-    });
+    const resolved = await invoke<ResolvedDesktopSettings>(
+      "resolved_settings",
+      {
+        request: nextOverrides.cwd ? { cwd: nextOverrides.cwd } : undefined,
+      },
+    );
     setSettings(resolved);
     setLoadingSettings(false);
   }
@@ -350,11 +379,18 @@ export function App() {
         setApiKeyDraft("");
         return;
       }
-      const resolved = await invoke<ResolvedDesktopSettings>("save_deepseek_key", {
-        request: { apiKey },
-      });
+      const resolved = await invoke<ResolvedDesktopSettings>(
+        "save_deepseek_key",
+        {
+          request: { apiKey },
+        },
+      );
       setSettings(resolved);
-      setOverrides((current) => ({ ...current, provider: "deepseek", apiKey: undefined }));
+      setOverrides((current) => ({
+        ...current,
+        provider: "deepseek",
+        apiKey: undefined,
+      }));
       setApiKeyDraft("");
       await invoke("reset_all_sessions").catch(() => undefined);
       setSessions((current) =>
@@ -362,7 +398,10 @@ export function App() {
       );
       setPendingApprovals({});
     } catch (error) {
-      dispatch({ type: "error", message: `保存 API Key 失败：${String(error)}` });
+      dispatch({
+        type: "error",
+        message: `保存 API Key 失败：${String(error)}`,
+      });
     } finally {
       setSavingKey(false);
     }
@@ -387,7 +426,9 @@ export function App() {
       updateSessionState(current, activeSessionId, (chatState) =>
         reduceChatAction(chatState, { type: "start", prompt: fullPrompt }),
       ).map((session) =>
-        session.id === activeSessionId ? renameSessionFromPrompt(session, fullPrompt) : session,
+        session.id === activeSessionId
+          ? renameSessionFromPrompt(session, fullPrompt)
+          : session,
       ),
     );
     try {
@@ -430,7 +471,9 @@ export function App() {
   }
 
   async function resetSession() {
-    await invoke("reset_session", { request: { sessionId: activeSessionId } }).catch(() => undefined);
+    await invoke("reset_session", {
+      request: { sessionId: activeSessionId },
+    }).catch(() => undefined);
     dispatch({ type: "reset" });
     setPendingApprovals((current) => {
       const next = { ...current };
@@ -496,11 +539,17 @@ export function App() {
     }
 
     if (isTauriRuntime()) {
-      invoke("reset_session", { request: { sessionId } }).catch(() => undefined);
+      invoke("reset_session", { request: { sessionId } }).catch(
+        () => undefined,
+      );
     }
 
     setSessions((current) => {
-      const result = deleteConversationSession(current, sessionId, activeSessionId);
+      const result = deleteConversationSession(
+        current,
+        sessionId,
+        activeSessionId,
+      );
       setActiveSessionId(result.activeSessionId);
       return result.sessions;
     });
@@ -612,7 +661,9 @@ export function App() {
       }
 
       const overview = await invoke<MemoryOverview>("memory_summary", {
-        request: effectiveSettings.cwd ? { cwd: effectiveSettings.cwd } : undefined,
+        request: effectiveSettings.cwd
+          ? { cwd: effectiveSettings.cwd }
+          : undefined,
       });
       setMemoryOverview(overview);
     } catch (error) {
@@ -669,7 +720,6 @@ export function App() {
           />
           <div className="grid min-h-0 min-w-0 grid-cols-1 min-[1180px]:grid-cols-[340px_minmax(0,1fr)]">
             <AgentStatusRail
-              agent={defaultAgent}
               activeSessionId={activeSessionId}
               sessions={sessions}
               onDeleteSession={deleteConversation}
@@ -692,7 +742,9 @@ export function App() {
               <Composer
                 value={prompt}
                 sendDisabled={!canSend}
-                disabledReason={deepseekNeedsKey ? "请先配置 DeepSeek API Key" : undefined}
+                disabledReason={
+                  deepseekNeedsKey ? "请先配置 DeepSeek API Key" : undefined
+                }
                 running={state.running}
                 onChange={setPrompt}
                 onStop={stopCurrentTask}
@@ -782,7 +834,9 @@ function ApprovalDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             命令需要确认
-            {approval?.toolName ? <Badge variant="outline">{approval.toolName}</Badge> : null}
+            {approval?.toolName ? (
+              <Badge variant="outline">{approval.toolName}</Badge>
+            ) : null}
           </DialogTitle>
           <DialogDescription>
             自动批准关闭时，需审批的工具调用会暂停在这里等待你的决定。
@@ -793,7 +847,9 @@ function ApprovalDialog({
           <div className="grid gap-3">
             <div className="grid gap-1 rounded-md border bg-muted/30 p-3 text-sm">
               <span className="font-medium">原因</span>
-              <span className="text-muted-foreground">{approval.reason || "需要人工确认"}</span>
+              <span className="text-muted-foreground">
+                {approval.reason || "需要人工确认"}
+              </span>
             </div>
             {approval.cwd ? (
               <div className="grid gap-1 rounded-md border bg-muted/30 p-3 text-sm">
@@ -848,7 +904,9 @@ function normalizeOverrides(
 
 function definedOverrides(overrides: DesktopSettingsOverrides) {
   return Object.fromEntries(
-    Object.entries(overrides).filter(([, value]) => value !== undefined && value !== ""),
+    Object.entries(overrides).filter(
+      ([, value]) => value !== undefined && value !== "",
+    ),
   ) as Partial<ResolvedDesktopSettings>;
 }
 

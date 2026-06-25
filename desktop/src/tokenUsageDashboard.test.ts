@@ -1,19 +1,31 @@
 ﻿import { describe, expect, it } from "vitest";
-import { buildTodayTokenMetrics, buildTokenUsageDashboard } from "@/tokenUsageDashboard";
+import {
+  buildTodayTokenMetrics,
+  buildTokenUsageDashboard,
+} from "@/tokenUsageDashboard";
 
 describe("buildTokenUsageDashboard", () => {
   it("returns empty states for each dashboard scope when provider has not reported usage", () => {
     const dashboard = buildTokenUsageDashboard({});
 
     expect(dashboard.map((item) => item.empty)).toEqual([true, true, true]);
-    expect(dashboard.map((item) => item.label)).toEqual(["Today", "Session", "Turn"]);
+    expect(dashboard.map((item) => item.label)).toEqual([
+      "Today",
+      "Session",
+      "Turn",
+    ]);
   });
 
   it("formats today, session, and turn usage with input and output breakdowns", () => {
     const dashboard = buildTokenUsageDashboard({
       todayUsage: { inputTokens: 1200, outputTokens: 345, totalTokens: 1545 },
       sessionUsage: { inputTokens: 900, outputTokens: 100, totalTokens: 1000 },
-      turnUsage: { inputTokens: 200, outputTokens: 50, totalTokens: 250, reasoningTokens: 25 },
+      turnUsage: {
+        inputTokens: 200,
+        outputTokens: 50,
+        totalTokens: 250,
+        reasoningTokens: 25,
+      },
     });
 
     expect(dashboard).toEqual([

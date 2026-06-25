@@ -3,11 +3,11 @@
 use async_trait::async_trait;
 use base64::Engine;
 use serde_json::{Value, json};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
 use crate::error::AgentError;
 use crate::tool::{PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput};
@@ -158,15 +158,15 @@ Provide a short `description` summarizing the command's intent.",
             Duration::from_millis(timeout_ms),
             run_powershell_child(child, progress, context.tool_call_id.clone()),
         )
-            .await
-            .map_err(|_| AgentError::ToolExecution {
-                tool: "PowerShell".into(),
-                message: format!("Command timed out after {timeout_ms}ms"),
-            })?
-            .map_err(|err| AgentError::ToolExecution {
-                tool: "PowerShell".into(),
-                message: err.to_string(),
-            })?;
+        .await
+        .map_err(|_| AgentError::ToolExecution {
+            tool: "PowerShell".into(),
+            message: format!("Command timed out after {timeout_ms}ms"),
+        })?
+        .map_err(|err| AgentError::ToolExecution {
+            tool: "PowerShell".into(),
+            message: err.to_string(),
+        })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -205,8 +205,9 @@ async fn run_powershell_child(
     let stdout_task = tokio::spawn(async move {
         read_stream_with_progress(stdout, stdout_progress, stdout_tool_call_id, "stdout").await
     });
-    let stderr_task =
-        tokio::spawn(async move { read_stream_with_progress(stderr, progress, tool_call_id, "stderr").await });
+    let stderr_task = tokio::spawn(async move {
+        read_stream_with_progress(stderr, progress, tool_call_id, "stderr").await
+    });
 
     let status = child.wait().await?;
     let stdout = stdout_task.await.map_err(std::io::Error::other)??;
@@ -271,19 +272,19 @@ async fn read_stream_with_progress(
     let mut tail = Vec::new();
     reader.read_to_end(&mut tail).await?;
     if !tail.is_empty() {
-      if let Ok(text) = String::from_utf8(tail.clone()) {
-          if let Some(tx) = &progress {
-              let _ = tx.send(crate::tool::ToolProgress {
-                  tool_call_id,
-                  message: format!("{stream_name} update"),
-                  data: Some(json!({
-                      "stream": stream_name,
-                      "output": text,
-                  })),
-              });
-          }
-      }
-      buf.extend_from_slice(&tail);
+        if let Ok(text) = String::from_utf8(tail.clone()) {
+            if let Some(tx) = &progress {
+                let _ = tx.send(crate::tool::ToolProgress {
+                    tool_call_id,
+                    message: format!("{stream_name} update"),
+                    data: Some(json!({
+                        "stream": stream_name,
+                        "output": text,
+                    })),
+                });
+            }
+        }
+        buf.extend_from_slice(&tail);
     }
     Ok(buf)
 }

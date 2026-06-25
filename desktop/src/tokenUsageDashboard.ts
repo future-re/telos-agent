@@ -45,9 +45,15 @@ export function buildTodayTokenMetrics(usage?: TokenUsage): TodayMetric[] {
     { id: "total", label: "Total", value: formatTokenCount(usage.totalTokens) },
   ];
 
-  if (usage.promptCacheHitTokens !== undefined && usage.promptCacheMissTokens !== undefined) {
+  if (
+    usage.promptCacheHitTokens !== undefined &&
+    usage.promptCacheMissTokens !== undefined
+  ) {
     const total = usage.promptCacheHitTokens + usage.promptCacheMissTokens;
-    const rate = total > 0 ? ((usage.promptCacheHitTokens / total) * 100).toFixed(1) : "0.0";
+    const rate =
+      total > 0
+        ? ((usage.promptCacheHitTokens / total) * 100).toFixed(1)
+        : "0.0";
     items.push({
       id: "cache",
       label: "Cache",
@@ -57,7 +63,11 @@ export function buildTodayTokenMetrics(usage?: TokenUsage): TodayMetric[] {
 
   const cost = estimateCost(usage.model ?? undefined, usage);
   if (cost && cost.totalCost > 0) {
-    items.push({ id: "cost", label: "Cost", value: formatCost(cost.totalCost) });
+    items.push({
+      id: "cost",
+      label: "Cost",
+      value: formatCost(cost.totalCost),
+    });
   }
 
   return items;
@@ -93,7 +103,10 @@ function toDashboardItem(
     usage.promptCacheMissTokens !== undefined
   ) {
     const total = usage.promptCacheHitTokens + usage.promptCacheMissTokens;
-    const rate = total > 0 ? ((usage.promptCacheHitTokens / total) * 100).toFixed(1) : "0.0";
+    const rate =
+      total > 0
+        ? ((usage.promptCacheHitTokens / total) * 100).toFixed(1)
+        : "0.0";
     details.push(`Cache ${rate}%`);
   }
 

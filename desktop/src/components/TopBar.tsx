@@ -116,14 +116,18 @@ export function TopBar({
   const mergedCwd = overrides.cwd ?? settings.cwd;
 
   return (
-    <header className="flex min-h-16 w-full min-w-0 items-center justify-between gap-3 border-b bg-background/95 px-4 py-3 md:px-5">
+    <header className="flex min-h-16 w-full min-w-0 items-center justify-between gap-3 border-b bg-background px-4 py-3 md:px-5">
       <div className="flex min-w-0 items-center gap-3">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
           <Bot className="size-4" aria-hidden="true" />
         </span>
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold leading-none tracking-normal">telos</h1>
-          <p className="mt-1 truncate font-mono text-xs text-muted-foreground">{metadata}</p>
+          <h1 className="text-xl font-semibold leading-none tracking-normal">
+            telos
+          </h1>
+          <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+            {metadata}
+          </p>
         </div>
       </div>
 
@@ -155,7 +159,11 @@ export function TopBar({
           <TooltipTrigger asChild>
             <Button
               type="button"
-              variant={panelOpen && sideWorkspaceTab === "deepseek" ? "default" : "outline"}
+              variant={
+                panelOpen && sideWorkspaceTab === "deepseek"
+                  ? "default"
+                  : "outline"
+              }
               size="icon"
               aria-label="打开 DeepSeek 面板"
               onClick={onOpenDeepSeek}
@@ -181,7 +189,9 @@ export function TopBar({
               )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{panelOpen ? "隐藏侧边栏" : "显示侧边栏"}</TooltipContent>
+          <TooltipContent>
+            {panelOpen ? "隐藏侧边栏" : "显示侧边栏"}
+          </TooltipContent>
         </Tooltip>
         <Button type="button" variant="outline" onClick={onReset}>
           <Plus className="size-4" aria-hidden="true" />
@@ -243,7 +253,10 @@ function SettingsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button type="button" variant={settings.apiKeyConfigured ? "outline" : "default"}>
+        <Button
+          type="button"
+          variant={settings.apiKeyConfigured ? "outline" : "default"}
+        >
           <Settings className="size-4" aria-hidden="true" />
           设置
         </Button>
@@ -252,7 +265,8 @@ function SettingsDialog({
         <DialogHeader>
           <DialogTitle>运行设置</DialogTitle>
           <DialogDescription>
-            桌面端读取 CLI 配置、项目配置、记忆目录和工作目录；这里的改动作为当前桌面对话的覆盖项。
+            桌面端读取 CLI
+            配置、项目配置、记忆目录和工作目录；这里的改动作为当前桌面对话的覆盖项。
           </DialogDescription>
         </DialogHeader>
 
@@ -284,7 +298,9 @@ function SettingsDialog({
           <section className="min-w-0 rounded-md border bg-background p-4">
             <div className="mb-4">
               <h3 className="text-base font-semibold">{section.title}</h3>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">{section.description}</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                {section.description}
+              </p>
             </div>
 
             {activeSection === "appearance" && (
@@ -294,7 +310,10 @@ function SettingsDialog({
                   <Select
                     value={appearance.font}
                     onValueChange={(font) =>
-                      onAppearanceChange({ ...appearance, font: font as FontChoice })
+                      onAppearanceChange({
+                        ...appearance,
+                        font: font as FontChoice,
+                      })
                     }
                   >
                     <SelectTrigger aria-label="中文字体">
@@ -309,7 +328,11 @@ function SettingsDialog({
                     </SelectContent>
                   </Select>
                   <span className="text-xs text-muted-foreground">
-                    {fontOptions.find((option) => option.value === appearance.font)?.description}
+                    {
+                      fontOptions.find(
+                        (option) => option.value === appearance.font,
+                      )?.description
+                    }
                   </span>
                 </label>
 
@@ -318,7 +341,10 @@ function SettingsDialog({
                   <Select
                     value={appearance.theme}
                     onValueChange={(theme) =>
-                      onAppearanceChange({ ...appearance, theme: theme as ThemeChoice })
+                      onAppearanceChange({
+                        ...appearance,
+                        theme: theme as ThemeChoice,
+                      })
                     }
                   >
                     <SelectTrigger aria-label="背景主题">
@@ -356,7 +382,9 @@ function SettingsDialog({
                 <div className="grid gap-2">
                   <div className="flex items-center justify-between gap-3">
                     <h4 className="text-sm font-semibold">历史统计</h4>
-                    <span className="text-xs text-muted-foreground">最近 14 天</span>
+                    <span className="text-xs text-muted-foreground">
+                      最近 14 天
+                    </span>
                   </div>
                   <div className="grid max-h-52 gap-1.5 overflow-y-auto pr-2">
                     {historyItems.length === 0 ? (
@@ -371,7 +399,8 @@ function SettingsDialog({
                   </div>
                 </div>
                 <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                  历史 Token 统计会保存在本机浏览器存储中。当前数据来自 provider 的真实 usage 上报；没有上报时不会估算。
+                  历史 Token 统计会保存在本机浏览器存储中。当前数据来自 provider
+                  的真实 usage 上报；没有上报时不会估算。
                 </div>
               </div>
             )}
@@ -384,7 +413,8 @@ function SettingsDialog({
                   onValueChange={(provider) =>
                     onOverridesChange({
                       ...overrides,
-                      provider: provider as DesktopSettingsOverrides["provider"],
+                      provider:
+                        provider as DesktopSettingsOverrides["provider"],
                     })
                   }
                 >
@@ -409,8 +439,14 @@ function SettingsDialog({
                       className="pl-9"
                       type="password"
                       value={apiKeyDraft}
-                      onChange={(event) => onApiKeyDraftChange(event.target.value)}
-                      placeholder={settings.apiKeyConfigured ? "已写入 CLI 配置" : "请输入 DeepSeek API Key"}
+                      onChange={(event) =>
+                        onApiKeyDraftChange(event.target.value)
+                      }
+                      placeholder={
+                        settings.apiKeyConfigured
+                          ? "已写入 CLI 配置"
+                          : "请输入 DeepSeek API Key"
+                      }
                     />
                   </div>
                   <Button
@@ -422,7 +458,8 @@ function SettingsDialog({
                   </Button>
                 </div>
                 <span className="text-xs leading-5 text-muted-foreground">
-                  保存到 {settings.configPath ?? "用户配置目录"}，CLI 和桌面端会共用这份配置。
+                  保存到 {settings.configPath ?? "用户配置目录"}，CLI
+                  和桌面端会共用这份配置。
                 </span>
               </label>
             )}
@@ -430,8 +467,12 @@ function SettingsDialog({
             {activeSection === "approval" && (
               <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/30 px-3 py-2.5">
                 <div>
-                  <span className="block text-sm font-medium">自动批准工具</span>
-                  <span className="block text-xs text-muted-foreground">对应 CLI 的 auto mode。</span>
+                  <span className="block text-sm font-medium">
+                    自动批准工具
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    对应 CLI 的 auto mode。
+                  </span>
                 </div>
                 <Switch
                   checked={mergedAutoApprove}
@@ -448,7 +489,9 @@ function SettingsDialog({
                 <span className="text-sm font-medium">模型</span>
                 <Select
                   value={mergedModel}
-                  onValueChange={(model) => onOverridesChange({ ...overrides, model })}
+                  onValueChange={(model) =>
+                    onOverridesChange({ ...overrides, model })
+                  }
                 >
                   <SelectTrigger aria-label="模型">
                     <SelectValue />
@@ -471,7 +514,10 @@ function SettingsDialog({
                     className="pl-9"
                     value={mergedCwd}
                     onChange={(event) =>
-                      onOverridesChange({ ...overrides, cwd: event.target.value })
+                      onOverridesChange({
+                        ...overrides,
+                        cwd: event.target.value,
+                      })
                     }
                   />
                 </div>
@@ -498,7 +544,9 @@ function TokenTopStrip({ usage }: { usage?: TokenUsage }) {
       className="hidden min-w-0 max-w-[36rem] flex-1 items-center justify-center px-2 text-[13px] text-muted-foreground lg:flex"
       aria-label="今日 Token 统计"
     >
-      <span className="mr-3 shrink-0 text-sm font-medium text-foreground">今日 Token</span>
+      <span className="mr-3 shrink-0 text-sm font-medium text-foreground">
+        今日 Token
+      </span>
       <span className="flex min-w-0 flex-wrap justify-center gap-x-4 gap-y-1">
         {metrics.map((item) => (
           <span key={item.id} className="whitespace-nowrap">
@@ -527,7 +575,10 @@ const settingsSections: Array<{
   { id: "directory", label: "工作目录", icon: Folder },
 ];
 
-const sectionMeta: Record<SettingsSection, { title: string; description: string }> = {
+const sectionMeta: Record<
+  SettingsSection,
+  { title: string; description: string }
+> = {
   appearance: {
     title: "界面外观",
     description: "字体随桌面应用打包；背景主题只影响桌面端 UI。",
@@ -562,7 +613,9 @@ function UsagePanelItem({ item }: { item: TokenUsageDashboardItem }) {
   return (
     <div className="rounded-md border bg-background px-3 py-2.5">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-sm font-medium text-muted-foreground">{item.label}</span>
+        <span className="text-sm font-medium text-muted-foreground">
+          {item.label}
+        </span>
         <strong
           className={cn(
             "font-mono text-base text-foreground",

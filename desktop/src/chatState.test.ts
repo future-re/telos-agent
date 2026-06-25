@@ -108,7 +108,9 @@ describe("reduceTelosEvent", () => {
       detail: "running PowerShell command with 120000ms timeout",
       status: "running",
     });
-    expect(progressed.messages.filter((message) => message.role === "tool")).toHaveLength(1);
+    expect(
+      progressed.messages.filter((message) => message.role === "tool"),
+    ).toHaveLength(1);
   });
 
   it("strips ansi escapes from PowerShell tool summaries", () => {
@@ -145,7 +147,13 @@ describe("reduceTelosEvent", () => {
       toolName: "PowerShell",
       streaming: true,
     });
-    expect(String(progressed.messages[0]?.toolResultContent && (progressed.messages[0]?.toolResultContent as { stdout?: string }).stdout)).toContain("line 1");
+    expect(
+      String(
+        progressed.messages[0]?.toolResultContent &&
+          (progressed.messages[0]?.toolResultContent as { stdout?: string })
+            .stdout,
+      ),
+    ).toContain("line 1");
   });
 
   it("preserves status and success in tool result content but they can be hidden by the view", () => {

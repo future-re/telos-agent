@@ -49,46 +49,72 @@ export function MemoryOverviewDialog({
             <section className="grid gap-3 rounded-md border bg-muted/25 p-3 sm:grid-cols-[160px_minmax(0,1fr)]">
               <div>
                 <span className="text-xs text-muted-foreground">总量</span>
-                <strong className="mt-1 block text-3xl leading-none">{memory.total}</strong>
+                <strong className="mt-1 block text-3xl leading-none">
+                  {memory.total}
+                </strong>
               </div>
               <div className="min-w-0">
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <FolderOpen className="size-3.5" aria-hidden="true" />
                   存储位置
                 </span>
-                <strong className="mt-1 block truncate text-sm font-medium" title={memory.root}>
+                <strong
+                  className="mt-1 block truncate text-sm font-medium"
+                  title={memory.root}
+                >
                   {memory.root}
                 </strong>
               </div>
             </section>
 
             <section className="grid gap-3 sm:grid-cols-2">
-              <BucketChart title="分类" buckets={memory.categories} total={memory.total} />
-              <BucketChart title="状态" buckets={memory.statuses} total={memory.total} />
+              <BucketChart
+                title="分类"
+                buckets={memory.categories}
+                total={memory.total}
+              />
+              <BucketChart
+                title="状态"
+                buckets={memory.statuses}
+                total={memory.total}
+              />
             </section>
 
             <section className="grid gap-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold">最近更新</h3>
-                <span className="text-xs text-muted-foreground">{memory.recent.length} 条</span>
+                <span className="text-xs text-muted-foreground">
+                  {memory.recent.length} 条
+                </span>
               </div>
               <ScrollArea className="max-h-[320px] rounded-md border">
                 {memory.recent.length === 0 ? (
-                  <div className="p-4 text-sm text-muted-foreground">还没有记忆。</div>
+                  <div className="p-4 text-sm text-muted-foreground">
+                    还没有记忆。
+                  </div>
                 ) : (
                   <div className="divide-y">
                     {memory.recent.map((entry) => (
                       <article key={entry.name} className="grid gap-2 p-3">
                         <div className="flex min-w-0 items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <strong className="block truncate text-sm" title={entry.name}>
+                            <strong
+                              className="block truncate text-sm"
+                              title={entry.name}
+                            >
                               {entry.name}
                             </strong>
                             <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
                               {entry.description || "无描述"}
                             </p>
                           </div>
-                          <Badge variant={entry.status === "需确认" ? "destructive" : "secondary"}>
+                          <Badge
+                            variant={
+                              entry.status === "需确认"
+                                ? "destructive"
+                                : "secondary"
+                            }
+                          >
                             {entry.status}
                           </Badge>
                         </div>
@@ -97,7 +123,10 @@ export function MemoryOverviewDialog({
                           <span>使用 {entry.timesUsed} 次</span>
                           <span>更新 {entry.updated || "-"}</span>
                           {entry.tags.slice(0, 4).map((tag) => (
-                            <span key={tag} className="rounded bg-muted px-1.5 py-0.5">
+                            <span
+                              key={tag}
+                              className="rounded bg-muted px-1.5 py-0.5"
+                            >
                               {tag}
                             </span>
                           ))}
@@ -139,7 +168,9 @@ function BucketChart({
             <div className="h-2 overflow-hidden rounded-full bg-muted">
               <div
                 className="h-full rounded-full bg-primary"
-                style={{ width: `${total === 0 ? 0 : Math.max(6, (bucket.count / max) * 100)}%` }}
+                style={{
+                  width: `${total === 0 ? 0 : Math.max(6, (bucket.count / max) * 100)}%`,
+                }}
               />
             </div>
           </div>

@@ -482,8 +482,9 @@ async fn plugin_tool_integration() {
         ..AgentConfig::default()
     };
 
-    let (tools, _hooks, _skills, _mcp, _prompt) =
-        config.apply_plugins(tools, hooks, skills, mcp, prompt).unwrap();
+    let (tools, _hooks, _skills, _mcp, _prompt, result) =
+        config.apply_plugins(tools, hooks, skills, mcp, prompt);
+    result.unwrap();
 
     // Verify the tool is registered with namespace
     let tool = tools.get("plugin__mytool__uppercase");

@@ -1,11 +1,11 @@
 pub mod billing;
 pub mod cli;
 pub mod config;
-mod interactive_input;
 #[path = "workspace/context.rs"]
 pub mod context;
 #[path = "runtime/diagnostics.rs"]
 pub mod diagnostics;
+mod interactive_input;
 #[path = "runtime/memory.rs"]
 pub mod memory_runtime;
 #[path = "workspace/project.rs"]

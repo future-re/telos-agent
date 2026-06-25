@@ -77,7 +77,8 @@ impl AgentSession {
                     .iter()
                     .map(|block| format!("{}:{} chars", block.name, block.text.chars().count()))
                     .collect::<Vec<_>>();
-                let total_chars: usize = blocks.iter().map(|block| block.text.chars().count()).sum();
+                let total_chars: usize =
+                    blocks.iter().map(|block| block.text.chars().count()).sum();
                 info!(
                     prompt_profile = ?self.config.prompt_profile,
                     prompt_sections = blocks.len(),

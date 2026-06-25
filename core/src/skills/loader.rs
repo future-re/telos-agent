@@ -27,6 +27,12 @@ impl SkillLoader {
 pub struct SkillLoader;
 
 impl SkillLoader {
+    /// Load a single skill from a markdown file with YAML frontmatter.
+    pub fn load_skill_file(path: &Path, source: SkillSource) -> Option<Skill> {
+        let content = std::fs::read_to_string(path).ok()?;
+        Self::parse_skill(&content, source)
+    }
+
     /// Scan `dir` for `.md` files, parse YAML frontmatter, return skills.
     /// Non-fatal errors (unparseable files) are logged and skipped.
     pub fn load_from_dir(dir: &Path) -> Result<Vec<Skill>, std::io::Error> {

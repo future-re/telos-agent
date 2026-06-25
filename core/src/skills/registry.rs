@@ -91,7 +91,8 @@ impl SkillRegistry {
 
         let mut lines = vec![
             "## Skill Index".to_string(),
-            "Use the Skill tool only for skills listed as available or recommended below.".to_string(),
+            "Use the Skill tool only for skills listed as available or recommended below."
+                .to_string(),
         ];
         let mut skills: Vec<&Skill> = self.skills.values().collect();
         skills.sort_by(|a, b| a.name.cmp(&b.name));

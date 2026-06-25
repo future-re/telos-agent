@@ -1,4 +1,4 @@
-use std::io::{self, IsTerminal};
+use std::io::{self};
 
 pub(crate) enum InputLine {
     Line(String),
@@ -35,10 +35,10 @@ fn read_buffered_line(stdin: &io::Stdin) -> io::Result<InputLine> {
 mod windows_console {
     use super::InputLine;
     use std::io::{self, Write};
+    use windows_sys::Win32::System::Console::{GetStdHandle, KEY_EVENT_RECORD};
     use windows_sys::Win32::System::Console::{
         INPUT_RECORD, KEY_EVENT, ReadConsoleInputW, STD_INPUT_HANDLE,
     };
-    use windows_sys::Win32::System::Console::{GetStdHandle, KEY_EVENT_RECORD};
 
     const CTRL_D: u16 = 0x04;
     const BACKSPACE: u16 = 0x08;
@@ -84,7 +84,9 @@ mod windows_console {
         }
     }
 
-    fn read_key_event(handle: windows_sys::Win32::Foundation::HANDLE) -> io::Result<KEY_EVENT_RECORD> {
+    fn read_key_event(
+        handle: windows_sys::Win32::Foundation::HANDLE,
+    ) -> io::Result<KEY_EVENT_RECORD> {
         loop {
             let mut record = INPUT_RECORD::default();
             let mut read = 0;

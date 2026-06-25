@@ -8,6 +8,7 @@
 //! GitHub, git URLs, npm, pip, or local directories.
 
 pub mod errors;
+pub mod hook_loader;
 pub mod manifest;
 pub mod marketplace;
 pub mod registry;

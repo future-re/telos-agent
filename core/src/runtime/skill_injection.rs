@@ -35,7 +35,8 @@ impl SkillInjector {
 
         let mut lines = vec![
             "## Recommended Skills".to_string(),
-            "Use the Skill tool only with the skills listed below; do not guess skill names.".to_string(),
+            "Use the Skill tool only with the skills listed below; do not guess skill names."
+                .to_string(),
             String::new(),
         ];
         for skill in skills {

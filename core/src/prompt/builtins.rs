@@ -230,7 +230,9 @@ impl ShellAwareToolUsageSection {
 
 fn render_tool_usage(shell_tool: &str) -> String {
     let shell_syntax = if shell_tool == "PowerShell" {
-        format!("- The default shell is PowerShell. Use PowerShell syntax for {shell_tool} commands.")
+        format!(
+            "- The default shell is PowerShell. Use PowerShell syntax for {shell_tool} commands."
+        )
     } else {
         format!("- The default shell is Bash. Use Bash syntax for {shell_tool} commands.")
     };

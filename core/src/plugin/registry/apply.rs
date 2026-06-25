@@ -1,6 +1,12 @@
 //! Apply enabled plugin components to agent registries.
 
+use std::collections::HashMap;
+
+use crate::hooks::{HookCondition, HookEntry, HookPhase};
+use crate::mcp::McpServerConfig;
 use crate::plugin::PluginError;
+use crate::plugin::hook_loader::CommandHook;
+use crate::plugin::manifest::{McpServerEntry, McpServersConfig};
 use crate::plugin::registry::lifecycle::PluginRegistry;
 use crate::subagent::{AgentDefinition, AgentSource, SubagentRegistry};
 use std::path::Path;
@@ -18,9 +24,9 @@ impl PluginRegistry {
     pub fn apply(
         &self,
         tools: &mut crate::tool::ToolRegistry,
-        _hooks: &mut crate::hooks::HookRegistry,
+        hooks: &mut crate::hooks::HookRegistry,
         skills: &mut crate::skills::SkillRegistry,
-        _mcp: &mut crate::mcp::McpManager,
+        mcp: &mut crate::mcp::McpManager,
         prompt: &mut crate::prompt::PromptAssembly,
     ) -> Result<(), Vec<PluginError>> {
         let enabled = self.list_enabled();
@@ -54,30 +60,61 @@ impl PluginRegistry {
                 }
             }
 
-            // --- Unsupported component warnings ---
-            if plugin.manifest.hooks.is_some() {
-                tracing::warn!(
-                    plugin = %plugin.id,
-                    "plugin declares hooks but hook support is not yet implemented"
-                );
+            // --- Hooks ---
+            if let Some(ref hooks_config) = plugin.manifest.hooks {
+                component_count += 1;
+                let hook_count = register_plugin_hooks(hooks, hooks_config, plugin_id_str.clone());
+                if hook_count > 0 {
+                    loaded_count += 1;
+                }
             }
-            if plugin.manifest.mcp_servers.is_some() {
-                tracing::warn!(
-                    plugin = %plugin.id,
-                    "plugin declares MCP servers but MCP server support is not yet implemented"
-                );
+
+            // --- MCP Servers ---
+            if let Some(ref mcp_servers) = plugin.manifest.mcp_servers {
+                component_count += 1;
+                if let Err(e) =
+                    register_plugin_mcp_servers(mcp, mcp_servers, &plugin.path, &plugin_id_str)
+                {
+                    tracing::warn!(
+                        plugin = %plugin.id,
+                        error = %e,
+                        "failed to register plugin MCP servers"
+                    );
+                } else {
+                    loaded_count += 1;
+                }
             }
+
+            // --- LSP Servers ---
             if plugin.manifest.lsp_servers.is_some() {
-                tracing::warn!(
+                component_count += 1;
+                tracing::info!(
                     plugin = %plugin.id,
-                    "plugin declares LSP servers but LSP server support is not yet implemented"
+                    "plugin declares LSP servers — LSP integration not yet wired into the agent runtime"
                 );
+                loaded_count += 1;
             }
-            if plugin.manifest.output_styles.is_some() {
-                tracing::warn!(
-                    plugin = %plugin.id,
-                    "plugin declares output styles but output style support is not yet implemented"
-                );
+
+            // --- Output Styles ---
+            if let Some(ref styles) = plugin.manifest.output_styles {
+                component_count += styles.len();
+                for style_path in styles {
+                    let abs_path = plugin.path.join(style_path);
+                    if abs_path.exists() {
+                        tracing::info!(
+                            plugin = %plugin.id,
+                            style = %style_path,
+                            "plugin output style available (not yet wired into the agent runtime)"
+                        );
+                        loaded_count += 1;
+                    } else {
+                        tracing::warn!(
+                            plugin = %plugin.id,
+                            style = %style_path,
+                            "plugin output style file not found"
+                        );
+                    }
+                }
             }
 
             // --- Skills ---
@@ -99,20 +136,17 @@ impl PluginRegistry {
                     }
                 } else if skill_path.is_file() && skill_path.extension().is_some_and(|e| e == "md")
                 {
-                    // For single .md files, load from the containing directory
-                    // (the SkillLoader scans all .md files in a directory)
-                    if let Some(parent) = skill_path.parent() {
-                        match skills.inject_skills_from_dir(parent, source) {
-                            Ok(()) => loaded_count += 1,
-                            Err(e) => {
-                                tracing::warn!(
-                                    plugin = %plugin.id,
-                                    path = %parent.display(),
-                                    error = %e,
-                                    "failed to load plugin skill file"
-                                );
-                            }
-                        }
+                    if let Some(skill) =
+                        crate::skills::SkillLoader::load_skill_file(skill_path, source)
+                    {
+                        skills.register(skill);
+                        loaded_count += 1;
+                    } else {
+                        tracing::warn!(
+                            plugin = %plugin.id,
+                            path = %skill_path.display(),
+                            "failed to parse plugin skill file"
+                        );
                     }
                 }
             }
@@ -158,6 +192,33 @@ impl PluginRegistry {
         }
 
         if errors.is_empty() { Ok(()) } else { Err(errors) }
+    }
+
+    /// Re-apply only prompt sections from enabled plugins into a prompt assembly.
+    ///
+    /// This is a lighter variant of [`apply`](Self::apply) — it does not
+    /// re-register tools, hooks, skills, or MCP servers. Useful when the
+    /// prompt assembly is rebuilt (e.g. after tools change).
+    pub fn apply_prompt_sections(&self, prompt: &mut crate::prompt::PromptAssembly) {
+        for entry in self.list_enabled() {
+            let plugin = &entry.plugin;
+            let plugin_id_str = plugin.id.name.clone();
+            for section_path in &plugin.resolved_prompt_sections {
+                if section_path.is_file()
+                    && let Ok(template) = std::fs::read_to_string(section_path)
+                {
+                    let template =
+                        template.replace("${PLUGIN_ROOT}", &plugin.path.to_string_lossy());
+                    let stem =
+                        section_path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+                    let section = crate::plugin::PluginPromptSection {
+                        name: format!("plugin_{plugin_id_str}_{stem}"),
+                        template,
+                    };
+                    prompt.add(section);
+                }
+            }
+        }
     }
 
     /// Apply enabled plugin agent definitions into a subagent registry.
@@ -229,6 +290,133 @@ impl PluginRegistry {
         }
 
         if errors.is_empty() { Ok(()) } else { Err(errors) }
+    }
+}
+
+/// Map a plugin phase-name string to a [`HookPhase`] variant.
+fn phase_from_str(phase: &str, plugin_name: &str) -> Option<HookPhase> {
+    match phase {
+        "PreToolUse" => Some(HookPhase::PreToolUse { tool_name: String::new() }),
+        "PostToolUse" => Some(HookPhase::PostToolUse { tool_name: String::new() }),
+        "PostToolUseFailure" => Some(HookPhase::PostToolUseFailure { tool_name: String::new() }),
+        "SessionStart" => Some(HookPhase::SessionStart),
+        "UserPromptSubmit" => Some(HookPhase::UserPromptSubmit),
+        "PostSampling" => Some(HookPhase::PostSampling),
+        "Stop" => Some(HookPhase::Stop),
+        _ => {
+            tracing::warn!(
+                plugin = %plugin_name,
+                phase = %phase,
+                "unknown hook phase in plugin manifest"
+            );
+            None
+        }
+    }
+}
+
+/// Register plugin hook definitions into the hook registry.
+///
+/// Returns the number of hooks successfully registered.
+fn register_plugin_hooks(
+    hooks_registry: &mut crate::hooks::HookRegistry,
+    hooks_config: &crate::plugin::manifest::HooksConfig,
+    plugin_id_str: String,
+) -> usize {
+    let mut count = 0;
+    for (phase_name, matchers) in hooks_config {
+        let Some(hook_phase) = phase_from_str(phase_name, &plugin_id_str) else {
+            continue;
+        };
+        for matcher in matchers {
+            let condition = matcher
+                .matcher
+                .as_ref()
+                .map(|pattern| HookCondition { tool_name: Some(pattern.clone()) });
+            for hook_def in &matcher.hooks {
+                match hook_def {
+                    crate::plugin::manifest::HookDef::Command { command, args, timeout } => {
+                        let name = format!("plugin_{plugin_id_str}_hook_{phase_name}_{count}");
+                        let cmd_hook = CommandHook::new(
+                            name.clone(),
+                            command.clone(),
+                            args.clone(),
+                            hook_phase.clone(),
+                            *timeout,
+                        );
+                        hooks_registry.register_entry(HookEntry {
+                            hook: std::sync::Arc::new(cmd_hook),
+                            phase: hook_phase.clone(),
+                            condition: condition.clone(),
+                            once: false,
+                            async_exec: false,
+                        });
+                        count += 1;
+                    }
+                    crate::plugin::manifest::HookDef::Unknown => {
+                        tracing::warn!(
+                            plugin = %plugin_id_str,
+                            "unknown hook type in plugin manifest"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    count
+}
+
+/// Register MCP servers declared by a plugin into the MCP manager.
+fn register_plugin_mcp_servers(
+    mcp: &crate::mcp::McpManager,
+    mcp_servers: &McpServersConfig,
+    plugin_path: &Path,
+    plugin_id_str: &str,
+) -> Result<(), PluginError> {
+    let servers = match mcp_servers {
+        McpServersConfig::Inline(map) => map.clone(),
+        McpServersConfig::File(rel_path) => {
+            let abs_path = plugin_path.join(rel_path);
+            let content = std::fs::read_to_string(&abs_path).map_err(|e| {
+                PluginError::Io(format!(
+                    "failed to read plugin MCP config {}: {e}",
+                    abs_path.display()
+                ))
+            })?;
+            let value: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+                PluginError::Json(format!(
+                    "failed to parse plugin MCP config {}: {e}",
+                    abs_path.display()
+                ))
+            })?;
+            let config_val = value.get("mcpServers").unwrap_or(&value);
+            serde_json::from_value(config_val.clone()).map_err(|e| {
+                PluginError::Json(format!("failed to decode plugin MCP servers: {e}"))
+            })?
+        }
+    };
+    let namespace_id = |name: &str| -> String { format!("plugin__{plugin_id_str}__{name}") };
+    let server_configs: HashMap<String, McpServerConfig> = servers
+        .into_iter()
+        .map(|(name, entry): (String, McpServerEntry)| {
+            (namespace_id(&name), mcp_server_entry_to_config(entry))
+        })
+        .collect();
+    tokio::task::block_in_place(move || {
+        tokio::runtime::Handle::current().block_on(async {
+            mcp.register_servers(server_configs).await;
+        })
+    });
+    Ok(())
+}
+
+fn mcp_server_entry_to_config(entry: McpServerEntry) -> McpServerConfig {
+    McpServerConfig {
+        command: entry.command,
+        args: entry.args,
+        env: entry.env,
+        cwd: None,
+        auto_connect: entry.auto_connect,
+        timeout_ms: entry.timeout_ms,
     }
 }
 

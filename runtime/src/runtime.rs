@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -50,12 +51,54 @@ pub fn prepare_runtime(
         agent_config.skill_injector =
             Some(Arc::new(telos_agent::SkillInjector::new(skill_registry)));
     }
-    agent_config.prompt_assembly = Some(Arc::new(build_prompt_assembly(
-        &agent_config,
-        &tools,
-        &context,
-        memory_store.clone(),
-    )));
+
+    // Load project MCP servers
+    let mcp_config_path = project_root_or_cwd.join(".tiny-agent").join("mcp.json");
+    let mcp_manager = telos_agent::McpManager::load_config(&mcp_config_path)
+        .unwrap_or_else(|e| {
+            if mcp_config_path.exists() {
+                tracing::warn!(path = %mcp_config_path.display(), error = %e, "failed to load MCP config");
+            }
+            telos_agent::McpManager::new(HashMap::new())
+        });
+
+    // Create plugin registry and discover installed plugins
+    let plugin_registry = create_plugin_registry(&project_root_or_cwd);
+    agent_config.plugin_registry = plugin_registry.clone();
+
+    // Prepare registries for plugin apply
+    let hooks = hook_registry_for_config(&agent_config);
+    let skills = agent_config.skill_registry.clone().map(|r| (*r).clone()).unwrap_or_default();
+    let prompt = build_prompt_assembly(&agent_config, &tools, &context, memory_store.clone());
+
+    // Apply enabled plugins — always get the registries back
+    let (mut tools, hooks, skills, mcp_manager, mut prompt, plugin_result) =
+        agent_config.apply_plugins(tools, hooks, skills, mcp_manager, prompt);
+    agent_config.hooks = Arc::new(hooks);
+    agent_config.skill_registry = Some(Arc::new(skills));
+    if let Err(errors) = plugin_result {
+        for error in &errors {
+            tracing::warn!(?error, "plugin apply error");
+        }
+    }
+
+    // Connect all MCP servers and register their tools
+    let mcp_manager = Arc::new(mcp_manager);
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(async {
+            mcp_manager.connect_all().await;
+            for (server_id, mcp_tool) in mcp_manager.all_tools().await {
+                let bridge =
+                    telos_agent::McpToolBridge::new(server_id, mcp_tool, mcp_manager.clone());
+                tools.register(bridge);
+            }
+        });
+    });
+    agent_config.mcp_manager = Some(mcp_manager.clone());
+
+    // Add MCP section to the plugin-applied prompt assembly
+    prompt.add(telos_agent::McpSection::new(mcp_manager.clone()));
+    agent_config.prompt_assembly = Some(Arc::new(prompt));
 
     Ok(PreparedRuntime { agent_config, tools, project_root, context, memory_store })
 }
@@ -70,12 +113,23 @@ pub fn register_subagent_tool(
 }
 
 pub fn rebuild_prompt_assembly(runtime: &mut PreparedRuntime) {
-    runtime.agent_config.prompt_assembly = Some(Arc::new(build_prompt_assembly(
+    let mut prompt = build_prompt_assembly(
         &runtime.agent_config,
         &runtime.tools,
         &runtime.context,
         runtime.memory_store.clone(),
-    )));
+    );
+
+    // Re-apply plugin prompt sections
+    if let Some(ref registry) = runtime.agent_config.plugin_registry {
+        registry.apply_prompt_sections(&mut prompt);
+    }
+
+    if let Some(mcp_manager) = runtime.agent_config.mcp_manager.clone() {
+        prompt.add(telos_agent::McpSection::new(mcp_manager));
+    }
+
+    runtime.agent_config.prompt_assembly = Some(Arc::new(prompt));
 }
 
 fn build_prompt_assembly(
@@ -93,6 +147,42 @@ fn build_prompt_assembly(
     );
     context::append_prompt_context(&mut assembly, context);
     assembly
+}
+
+fn hook_registry_for_config(agent_config: &AgentConfig) -> telos_agent::HookRegistry {
+    agent_config.hooks.as_ref().clone()
+}
+
+fn create_plugin_registry(project_root_or_cwd: &Path) -> Option<Arc<telos_agent::PluginRegistry>> {
+    let telos_dir = project_root_or_cwd.join(".telos");
+    let plugins_root = telos_dir.join("plugins");
+    let mut registry = telos_agent::PluginRegistry::new(&plugins_root);
+
+    let installed_dir = registry.installed_dir();
+    if let Err(e) = std::fs::create_dir_all(&installed_dir) {
+        tracing::debug!(path = %installed_dir.display(), error = %e, "failed to create plugin installed dir");
+    }
+
+    let discovered = match registry.discover_installed() {
+        Ok(ids) => {
+            tracing::info!(count = ids.len(), "discovered installed plugins");
+            ids
+        }
+        Err(e) => {
+            tracing::debug!(error = %e, "failed to discover installed plugins");
+            Vec::new()
+        }
+    };
+
+    if discovered.is_empty() {
+        return None;
+    }
+
+    if let Err(e) = registry.load_state() {
+        tracing::warn!(error = %e, "failed to load plugin state");
+    }
+
+    Some(Arc::new(registry))
 }
 
 pub fn task_manager_for_root(project_root_or_cwd: &Path) -> Arc<telos_agent::TaskManager> {

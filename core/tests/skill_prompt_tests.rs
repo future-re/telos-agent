@@ -421,8 +421,8 @@ async fn full_coding_assembly_renders_extended_sections() {
 
 #[tokio::test]
 async fn prompt_assembly_build_stats_reports_section_sizes() {
-    use telos_agent::prompt::builtins::{CwdSection, DateSection, IdentitySection};
     use telos_agent::prompt::PromptAssembly;
+    use telos_agent::prompt::builtins::{CwdSection, DateSection, IdentitySection};
 
     let mut assembly = PromptAssembly::new();
     assembly.add(IdentitySection::new(None));

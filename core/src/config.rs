@@ -225,6 +225,9 @@ pub struct AgentConfig {
     /// When set, top matching skills are injected as system reminders
     /// before the first provider call of each turn.
     pub skill_injector: Option<Arc<crate::runtime::SkillInjector>>,
+    /// Optional MCP manager. When set, MCP server tools are bridged into the
+    /// tool registry and an MCP tools section is added to the prompt assembly.
+    pub mcp_manager: Option<Arc<crate::mcp::McpManager>>,
 }
 
 impl std::fmt::Debug for AgentConfig {
@@ -260,6 +263,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("task_manager", &self.task_manager.as_ref().map(|_| "<set>"))
             .field("memory_injector", &self.memory_injector.as_ref().map(|_| "<set>"))
             .field("skill_injector", &self.skill_injector.as_ref().map(|_| "<set>"))
+            .field("mcp_manager", &self.mcp_manager.as_ref().map(|_| "<set>"))
             .finish()
     }
 }
@@ -298,6 +302,7 @@ impl Default for AgentConfig {
             task_manager: None,
             memory_injector: None,
             skill_injector: None,
+            mcp_manager: None,
         }
     }
 }
@@ -476,9 +481,8 @@ impl AgentConfig {
         let mut registry = crate::skills::SkillRegistry::new();
         registry.load_bundled_skills();
         let registry = Arc::new(registry);
-        self.skill_injector = Some(Arc::new(crate::runtime::SkillInjector::new(Arc::clone(
-            &registry,
-        ))));
+        self.skill_injector =
+            Some(Arc::new(crate::runtime::SkillInjector::new(Arc::clone(&registry))));
         self.skill_registry = Some(registry);
         self
     }
@@ -487,8 +491,8 @@ impl AgentConfig {
     ///
     /// Call this before creating an [`AgentSession`](crate::AgentSession) to
     /// populate tools/hooks/skills/mcp/prompt with the content of any enabled
-    /// plugins. Returns the populated registries so they can be passed into
-    /// the session and its config.
+    /// plugins. Always returns the registries (even on error) so callers can
+    /// continue with degraded state.
     pub fn apply_plugins(
         &self,
         mut tools: crate::tool::ToolRegistry,
@@ -496,20 +500,20 @@ impl AgentConfig {
         mut skills: crate::skills::SkillRegistry,
         mut mcp: crate::mcp::McpManager,
         mut prompt: crate::prompt::PromptAssembly,
-    ) -> Result<
-        (
-            crate::tool::ToolRegistry,
-            crate::hooks::HookRegistry,
-            crate::skills::SkillRegistry,
-            crate::mcp::McpManager,
-            crate::prompt::PromptAssembly,
-        ),
-        Vec<crate::plugin::PluginError>,
-    > {
-        if let Some(registry) = &self.plugin_registry {
-            registry.apply(&mut tools, &mut hooks, &mut skills, &mut mcp, &mut prompt)?;
-        }
-        Ok((tools, hooks, skills, mcp, prompt))
+    ) -> (
+        crate::tool::ToolRegistry,
+        crate::hooks::HookRegistry,
+        crate::skills::SkillRegistry,
+        crate::mcp::McpManager,
+        crate::prompt::PromptAssembly,
+        Result<(), Vec<crate::plugin::PluginError>>,
+    ) {
+        let result = if let Some(registry) = &self.plugin_registry {
+            registry.apply(&mut tools, &mut hooks, &mut skills, &mut mcp, &mut prompt)
+        } else {
+            Ok(())
+        };
+        (tools, hooks, skills, mcp, prompt, result)
     }
 }
 

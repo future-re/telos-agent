@@ -508,7 +508,7 @@ fn clean_path(path: PathBuf) -> PathBuf {
 mod tests {
     use super::*;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn mock_host_runs_prompt_and_emits_finish_event() {
         let temp = tempfile::tempdir().expect("tempdir should be created");
         let mut host = AgentHost::new(
@@ -571,7 +571,7 @@ max_iterations = 9
         assert_eq!(resolved.memory_root, temp.path().join(".telos").join("memory"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn desktop_prompt_registers_system_subagent_tool() {
         let temp = tempfile::tempdir().expect("tempdir should be created");
         let shared = SharedOptions {

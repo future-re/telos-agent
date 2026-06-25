@@ -30,9 +30,7 @@ impl Tool for CodeSearchTool {
     }
 
     fn prompt_text(&self) -> Option<&'static str> {
-        Some(
-            "Use CodeSearch for indexed repository search before broad filesystem reads.",
-        )
+        Some("Use CodeSearch for indexed repository search before broad filesystem reads.")
     }
 
     fn is_concurrency_safe(&self, _arguments: &Value) -> bool {

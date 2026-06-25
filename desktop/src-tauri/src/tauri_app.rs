@@ -167,9 +167,8 @@ fn memory_summary(request: Option<ResolveSettingsRequest>) -> Result<MemoryOverv
 
 #[tauri::command]
 async fn extract_deepseek_text(window: Window) -> Result<ExtractResult, String> {
-    let webview = window
-        .get_webview("deepseek-panel")
-        .ok_or_else(|| "DeepSeek 面板未打开".to_string())?;
+    let webview =
+        window.get_webview("deepseek-panel").ok_or_else(|| "DeepSeek 面板未打开".to_string())?;
 
     let (tx, rx) = oneshot::channel();
     let tx = Arc::new(std::sync::Mutex::new(Some(tx)));
@@ -196,11 +195,9 @@ async fn extract_deepseek_text(window: Window) -> Result<ExtractResult, String> 
         .map_err(|_| "提取超时，请确保 DeepSeek 面板已加载完毕".to_string())?
         .unwrap_or_else(|_| "\"\"".to_string());
 
-    let extract: ExtractResult = serde_json::from_str(&json_text)
-        .unwrap_or_else(|_| ExtractResult {
-            text: json_text.trim_matches('"').to_string(),
-            messages: vec![],
-        });
+    let extract: ExtractResult = serde_json::from_str(&json_text).unwrap_or_else(|_| {
+        ExtractResult { text: json_text.trim_matches('"').to_string(), messages: vec![] }
+    });
 
     Ok(extract)
 }

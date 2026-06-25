@@ -111,7 +111,12 @@ impl MemoryStore {
     /// `query()` + `MemorySort::Relevance` (which sorts by metadata), this
     /// uses the actual content of the user's prompt to find semantically
     /// relevant memories via simple token overlap.
-    pub fn search_relevant(&self, query: &str, limit: usize, min_relevance: f64) -> Vec<MemoryEntry> {
+    pub fn search_relevant(
+        &self,
+        query: &str,
+        limit: usize,
+        min_relevance: f64,
+    ) -> Vec<MemoryEntry> {
         let query_tokens = tokenize(query);
         if query_tokens.is_empty() || self.cache.is_empty() {
             return Vec::new();
@@ -179,10 +184,8 @@ fn token_overlap(query_tokens: &[String], entry_tokens: &[String]) -> f64 {
     if query_tokens.is_empty() || entry_tokens.is_empty() {
         return 0.0;
     }
-    let matches = query_tokens
-        .iter()
-        .filter(|qt| entry_tokens.iter().any(|et| token_match(qt, et)))
-        .count();
+    let matches =
+        query_tokens.iter().filter(|qt| entry_tokens.iter().any(|et| token_match(qt, et))).count();
     matches as f64 / query_tokens.len() as f64
 }
 

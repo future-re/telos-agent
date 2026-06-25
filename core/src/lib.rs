@@ -226,12 +226,12 @@ pub use team::{
 // MCP — stdio-based Model Context Protocol client + manager + bridge.
 pub use mcp::{McpClient, McpManager, McpTool, McpToolBridge};
 // Plugin — marketplace-based plugin system for extensibility.
-pub use plugin::{BUILTIN_MARKETPLACE, PluginError, PluginId, PluginPromptSection};
+pub use plugin::{BUILTIN_MARKETPLACE, PluginError, PluginId, PluginPromptSection, PluginRegistry};
 // Prompt system — modular, cache-aware construction of the system prompt.
 pub use prompt::{
     CwdSection, DateSection, GitStatusSection, IdentitySection, McpSection, MemorySection,
-    ProfileSection, PromptAssembly, PromptProfile, PromptSection, PromptSectionStat, PromptStats,
-    PromptStability, SafetySection, ShellAwareToolUsageSection, SkillsSection,
+    ProfileSection, PromptAssembly, PromptProfile, PromptSection, PromptSectionStat,
+    PromptStability, PromptStats, SafetySection, ShellAwareToolUsageSection, SkillsSection,
     TaskGuidanceSection, ToneStyleSection, ToolUsageSection, ToolsSection,
 };
 // Tool abstraction — the trait every callable capability implements, plus its registry.

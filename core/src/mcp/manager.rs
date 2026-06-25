@@ -51,6 +51,13 @@ impl McpManager {
         if let Some(map) = servers_map {
             for (name, server_cfg) in map {
                 let command = server_cfg.get("command").and_then(|v| v.as_str()).unwrap_or("");
+                if command.is_empty() {
+                    tracing::warn!(
+                        server = %name,
+                        "MCP server config missing 'command' field — skipping"
+                    );
+                    continue;
+                }
                 let args: Vec<String> = server_cfg
                     .get("args")
                     .and_then(|v| v.as_array())
@@ -70,15 +77,37 @@ impl McpManager {
         Ok(Self::new(servers))
     }
 
+    /// Register a new server configuration. If a server with the same id
+    /// already exists, it is replaced.
+    pub async fn register_server(&self, id: String, config: McpServerConfig) {
+        let mut servers = self.servers.lock().await;
+        let client = McpClient::new(config.clone());
+        servers.insert(id, McpServerHandle { config, client, connected: false });
+    }
+
+    /// Register multiple servers from a map of configs.
+    pub async fn register_servers(&self, new_servers: HashMap<String, McpServerConfig>) {
+        let mut servers = self.servers.lock().await;
+        for (id, config) in new_servers {
+            let client = McpClient::new(config.clone());
+            servers.insert(id, McpServerHandle { config, client, connected: false });
+        }
+    }
+
     /// Connect all servers with `auto_connect` enabled.
     pub async fn connect_all(&self) {
         let mut servers = self.servers.lock().await;
-        for (_, handle) in servers.iter_mut() {
-            if handle.config.auto_connect
-                && !handle.connected
-                && handle.client.connect().await.is_ok()
-            {
-                handle.connected = true;
+        for (id, handle) in servers.iter_mut() {
+            if handle.config.auto_connect && !handle.connected {
+                match handle.client.connect().await {
+                    Ok(()) => {
+                        handle.connected = true;
+                        tracing::info!(server = %id, "MCP server connected");
+                    }
+                    Err(e) => {
+                        tracing::warn!(server = %id, error = %e, "MCP server failed to connect");
+                    }
+                }
             }
         }
     }

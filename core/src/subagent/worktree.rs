@@ -5,6 +5,8 @@
 //! prevent worktree nesting and protect the main repo from accidental mutation
 //! by isolated subagent runs.
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -60,7 +62,8 @@ pub fn create_subagent_worktree(
     .map_err(|e| AgentError::Config(format!("failed to create worktree parent dir: {e}")))?;
 
     // Create the worktree with detached HEAD.
-    let output = Command::new("git")
+    let mut command = hidden_command("git");
+    let output = command
         .args([
             "worktree",
             "add",
@@ -104,7 +107,8 @@ pub fn remove_subagent_worktree(
     }
 
     // Run git worktree remove
-    let output = Command::new("git")
+    let mut command = hidden_command("git");
+    let output = command
         .args(["worktree", "remove", "--force", worktree_path.to_str().unwrap_or("")])
         .output()
         .map_err(|e| AgentError::Config(format!("failed to run git worktree remove: {e}")))?;
@@ -124,14 +128,15 @@ pub fn remove_subagent_worktree(
     }
 
     // Prune stale metadata.
-    let _ = Command::new("git").args(["worktree", "prune"]).output();
+    let _ = hidden_command("git").args(["worktree", "prune"]).output();
 
     Ok(())
 }
 
 /// Check if a worktree has uncommitted changes (modified or untracked files).
 pub fn has_worktree_changes(worktree_path: &Path) -> Result<bool, AgentError> {
-    let output = Command::new("git")
+    let mut command = hidden_command("git");
+    let output = command
         .args(["status", "--porcelain", "-uno"])
         .current_dir(worktree_path)
         .output()
@@ -139,6 +144,16 @@ pub fn has_worktree_changes(worktree_path: &Path) -> Result<bool, AgentError> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(!stdout.trim().is_empty())
+}
+
+fn hidden_command(program: &str) -> Command {
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
 }
 
 /// Clean up stale ephemeral subagent worktrees older than the cutoff.

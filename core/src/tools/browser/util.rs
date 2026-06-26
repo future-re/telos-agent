@@ -1,3 +1,5 @@
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -91,11 +93,10 @@ pub(super) fn find_browser_path(context: &ToolContext) -> Result<PathBuf, AgentE
 }
 
 fn command_exists(command: &str) -> bool {
-    std::process::Command::new(command)
-        .arg("--version")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+    let mut command = std::process::Command::new(command);
+    command.arg("--version");
+    hide_console_window(&mut command);
+    command.output().map(|output| output.status.success()).unwrap_or(false)
 }
 
 fn browser_candidates() -> Vec<PathBuf> {
@@ -118,7 +119,7 @@ fn browser_candidates() -> Vec<PathBuf> {
 
 pub(super) fn browser_arg_path(browser_path: &Path, path: &Path) -> String {
     if is_windows_browser_path(browser_path)
-        && let Ok(output) = std::process::Command::new("wslpath").arg("-w").arg(path).output()
+        && let Ok(output) = wslpath_to_windows(path)
         && output.status.success()
     {
         let converted = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -127,6 +128,21 @@ pub(super) fn browser_arg_path(browser_path: &Path, path: &Path) -> String {
         }
     }
     path.display().to_string()
+}
+
+fn wslpath_to_windows(path: &Path) -> std::io::Result<std::process::Output> {
+    let mut command = std::process::Command::new("wslpath");
+    command.arg("-w").arg(path);
+    hide_console_window(&mut command);
+    command.output()
+}
+
+fn hide_console_window(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
 }
 
 fn is_windows_browser_path(path: &Path) -> bool {

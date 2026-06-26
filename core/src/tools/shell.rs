@@ -96,6 +96,7 @@ Provide a short `description` of the command's intent. Avoid superuser commands 
             // would leak secrets (API keys, tokens) to arbitrary tool calls.
             .env_clear()
             .envs(context.env.iter());
+        hide_console_window(&mut child);
         #[cfg(unix)]
         {
             child.process_group(0);
@@ -156,6 +157,14 @@ async fn run_shell_child(mut command: Command) -> std::io::Result<std::process::
     let stderr = stderr_task.await.map_err(std::io::Error::other)??;
 
     Ok(std::process::Output { status, stdout, stderr })
+}
+
+fn hide_console_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
 }
 
 struct ProcessCleanupGuard {

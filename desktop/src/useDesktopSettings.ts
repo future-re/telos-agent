@@ -8,7 +8,7 @@ import {
 
 const fallbackSettings: ResolvedDesktopSettings = {
   provider: "deepseek",
-  model: "auto",
+  model: "flash",
   cwd: "",
   projectRootOrCwd: "",
   memoryRoot: "",
@@ -161,10 +161,22 @@ function normalizeOverrides(
     provider: overrides.provider ?? settings.provider,
     apiKey: overrides.apiKey?.trim() || undefined,
     cwd: overrides.cwd?.trim() || settings.cwd || undefined,
-    model: overrides.model?.trim() || settings.model || "auto",
+    model: normalizeModelOverride(overrides.model ?? settings.model),
     maxIterations: overrides.maxIterations ?? settings.maxIterations,
     autoApprove: overrides.autoApprove ?? settings.autoApprove,
   };
+}
+
+function normalizeModelOverride(model?: string): string {
+  switch (model?.trim().toLowerCase()) {
+    case "pro":
+    case "deepseek-v4-pro":
+      return "pro";
+    case "flash":
+    case "deepseek-v4-flash":
+    default:
+      return "flash";
+  }
 }
 
 function definedOverrides(overrides: DesktopSettingsOverrides) {

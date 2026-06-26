@@ -61,20 +61,18 @@ function normalizeModel(model?: string): {
   switch (value) {
     case "":
     case undefined:
-    case "auto":
-      return { label: "自动路由", description: "按任务自动选择 Pro 或 Flash" };
-    case "pro":
-    case "deepseek-v4-pro":
-      return { label: "DeepSeek V4 Pro", description: "适合复杂推理和规划" };
     case "flash":
     case "deepseek-v4-flash":
       return {
         label: "DeepSeek V4 Flash",
         description: "适合快速响应和轻量任务",
       };
+    case "pro":
+    case "deepseek-v4-pro":
+      return { label: "DeepSeek V4 Pro", description: "适合复杂推理和规划" };
     default:
       return {
-        label: model?.trim() || "自动路由",
+        label: model?.trim() || "DeepSeek V4 Flash",
         description: "来自配置文件的自定义模型",
       };
   }

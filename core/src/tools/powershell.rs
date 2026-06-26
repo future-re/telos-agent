@@ -313,9 +313,9 @@ mod tests {
 
     #[test]
     fn build_args_use_noninteractive_no_profile_command() {
-        assert_eq!(
-            build_powershell_args("Get-Process"),
-            vec!["-NoProfile", "-NonInteractive", "-Command", "Get-Process"]
-        );
+        let args = build_powershell_args("Get-Process");
+        assert_eq!(&args[..3], ["-NoProfile", "-NonInteractive", "-Command"]);
+        assert!(args[3].contains("[Console]::OutputEncoding"));
+        assert!(args[3].ends_with("Get-Process"));
     }
 }

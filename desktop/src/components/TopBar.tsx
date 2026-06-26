@@ -497,9 +497,8 @@ function SettingsDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="auto">自动</SelectItem>
-                    <SelectItem value="pro">Pro</SelectItem>
                     <SelectItem value="flash">Flash</SelectItem>
+                    <SelectItem value="pro">Pro</SelectItem>
                   </SelectContent>
                 </Select>
               </label>
@@ -601,7 +600,7 @@ const sectionMeta: Record<
   },
   model: {
     title: "模型设置",
-    description: "选择自动路由、Pro 或 Flash。",
+    description: "选择 Flash 或 Pro。",
   },
   directory: {
     title: "工作目录",
@@ -663,8 +662,7 @@ function normalizeModelValue(model?: string): string {
       return "pro";
     case "flash":
     case "deepseek-v4-flash":
-      return "flash";
     default:
-      return "auto";
+      return "flash";
   }
 }

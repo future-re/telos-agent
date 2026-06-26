@@ -67,6 +67,7 @@ impl BrowserSession {
         if optional_bool(arguments, "no_sandbox").unwrap_or(false) {
             command.arg("--no-sandbox");
         }
+        hide_console_window(&mut command);
 
         emit_progress(context, "starting managed Chromium", json!({ "port": port }));
         let process = command.spawn().map_err(|err| AgentError::ToolExecution {
@@ -350,6 +351,14 @@ impl BrowserSession {
             )));
         }
         Ok(())
+    }
+}
+
+fn hide_console_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
     }
 }
 

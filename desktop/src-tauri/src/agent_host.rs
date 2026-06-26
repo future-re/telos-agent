@@ -17,6 +17,8 @@ use telos_runtime::{ProviderKind as RuntimeProviderKind, SharedOptions};
 
 use crate::desktop_event::{DesktopEvent, map_turn_event};
 
+const DESKTOP_DEFAULT_MODEL: &str = "flash";
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
@@ -116,9 +118,6 @@ impl AgentHost {
 
         let provider = match config::build_provider(&shared, &merged).map_err(|e| e.to_string())? {
             ResolvedProvider::DeepSeek(provider) => {
-                Arc::new(provider) as Arc<dyn ModelProvider + Send + Sync>
-            }
-            ResolvedProvider::Routed(provider) => {
                 Arc::new(provider) as Arc<dyn ModelProvider + Send + Sync>
             }
             ResolvedProvider::Mock(_) => Arc::new(MockProvider::new(vec![CompletionResponse {
@@ -266,7 +265,8 @@ pub fn resolve_desktop_settings(
         .model
         .clone()
         .or_else(|| merged.agent.as_ref()?.model.clone())
-        .unwrap_or_else(|| "auto".to_string());
+        .map(|model| normalize_desktop_model(&model))
+        .unwrap_or_else(|| DESKTOP_DEFAULT_MODEL.to_string());
     let auto_approve = overrides.auto_approve.or(merged.auto_mode).unwrap_or(false);
     let max_iterations =
         shared.max_iterations.or_else(|| merged.agent.as_ref()?.max_iterations).unwrap_or(30);
@@ -302,7 +302,13 @@ pub fn save_deepseek_api_key(api_key: &str) -> Result<ResolvedDesktopSettings, S
     };
     let mut agent = config.agent.unwrap_or_default();
     agent.provider = Some("deepseek".into());
-    agent.model = agent.model.or_else(|| Some("auto".into()));
+    agent.model = Some(
+        agent
+            .model
+            .as_deref()
+            .map(normalize_desktop_model)
+            .unwrap_or_else(|| DESKTOP_DEFAULT_MODEL.to_string()),
+    );
     config.agent = Some(agent);
     let mut env = config.env.unwrap_or_default();
     env.insert("DEEPSEEK_API_KEY".into(), trimmed.to_string());
@@ -437,7 +443,8 @@ fn settings_from_config(
             .agent
             .as_ref()
             .and_then(|agent| agent.model.clone())
-            .unwrap_or_else(|| "auto".into()),
+            .map(|model| normalize_desktop_model(&model))
+            .unwrap_or_else(|| DESKTOP_DEFAULT_MODEL.into()),
         cwd: project_root_or_cwd.clone(),
         project_root,
         project_root_or_cwd,
@@ -460,7 +467,7 @@ fn shared_options(
             ProviderKind::Deepseek => RuntimeProviderKind::Deepseek,
             ProviderKind::Mock => RuntimeProviderKind::Mock,
         }),
-        model: overrides.model.clone().or_else(|| Some(resolved.model.clone())),
+        model: Some(normalize_desktop_model(overrides.model.as_deref().unwrap_or(&resolved.model))),
         api_key: overrides
             .api_key
             .as_deref()
@@ -470,6 +477,15 @@ fn shared_options(
         cwd: Some(overrides.cwd.clone().unwrap_or_else(|| resolved.cwd.clone())),
         max_iterations: overrides.max_iterations.or(Some(resolved.max_iterations)),
         ..SharedOptions::default()
+    }
+}
+
+fn normalize_desktop_model(model: &str) -> String {
+    match model.trim().to_lowercase().as_str() {
+        "" => DESKTOP_DEFAULT_MODEL.into(),
+        "deepseek-v4-flash" => "flash".into(),
+        "deepseek-v4-pro" => "pro".into(),
+        other => other.into(),
     }
 }
 
@@ -553,7 +569,7 @@ max_iterations = 9
         .unwrap();
 
         assert_eq!(resolved.provider, ProviderKind::Mock);
-        assert_eq!(resolved.model, "deepseek-v4-flash");
+        assert_eq!(resolved.model, "flash");
         assert_eq!(resolved.max_iterations, 9);
         assert_eq!(resolved.project_root.as_deref(), Some(temp.path()));
     }

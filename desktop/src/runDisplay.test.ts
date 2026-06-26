@@ -44,8 +44,8 @@ describe("buildRunDisplay", () => {
       }),
     ).toMatchObject({
       providerLabel: "Mock",
-      modelLabel: "自动路由",
-      modelDescription: "按任务自动选择 Pro 或 Flash",
+      modelLabel: "DeepSeek V4 Flash",
+      modelDescription: "适合快速响应和轻量任务",
       cwdLabel: "启动目录",
       projectLabel: "未检测到项目根目录",
       workspaceLabel: "启动目录",

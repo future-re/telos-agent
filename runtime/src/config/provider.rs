@@ -3,16 +3,11 @@ use std::io::IsTerminal;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use telos_agent::{
-    AgentConfig, ApprovalHandler, DeepSeekConfig, DeepSeekProvider, MockProvider,
-    RoutedModelConfig, RoutedProvider,
-};
+use telos_agent::{AgentConfig, ApprovalHandler, DeepSeekConfig, DeepSeekProvider, MockProvider};
 
 use super::FileConfig;
 use crate::options::{ProviderKind, ProviderSetup, SharedOptions};
 
-const DEEPSEEK_AUTO_MODE: &str = "hybrid";
-const DEEPSEEK_AUTO_MODE_OLD: &str = "auto";
 const DEEPSEEK_PRO_ALIAS: &str = "pro";
 const DEEPSEEK_FLASH_ALIAS: &str = "flash";
 const DEEPSEEK_PRO_MODEL: &str = "deepseek-v4-pro";
@@ -20,13 +15,7 @@ const DEEPSEEK_FLASH_MODEL: &str = "deepseek-v4-flash";
 
 pub enum ResolvedProvider {
     DeepSeek(DeepSeekProvider),
-    Routed(RoutedProvider),
     Mock(MockProvider),
-}
-
-enum DeepSeekModelSelection {
-    Routed { thinking: String, fast: String },
-    Single(String),
 }
 
 pub fn build_agent_config(
@@ -66,20 +55,8 @@ pub fn build_provider(options: &SharedOptions, config: &FileConfig) -> Result<Re
             let api_key =
                 resolve_api_key(provider, options.api_key.clone(), config_env, "DEEPSEEK_API_KEY")?;
 
-            match resolve_deepseek_model_selection(options, config) {
-                DeepSeekModelSelection::Routed { thinking, fast } if thinking != fast => {
-                    let routed_config = RoutedModelConfig::dual(api_key, thinking, fast);
-                    Ok(ResolvedProvider::Routed(RoutedProvider::new(routed_config)))
-                }
-                DeepSeekModelSelection::Routed { thinking, .. } => {
-                    let cfg = DeepSeekConfig::new(api_key, thinking);
-                    Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
-                }
-                DeepSeekModelSelection::Single(model) => {
-                    let cfg = DeepSeekConfig::new(api_key, model);
-                    Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
-                }
-            }
+            let cfg = DeepSeekConfig::new(api_key, resolve_deepseek_model(options, config));
+            Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
         }
         ProviderKind::Mock => Ok(ResolvedProvider::Mock(MockProvider::new(vec![]))),
     }
@@ -88,66 +65,24 @@ pub fn build_provider(options: &SharedOptions, config: &FileConfig) -> Result<Re
 pub fn build_provider_from_setup(result: &ProviderSetup) -> Result<ResolvedProvider> {
     match result.provider {
         ProviderKind::Deepseek => {
-            if result.thinking_model != result.fast_model {
-                let routed_config = RoutedModelConfig::dual(
-                    result.api_key.clone(),
-                    result.thinking_model.clone(),
-                    result.fast_model.clone(),
-                );
-                Ok(ResolvedProvider::Routed(RoutedProvider::new(routed_config)))
-            } else {
-                let cfg = DeepSeekConfig::new(&result.api_key, &result.thinking_model);
-                Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
-            }
+            let cfg = DeepSeekConfig::new(&result.api_key, &result.fast_model);
+            Ok(ResolvedProvider::DeepSeek(DeepSeekProvider::new(cfg)))
         }
         ProviderKind::Mock => Ok(ResolvedProvider::Mock(MockProvider::new(vec![]))),
     }
 }
 
-fn resolve_deepseek_model_selection(
-    options: &SharedOptions,
-    config: &FileConfig,
-) -> DeepSeekModelSelection {
+fn resolve_deepseek_model(options: &SharedOptions, config: &FileConfig) -> String {
     let explicit_model = options.model.clone().or_else(|| config.agent.as_ref()?.model.clone());
 
     match explicit_model.as_deref().map(str::trim).filter(|model| !model.is_empty()) {
-        Some(model)
-            if model.eq_ignore_ascii_case(DEEPSEEK_AUTO_MODE)
-                || model.eq_ignore_ascii_case(DEEPSEEK_AUTO_MODE_OLD) =>
-        {
-            DeepSeekModelSelection::Routed {
-                thinking: configured_thinking_model(options, config),
-                fast: configured_fast_model(options, config),
-            }
-        }
-        Some(model) if model.eq_ignore_ascii_case(DEEPSEEK_PRO_ALIAS) => {
-            DeepSeekModelSelection::Single(DEEPSEEK_PRO_MODEL.into())
-        }
+        Some(model) if model.eq_ignore_ascii_case(DEEPSEEK_PRO_ALIAS) => DEEPSEEK_PRO_MODEL.into(),
         Some(model) if model.eq_ignore_ascii_case(DEEPSEEK_FLASH_ALIAS) => {
-            DeepSeekModelSelection::Single(DEEPSEEK_FLASH_MODEL.into())
+            DEEPSEEK_FLASH_MODEL.into()
         }
-        Some(model) => DeepSeekModelSelection::Single(model.to_string()),
-        None => DeepSeekModelSelection::Routed {
-            thinking: configured_thinking_model(options, config),
-            fast: configured_fast_model(options, config),
-        },
+        Some(model) => model.to_string(),
+        None => DEEPSEEK_FLASH_MODEL.into(),
     }
-}
-
-fn configured_thinking_model(options: &SharedOptions, config: &FileConfig) -> String {
-    options
-        .thinking_model
-        .clone()
-        .or_else(|| config.agent.as_ref()?.models.as_ref()?.thinking.clone())
-        .unwrap_or_else(|| DEEPSEEK_PRO_MODEL.into())
-}
-
-fn configured_fast_model(options: &SharedOptions, config: &FileConfig) -> String {
-    options
-        .fast_model
-        .clone()
-        .or_else(|| config.agent.as_ref()?.models.as_ref()?.fast.clone())
-        .unwrap_or_else(|| DEEPSEEK_FLASH_MODEL.into())
 }
 
 fn provider_from_config(config: &FileConfig) -> Option<ProviderKind> {

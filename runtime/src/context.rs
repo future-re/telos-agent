@@ -46,7 +46,8 @@ fn load_git_status(root: &Path) -> Option<String> {
     if output.status.success() { String::from_utf8(output.stdout).ok() } else { None }
 }
 
-fn hide_console_window(_command: &mut std::process::Command) {
+#[cfg_attr(not(windows), allow(unused_variables))]
+fn hide_console_window(command: &mut std::process::Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

@@ -246,7 +246,8 @@ fn is_bare_executable(command: &str) -> bool {
     !command.starts_with('.') && !command.contains('/') && !command.contains('\\')
 }
 
-fn hide_console_window(_command: &mut TokioCommand) {
+#[cfg_attr(not(windows), allow(unused_variables))]
+fn hide_console_window(command: &mut TokioCommand) {
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;

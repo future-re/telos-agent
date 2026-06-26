@@ -224,7 +224,8 @@ fn trim_large_output(output: &str) -> String {
     format!("{preview}\n<truncated output after {MAX_CHARS} chars>")
 }
 
-fn hide_console_window(_command: &mut Command) {
+#[cfg_attr(not(windows), allow(unused_variables))]
+fn hide_console_window(command: &mut Command) {
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -232,7 +233,8 @@ fn hide_console_window(_command: &mut Command) {
     }
 }
 
-fn hide_console_window_std(_command: &mut std::process::Command) {
+#[cfg_attr(not(windows), allow(unused_variables))]
+fn hide_console_window_std(command: &mut std::process::Command) {
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;

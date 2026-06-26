@@ -247,7 +247,8 @@ impl McpClient {
     }
 }
 
-fn hide_console_window(_command: &mut Command) {
+#[cfg_attr(not(windows), allow(unused_variables))]
+fn hide_console_window(command: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

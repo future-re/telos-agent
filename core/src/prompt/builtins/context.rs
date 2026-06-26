@@ -114,7 +114,8 @@ impl PromptSection for GitStatusSection {
     }
 }
 
-fn hide_console_window(_command: &mut std::process::Command) {
+#[cfg_attr(not(windows), allow(unused_variables))]
+fn hide_console_window(command: &mut std::process::Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

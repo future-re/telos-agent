@@ -33,6 +33,7 @@ export function App() {
     resetAllSessionStates,
     selectSession,
     sessions,
+    sessionsReady,
     state,
     startPrompt,
   } = useConversationSessions();

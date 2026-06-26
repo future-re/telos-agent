@@ -137,7 +137,7 @@ fn wslpath_to_windows(path: &Path) -> std::io::Result<std::process::Output> {
     command.output()
 }
 
-fn hide_console_window(command: &mut std::process::Command) {
+fn hide_console_window(_command: &mut std::process::Command) {
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;

@@ -101,7 +101,7 @@ Create parent directories automatically.",
             "file_path": input_path,
             "path": path,
             "written": true,
-            "bytes": content.as_bytes().len(),
+            "bytes": content.len(),
             "content_preview": content_preview,
             "content_truncated": content_truncated,
         })))

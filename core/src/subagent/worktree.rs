@@ -147,7 +147,7 @@ pub fn has_worktree_changes(worktree_path: &Path) -> Result<bool, AgentError> {
 }
 
 fn hidden_command(program: &str) -> Command {
-    let mut command = Command::new(program);
+    let command = Command::new(program);
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;

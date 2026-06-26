@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use telos_agent::{
     AgentSession, ApprovalDecision, ApprovalHandler, AutoDenyHandler, CompletionResponse,
     FixedDecisionHandler, JsonlStorage, MemoryCategory, MemoryEntry, MemoryQuery, MemorySort,
-    MemoryStatus, Message, MockProvider, ModelProvider, StopReason, ToolRegistry,
+    MemoryStatus, Message, MockProvider, ModelProvider, Role, StopReason, Storage, ToolRegistry,
 };
 use telos_runtime::config::{self, FileConfig, ResolvedProvider};
 use telos_runtime::context::ProjectContext;
@@ -85,6 +85,103 @@ pub struct MemoryPreview {
     pub updated: String,
     pub times_used: u32,
     pub tags: Vec<String>,
+}
+
+#[allow(dead_code)] // Used by Tauri commands for session history.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSummary {
+    pub id: String,
+    pub title: String,
+    pub message_count: usize,
+    pub created_at_ms: u64,
+    pub updated_at_ms: u64,
+}
+
+#[allow(dead_code)] // Called by Tauri command wrappers for session history.
+pub async fn list_sessions(cwd: Option<PathBuf>) -> Result<Vec<SessionSummary>, String> {
+    let resolved =
+        resolve_desktop_settings(&DesktopSettingsOverrides { cwd, ..Default::default() })?;
+    let sessions_dir = resolved.project_root_or_cwd.join(".telos").join("desktop-sessions");
+
+    if !sessions_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let storage = JsonlStorage::new(&sessions_dir).map_err(|e| e.to_string())?;
+
+    let mut sessions = Vec::new();
+    let mut dir = tokio::fs::read_dir(&sessions_dir).await.map_err(|e| e.to_string())?;
+
+    while let Some(entry) = dir.next_entry().await.map_err(|e| e.to_string())? {
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        let session_id = match file_name.strip_suffix(".jsonl") {
+            Some(id) => id.to_string(),
+            None => continue,
+        };
+
+        let messages = match storage.load(&session_id).await {
+            Ok(msgs) => msgs,
+            Err(_) => continue,
+        };
+
+        let (title, message_count) = extract_session_info(&messages);
+        let path = sessions_dir.join(format!("{session_id}.jsonl"));
+
+        let meta = tokio::fs::metadata(&path).await.ok();
+
+        let to_ms = |t: Option<std::time::SystemTime>| -> u64 {
+            t.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+        };
+
+        sessions.push(SessionSummary {
+            id: session_id,
+            title,
+            message_count,
+            created_at_ms: to_ms(meta.as_ref().and_then(|m| m.created().ok())),
+            updated_at_ms: to_ms(meta.as_ref().and_then(|m| m.modified().ok())),
+        });
+    }
+
+    sessions.sort_by_key(|s| s.updated_at_ms);
+    sessions.reverse();
+    Ok(sessions)
+}
+
+fn extract_session_info(messages: &[Message]) -> (String, usize) {
+    let title = messages
+        .iter()
+        .find(|m| m.role == Role::User)
+        .map(|m| {
+            let text = m.text_content();
+            let compact: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            if compact.chars().count() <= 32 {
+                compact
+            } else {
+                format!("{}...", compact.chars().take(32).collect::<String>())
+            }
+        })
+        .unwrap_or_else(|| "新对话".to_string());
+    let count = messages.iter().filter(|m| m.role == Role::User).count();
+    (title, count)
+}
+
+#[allow(dead_code)] // Called by Tauri command wrappers for session history.
+pub async fn load_session_messages(
+    session_id: &str,
+    cwd: Option<PathBuf>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let resolved =
+        resolve_desktop_settings(&DesktopSettingsOverrides { cwd, ..Default::default() })?;
+    let sessions_dir = resolved.project_root_or_cwd.join(".telos").join("desktop-sessions");
+    let storage = JsonlStorage::new(sessions_dir).map_err(|e| e.to_string())?;
+    let messages = storage.load(session_id).await.map_err(|e| e.to_string())?;
+    let values: Vec<serde_json::Value> =
+        messages.iter().map(|m| serde_json::to_value(m).unwrap_or_default()).collect();
+    Ok(values)
 }
 
 pub struct AgentHost {

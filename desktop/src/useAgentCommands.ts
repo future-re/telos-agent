@@ -91,12 +91,6 @@ export function useAgentCommands({
     if (!deleteConversation(sessionId)) {
       return;
     }
-
-    if (isTauriRuntime()) {
-      invoke("reset_session", { request: { sessionId } }).catch(
-        () => undefined,
-      );
-    }
     clearApproval(sessionId);
   }
 

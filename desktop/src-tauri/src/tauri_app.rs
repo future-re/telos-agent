@@ -8,7 +8,8 @@ use tokio::sync::{Mutex, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use crate::agent_host::{
-    AgentHost, DesktopSettingsOverrides, MemoryOverview, ResolvedDesktopSettings, memory_overview,
+    AgentHost, DesktopSettingsOverrides, MemoryOverview, ResolvedDesktopSettings, SessionSummary,
+    list_sessions as list_sessions_impl, load_session_messages, memory_overview,
     resolve_desktop_settings, save_deepseek_api_key,
 };
 
@@ -87,6 +88,13 @@ struct ResolveApprovalRequest {
     approval_id: String,
     decision: String,
     arguments: Option<Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoadSessionRequest {
+    session_id: String,
+    cwd: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -168,6 +176,18 @@ fn memory_summary(request: Option<ResolveSettingsRequest>) -> Result<MemoryOverv
         cwd: request.and_then(|request| request.cwd),
         ..DesktopSettingsOverrides::default()
     })
+}
+
+#[tauri::command]
+async fn list_sessions(
+    request: Option<ResolveSettingsRequest>,
+) -> Result<Vec<SessionSummary>, String> {
+    list_sessions_impl(request.and_then(|r| r.cwd)).await
+}
+
+#[tauri::command]
+async fn load_session(request: LoadSessionRequest) -> Result<Vec<serde_json::Value>, String> {
+    load_session_messages(&request.session_id, request.cwd).await
 }
 
 #[tauri::command]
@@ -351,6 +371,8 @@ pub fn run() {
             resolved_settings,
             save_deepseek_key,
             memory_summary,
+            list_sessions,
+            load_session,
             extract_deepseek_text,
             reset_all_sessions,
             reset_session,

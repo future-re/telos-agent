@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   ChatState,
   TelosEvent,
@@ -13,6 +14,7 @@ import {
   renameSessionFromPrompt,
   updateSessionState,
 } from "@/conversationSession";
+import { loadSessionList, loadSessionMessages } from "@/sessionLoader";
 
 export type ChatAction =
   | { type: "start"; prompt: string }
@@ -21,20 +23,89 @@ export type ChatAction =
   | { type: "reset" };
 
 export function useConversationSessions(initialSessionId = "session-1") {
-  const initialSession = useMemo(
-    () => createConversationSession(initialSessionId),
-    [initialSessionId],
-  );
-  const [sessions, setSessions] = useState<ConversationSession[]>([
-    initialSession,
-  ]);
-  const [activeSessionId, setActiveSessionId] = useState(initialSession.id);
+  const [sessions, setSessions] = useState<ConversationSession[]>([]);
+  const [activeSessionId, setActiveSessionId] =
+    useState(initialSessionId);
+  const [sessionsReady, setSessionsReady] = useState(false);
+  const loadedSessionsRef = useRef(new Set<string>());
+
   const activeSession = useMemo(
     () =>
       sessions.find((session) => session.id === activeSessionId) ?? sessions[0],
     [activeSessionId, sessions],
   );
   const state = activeSession?.state ?? initialChatState;
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      const session = createConversationSession(initialSessionId);
+      setSessions([session]);
+      setSessionsReady(true);
+      return;
+    }
+
+    loadSessionList()
+      .then((summaries) => {
+        if (summaries.length > 0) {
+          const loaded: ConversationSession[] = summaries.map((summary) => {
+            const session = createConversationSession(
+              summary.id,
+              summary.createdAtMs,
+            );
+            return { ...session, title: summary.title };
+          });
+          setSessions(loaded);
+          setActiveSessionId(loaded[0].id);
+
+          loadSessionMessages(loaded[0].id)
+            .then((chatMessages) => {
+              loadedSessionsRef.current.add(loaded[0].id);
+              setSessions((current) =>
+                updateSessionState(
+                  current,
+                  loaded[0].id,
+                  () => ({ ...initialChatState, messages: chatMessages }),
+                ),
+              );
+            })
+            .catch(() => undefined);
+        } else {
+          const session = createConversationSession(initialSessionId);
+          setSessions([session]);
+        }
+        setSessionsReady(true);
+      })
+      .catch(() => {
+        const session = createConversationSession(initialSessionId);
+        setSessions([session]);
+        setSessionsReady(true);
+      });
+  }, [initialSessionId]);
+
+  const selectSession = useCallback(
+    (sessionId: string) => {
+      setActiveSessionId(sessionId);
+
+      if (
+        isTauriRuntime() &&
+        !loadedSessionsRef.current.has(sessionId)
+      ) {
+        loadSessionMessages(sessionId)
+          .then((chatMessages) => {
+            loadedSessionsRef.current.add(sessionId);
+            setSessions((current) =>
+              updateSessionState(
+                current,
+                sessionId,
+                () => ({ ...initialChatState, messages: chatMessages }),
+              ),
+            );
+          })
+          .catch(() => undefined);
+      }
+    },
+    [],
+  );
 
   function dispatchChatAction(
     action: ChatAction,
@@ -70,7 +141,9 @@ export function useConversationSessions(initialSessionId = "session-1") {
       updateSessionState(current, sessionId, (chatState) =>
         reduceChatAction(chatState, { type: "start", prompt }),
       ).map((session) =>
-        session.id === sessionId ? renameSessionFromPrompt(session, prompt) : session,
+        session.id === sessionId
+          ? renameSessionFromPrompt(session, prompt)
+          : session,
       ),
     );
   }
@@ -94,8 +167,20 @@ export function useConversationSessions(initialSessionId = "session-1") {
       return false;
     }
 
+    loadedSessionsRef.current.delete(sessionId);
+
+    if (isTauriRuntime()) {
+      invoke("reset_session", { request: { sessionId } }).catch(
+        () => undefined,
+      );
+    }
+
     setSessions((current) => {
-      const result = deleteConversationSession(current, sessionId, activeSessionId);
+      const result = deleteConversationSession(
+        current,
+        sessionId,
+        activeSessionId,
+      );
       setActiveSessionId(result.activeSessionId);
       return result.sessions;
     });
@@ -135,8 +220,9 @@ export function useConversationSessions(initialSessionId = "session-1") {
     deleteConversation,
     dispatchChatAction,
     resetAllSessionStates,
-    selectSession: setActiveSessionId,
+    selectSession,
     sessions,
+    sessionsReady,
     state,
     startPrompt,
   };
@@ -165,4 +251,8 @@ function reduceChatAction(state: ChatState, action: ChatAction): ChatState {
     case "reset":
       return initialChatState;
   }
+}
+
+function isTauriRuntime(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }

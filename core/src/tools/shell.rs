@@ -159,7 +159,7 @@ async fn run_shell_child(mut command: Command) -> std::io::Result<std::process::
     Ok(std::process::Output { status, stdout, stderr })
 }
 
-fn hide_console_window(command: &mut Command) {
+fn hide_console_window(_command: &mut Command) {
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;

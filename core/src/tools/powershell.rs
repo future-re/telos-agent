@@ -224,7 +224,7 @@ fn trim_large_output(output: &str) -> String {
     format!("{preview}\n<truncated output after {MAX_CHARS} chars>")
 }
 
-fn hide_console_window(command: &mut Command) {
+fn hide_console_window(_command: &mut Command) {
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -232,7 +232,7 @@ fn hide_console_window(command: &mut Command) {
     }
 }
 
-fn hide_console_window_std(command: &mut std::process::Command) {
+fn hide_console_window_std(_command: &mut std::process::Command) {
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -272,17 +272,17 @@ async fn read_stream_with_progress(
     let mut tail = Vec::new();
     reader.read_to_end(&mut tail).await?;
     if !tail.is_empty() {
-        if let Ok(text) = String::from_utf8(tail.clone()) {
-            if let Some(tx) = &progress {
-                let _ = tx.send(crate::tool::ToolProgress {
-                    tool_call_id,
-                    message: format!("{stream_name} update"),
-                    data: Some(json!({
-                        "stream": stream_name,
-                        "output": text,
-                    })),
-                });
-            }
+        if let Ok(text) = String::from_utf8(tail.clone())
+            && let Some(tx) = &progress
+        {
+            let _ = tx.send(crate::tool::ToolProgress {
+                tool_call_id,
+                message: format!("{stream_name} update"),
+                data: Some(json!({
+                    "stream": stream_name,
+                    "output": text,
+                })),
+            });
         }
         buf.extend_from_slice(&tail);
     }

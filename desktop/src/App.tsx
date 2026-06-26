@@ -1,32 +1,26 @@
-﻿import { useEffect, useMemo, useState } from "react";
-import {
-  AppearanceSettings,
-  applyAppearance,
-  loadAppearance,
-  saveAppearance,
-} from "@/appearance";
+import { useMemo, useState } from "react";
 import { AgentStatusRail } from "@/components/AgentStatusRail";
 import { ApprovalDialog } from "@/components/ApprovalDialog";
 import { Composer } from "@/components/Composer";
 import { Conversation } from "@/components/Conversation";
 import { MemoryOverviewDialog } from "@/components/MemoryOverviewDialog";
-import { SideWorkspace, SideWorkspaceTab } from "@/components/SideWorkspace";
+import { SideWorkspace } from "@/components/SideWorkspace";
 import { TopBar } from "@/components/TopBar";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { SettingsSection } from "@/desktopTypes";
 import { groupConversationMessages } from "@/conversationView";
 import { cn } from "@/lib/utils";
 import { buildRunDisplay } from "@/runDisplay";
 import { sumTokenUsage } from "@/tokenUsage";
 import { useAgentCommands } from "@/useAgentCommands";
+import { useAppearanceSettings } from "@/useAppearanceSettings";
 import { useApprovals } from "@/useApprovals";
 import { ChatAction, useConversationSessions } from "@/useConversationSessions";
 import { useDeepSeekSync } from "@/useDeepSeekSync";
 import { useDesktopSettings } from "@/useDesktopSettings";
 import { useMemoryOverview } from "@/useMemoryOverview";
-import { useSideWorkspaceResize } from "@/useSideWorkspaceResize";
 import { useTelosEventQueue } from "@/useTelosEventQueue";
 import { useTokenUsageHistory } from "@/useTokenUsageHistory";
+import { useWorkspacePanel } from "@/useWorkspacePanel";
 
 export function App() {
   const {
@@ -43,17 +37,21 @@ export function App() {
     startPrompt,
   } = useConversationSessions();
   const [prompt, setPrompt] = useState("");
-  const [inspectorOpen, setInspectorOpen] = useState(true);
-  const [sideWorkspaceTab, setSideWorkspaceTab] =
-    useState<SideWorkspaceTab>("run");
-  const { sideWorkspaceWidth, startSideWorkspaceResize } =
-    useSideWorkspaceResize();
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] =
-    useState<SettingsSection>("appearance");
-  const [appearance, setAppearance] = useState<AppearanceSettings>(() =>
-    loadAppearance(),
-  );
+  const { appearance, setAppearance } = useAppearanceSettings();
+  const {
+    inspectorOpen,
+    openDeepSeekPanel,
+    openSettings,
+    setSettingsOpen,
+    setSettingsSection,
+    setSideWorkspaceTab,
+    settingsOpen,
+    settingsSection,
+    sideWorkspaceTab,
+    sideWorkspaceWidth,
+    startSideWorkspaceResize,
+    toggleInspector,
+  } = useWorkspacePanel();
   const resetSessionsAndApprovals = () => {
     resetAllSessionStates();
     clearAllApprovals();
@@ -109,11 +107,6 @@ export function App() {
     onEvents: applyTelosEvents,
     onProviderUsage: recordUsageEvent,
   });
-
-  useEffect(() => {
-    applyAppearance(appearance);
-    saveAppearance(appearance);
-  }, [appearance]);
 
   const deepseekNeedsKey =
     effectiveSettings.provider === "deepseek" &&
@@ -171,18 +164,6 @@ export function App() {
     running: state.running,
   });
 
-  function openSettings(section: SettingsSection) {
-    setSettingsSection(section);
-    setSettingsOpen(true);
-    setInspectorOpen(true);
-    setSideWorkspaceTab("run");
-  }
-
-  function openDeepSeekPanel() {
-    setInspectorOpen(true);
-    setSideWorkspaceTab("deepseek");
-  }
-
   return (
     <TooltipProvider delayDuration={250}>
       <main
@@ -210,7 +191,7 @@ export function App() {
             onNewConversation={startNewConversation}
             onSaveApiKey={saveApiKey}
             onOpenDeepSeek={openDeepSeekPanel}
-            onTogglePanel={() => setInspectorOpen((open) => !open)}
+            onTogglePanel={toggleInspector}
             overrides={overrides}
             panelOpen={inspectorOpen}
             savingKey={savingKey}

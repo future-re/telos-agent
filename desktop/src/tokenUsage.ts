@@ -1,4 +1,4 @@
-﻿import { TokenUsage } from "@/chatState";
+import { TokenUsage } from "@/chatState";
 
 export function sumTokenUsage(
   usages: Array<TokenUsage | undefined>,

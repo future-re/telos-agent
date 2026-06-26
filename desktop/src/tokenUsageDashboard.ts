@@ -1,4 +1,4 @@
-﻿import { TokenUsage } from "@/chatState";
+import { TokenUsage } from "@/chatState";
 import { estimateCost, formatCost, formatTokenCount } from "@/tokenUsage";
 
 export interface TokenUsageDashboardItem {

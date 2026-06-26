@@ -15,6 +15,7 @@ import {
   updateSessionState,
 } from "@/conversationSession";
 import { loadSessionList, loadSessionMessages } from "@/sessionLoader";
+import { SessionSummary } from "@/sessionLoader";
 
 export type ChatAction =
   | { type: "start"; prompt: string }
@@ -23,11 +24,16 @@ export type ChatAction =
   | { type: "reset" };
 
 export function useConversationSessions(initialSessionId = "session-1") {
-  const [sessions, setSessions] = useState<ConversationSession[]>([]);
-  const [activeSessionId, setActiveSessionId] =
-    useState(initialSessionId);
-  const [sessionsReady, setSessionsReady] = useState(false);
+  const initialSession = useMemo(
+    () => createConversationSession(initialSessionId),
+    [initialSessionId],
+  );
+  const [sessions, setSessions] = useState<ConversationSession[]>([
+    initialSession,
+  ]);
+  const [activeSessionId, setActiveSessionId] = useState(initialSession.id);
   const loadedSessionsRef = useRef(new Set<string>());
+  const historyLoadedRef = useRef(false);
 
   const activeSession = useMemo(
     () =>
@@ -37,50 +43,57 @@ export function useConversationSessions(initialSessionId = "session-1") {
   const state = activeSession?.state ?? initialChatState;
 
   useEffect(() => {
-    if (!isTauriRuntime()) {
-      const session = createConversationSession(initialSessionId);
-      setSessions([session]);
-      setSessionsReady(true);
+    if (!isTauriRuntime() || historyLoadedRef.current) {
       return;
     }
+    historyLoadedRef.current = true;
 
     loadSessionList()
       .then((summaries) => {
-        if (summaries.length > 0) {
-          const loaded: ConversationSession[] = summaries.map((summary) => {
-            const session = createConversationSession(
-              summary.id,
-              summary.createdAtMs,
-            );
-            return { ...session, title: summary.title };
-          });
-          setSessions(loaded);
-          setActiveSessionId(loaded[0].id);
+        if (summaries.length === 0) return;
 
-          loadSessionMessages(loaded[0].id)
-            .then((chatMessages) => {
-              loadedSessionsRef.current.add(loaded[0].id);
-              setSessions((current) =>
-                updateSessionState(
-                  current,
-                  loaded[0].id,
-                  () => ({ ...initialChatState, messages: chatMessages }),
-                ),
-              );
-            })
-            .catch(() => undefined);
-        } else {
-          const session = createConversationSession(initialSessionId);
-          setSessions([session]);
-        }
-        setSessionsReady(true);
+        const merged = mergeSessions(
+          sessions,
+          initialSessionId,
+          summaries,
+        );
+
+        setSessions(merged);
       })
-      .catch(() => {
-        const session = createConversationSession(initialSessionId);
-        setSessions([session]);
-        setSessionsReady(true);
-      });
+      .catch(() => undefined);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId]);
+
+  function mergeSessions(
+    current: ConversationSession[],
+    defaultId: string,
+    summaries: SessionSummary[],
+  ): ConversationSession[] {
+    const result: ConversationSession[] = [];
+    const seen = new Set<string>();
+
+    for (const summary of summaries) {
+      const existing = current.find((s) => s.id === summary.id);
+      if (existing) {
+        result.push({ ...existing, title: summary.title });
+      } else {
+        const session = createConversationSession(
+          summary.id,
+          summary.createdAtMs,
+        );
+        result.push({ ...session, title: summary.title });
+      }
+      seen.add(summary.id);
+    }
+
+    for (const session of current) {
+      if (!seen.has(session.id)) {
+        result.push(session);
+      }
+    }
+
+    return result;
+  }
 
   const selectSession = useCallback(
     (sessionId: string) => {
@@ -222,7 +235,6 @@ export function useConversationSessions(initialSessionId = "session-1") {
     resetAllSessionStates,
     selectSession,
     sessions,
-    sessionsReady,
     state,
     startPrompt,
   };

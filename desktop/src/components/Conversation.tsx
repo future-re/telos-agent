@@ -278,14 +278,15 @@ function ToolMessageBody({
       ) : null}
 
       {view.paths.length > 0 ? (
-        <div className="grid gap-2">
+        <div className="flex flex-wrap gap-1.5">
           {view.paths.map((path) => (
-            <div
+            <span
               key={path}
-              className="rounded-md border bg-background px-3 py-2 font-mono text-xs leading-5 text-foreground"
+              className="inline-flex items-center gap-1.5 rounded-md border bg-muted/50 px-2 py-1 font-mono text-[11px] leading-5 text-foreground"
             >
+              <FileText className="size-3 shrink-0 text-muted-foreground" />
               {path}
-            </div>
+            </span>
           ))}
         </div>
       ) : null}
@@ -319,11 +320,18 @@ function ToolMessageBody({
 
 function ToolCodeBlock({ label, content }: { label: string; content: string }) {
   return (
-    <div className="grid gap-1.5">
-      <span className="text-[11px] font-medium uppercase text-muted-foreground">
-        {label}
-      </span>
-      <pre className="max-h-80 overflow-auto rounded-lg border bg-slate-950 px-3 py-3 font-mono text-xs leading-5 text-slate-50">
+    <div className="overflow-hidden rounded-lg border shadow-sm">
+      <div className="flex items-center gap-2 border-b bg-muted/60 px-3 py-1.5">
+        <span className="flex gap-1.5">
+          <span className="size-2.5 rounded-full bg-[#ff5f57]" />
+          <span className="size-2.5 rounded-full bg-[#febc2e]" />
+          <span className="size-2.5 rounded-full bg-[#28c840]" />
+        </span>
+        <span className="ml-1.5 text-[11px] font-medium text-muted-foreground">
+          {label}
+        </span>
+      </div>
+      <pre className="max-h-80 overflow-auto bg-zinc-950 px-4 py-3 font-mono text-[13px] leading-6 text-zinc-200">
         {content}
       </pre>
     </div>

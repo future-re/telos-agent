@@ -179,7 +179,6 @@ pub(crate) fn build_erased_provider(
 ) -> Result<Arc<dyn telos_agent::ModelProvider>> {
     match config::build_provider(options, config)? {
         config::ResolvedProvider::DeepSeek(p) => Ok(Arc::new(p)),
-        config::ResolvedProvider::Routed(p) => Ok(Arc::new(p)),
         config::ResolvedProvider::Mock(p) => Ok(Arc::new(p)),
     }
 }
@@ -189,7 +188,6 @@ pub(crate) fn build_erased_from_onboarding(
 ) -> Result<Arc<dyn telos_agent::ModelProvider>> {
     match config::build_provider_from_onboarding(onb)? {
         config::ResolvedProvider::DeepSeek(p) => Ok(Arc::new(p)),
-        config::ResolvedProvider::Routed(p) => Ok(Arc::new(p)),
         config::ResolvedProvider::Mock(p) => Ok(Arc::new(p)),
     }
 }

@@ -394,14 +394,22 @@ function buildToolMessageView(
 
   if (normalizedName === "write") {
     const path = stringField(result, "file_path") ?? detail;
+    const contentPreview = stringField(result, "content_preview");
+    const contentTruncated = boolField(result, "content_truncated");
+    const bytes = numberField(result, "bytes");
     return {
       icon: FileText,
       title: path ? `Wrote ${path}` : "Wrote file",
-      subtitle: undefined,
+      subtitle:
+        bytes !== undefined
+          ? `${bytes} bytes${contentTruncated ? " · preview truncated" : ""}`
+          : contentTruncated
+            ? "Preview truncated"
+            : undefined,
       command: undefined,
       paths: path ? [path] : [],
-      output: undefined,
-      outputLabel: "结果",
+      output: contentPreview,
+      outputLabel: "写入内容",
       notes: collectToolNotes(result),
       fallback: turn.content,
     };
@@ -483,6 +491,9 @@ function collectToolNotes(
     "stdout",
     "stderr",
     "content",
+    "content_preview",
+    "content_truncated",
+    "bytes",
     "file_path",
     "path",
     "start_line",

@@ -17,6 +17,8 @@ use super::{
 /// Built-in file-write tool. Writes (and creates) text files inside the workspace.
 pub struct FileWriteTool;
 
+const WRITE_CONTENT_PREVIEW_CHARS: usize = 20_000;
+
 #[async_trait]
 impl Tool for FileWriteTool {
     fn definition(&self) -> ToolDefinition {
@@ -94,10 +96,22 @@ Create parent directories automatically.",
                 limit: None,
             },
         );
+        let (content_preview, content_truncated) = content_preview(content);
         Ok(ToolOutput::json(json!({
             "file_path": input_path,
             "path": path,
             "written": true,
+            "bytes": content.as_bytes().len(),
+            "content_preview": content_preview,
+            "content_truncated": content_truncated,
         })))
     }
+}
+
+fn content_preview(content: &str) -> (String, bool) {
+    if content.chars().count() <= WRITE_CONTENT_PREVIEW_CHARS {
+        return (content.to_string(), false);
+    }
+
+    (content.chars().take(WRITE_CONTENT_PREVIEW_CHARS).collect(), true)
 }

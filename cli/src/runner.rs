@@ -50,26 +50,6 @@ pub async fn run_single(
             )
             .await?;
         }
-        ResolvedProvider::Routed(p) => {
-            let provider = Arc::new(p);
-            crate::runtime::register_cli_subagent_tool(
-                &mut runtime.shared.tools,
-                &runtime.shared.agent_config,
-                provider.clone(),
-            )?;
-            crate::runtime::rebuild_prompt_assembly(&mut runtime);
-            let mut session = AgentSession::new(runtime.shared.agent_config)
-                .context("failed to create agent session")?;
-            run_with_provider(
-                &mut session,
-                provider.as_ref(),
-                &runtime.shared.tools,
-                prompt,
-                runtime.shared.memory_store.clone(),
-                config.billing.as_ref(),
-            )
-            .await?;
-        }
         ResolvedProvider::Mock(_) => {
             eprintln!("Note: using mock provider; no real model call is made.");
             let provider = Arc::new(MockProvider::new(vec![CompletionResponse {

@@ -92,6 +92,79 @@ async fn cancelling_during_provider_stream_returns_promptly() {
     assert!(matches!(err.unwrap(), AgentError::Cancelled));
 }
 
+#[tokio::test]
+async fn next_stream_turn_repairs_cancelled_tool_call_history() {
+    let cancellation = CancellationState::new();
+    let config = AgentConfig { cancellation: cancellation.clone(), ..AgentConfig::default() };
+    let provider = MockProvider::new(vec![CompletionResponse {
+        message: Message {
+            role: telos_agent::Role::Assistant,
+            blocks: vec![ContentBlock::ToolCall(ToolCall {
+                id: "call-1".into(),
+                name: "add".into(),
+                arguments: json!({ "a": 2, "b": 3 }),
+            })],
+        },
+        stop_reason: StopReason::ToolUse,
+        usage: None,
+        model: None,
+    }]);
+    let mut tools = ToolRegistry::new();
+    tools.register(AddTool);
+    let mut session = AgentSession::new(config).unwrap();
+
+    let mut stream = Box::pin(session.run_turn_stream(&provider, &tools, "start"));
+    let mut saw_cancelled = false;
+    while let Some(event) = stream.next().await {
+        match event {
+            Ok(TurnEvent::Assistant(_)) => cancellation.cancel(),
+            Ok(_) => {}
+            Err(err) => {
+                saw_cancelled = matches!(err, AgentError::Cancelled);
+                break;
+            }
+        }
+    }
+    drop(stream);
+
+    assert!(saw_cancelled, "turn should surface cancellation");
+    assert!(matches!(
+        session.messages().last(),
+        Some(message) if message.role == telos_agent::Role::Assistant
+            && message.tool_calls().any(|call| call.id == "call-1")
+    ));
+
+    cancellation.reset();
+    let provider = MockProvider::new(vec![CompletionResponse {
+        message: Message::assistant("continued"),
+        stop_reason: StopReason::EndTurn,
+        usage: None,
+        model: None,
+    }]);
+
+    let events = session
+        .run_turn_stream(&provider, &tools, "continue")
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    let requests = provider.requests.lock().await;
+    let repaired_request = &requests[0];
+    assert!(repaired_request.messages.iter().any(|message| {
+        message.role == telos_agent::Role::Tool
+            && message.tool_results_iter().any(|result| {
+                result.tool_call_id == "call-1"
+                    && result.is_error
+                    && result.content.to_string().contains("cancelled")
+            })
+    }));
+    assert!(events.iter().any(|event| {
+        matches!(event, TurnEvent::User(message) if message.text_content() == "continue")
+    }));
+}
+
 #[test]
 fn tool_calls_continue_even_when_stop_reason_is_end_turn() {
     let runtime = tokio::runtime::Runtime::new().unwrap();

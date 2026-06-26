@@ -22,6 +22,7 @@ import {
 const DEEPSEEK_URL = "https://chat.deepseek.com";
 const DEEPSEEK_PANEL_LABEL = "deepseek-panel";
 const DEEPSEEK_WINDOW_LABEL = "deepseek-browser";
+const WEBVIEW_BACKGROUND = "#f8fafc";
 
 type PanelBounds = {
   x: number;
@@ -58,30 +59,56 @@ export function DeepSeekBrowserPanel({
     }
 
     let cancelled = false;
+    let resizeFrame: number | undefined;
+    let panelShown = false;
+    let syncRunning = false;
+    let syncPending = false;
+    let lastSyncedBounds: PanelBounds | null = null;
     let resizeObserver: ResizeObserver | undefined;
 
     const sync = async () => {
+      if (syncRunning) {
+        syncPending = true;
+        return;
+      }
+
       const bounds = readBounds(bodyRef.current);
       if (!bounds || cancelled) {
         return;
       }
+      if (lastSyncedBounds && sameBounds(lastSyncedBounds, bounds)) {
+        return;
+      }
 
+      syncRunning = true;
       try {
         setPanelError("");
         const panel = await ensurePanelWebview(bounds, reloadToken);
         if (cancelled) {
           return;
         }
-        await syncPanelWebview(panel, bounds);
+        await syncPanelWebview(panel, bounds, !panelShown);
+        panelShown = true;
+        lastSyncedBounds = bounds;
       } catch (error) {
         if (!cancelled) {
           setPanelError(`DeepSeek 面板加载失败：${String(error)}`);
+        }
+      } finally {
+        syncRunning = false;
+        if (syncPending && !cancelled) {
+          syncPending = false;
+          scheduleSync();
         }
       }
     };
 
     const scheduleSync = () => {
-      window.requestAnimationFrame(() => {
+      if (resizeFrame !== undefined) {
+        return;
+      }
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = undefined;
         void sync();
       });
     };
@@ -96,6 +123,9 @@ export function DeepSeekBrowserPanel({
 
     return () => {
       cancelled = true;
+      if (resizeFrame !== undefined) {
+        window.cancelAnimationFrame(resizeFrame);
+      }
       resizeObserver?.disconnect();
       window.removeEventListener("resize", scheduleSync);
       void hidePanelWebview();
@@ -115,15 +145,16 @@ export function DeepSeekBrowserPanel({
         return;
       }
 
-      const webview = new WebviewWindow(DEEPSEEK_WINDOW_LABEL, {
-        url: DEEPSEEK_URL,
-        title: "DeepSeek",
-        width: 1120,
+  const webview = new WebviewWindow(DEEPSEEK_WINDOW_LABEL, {
+    url: DEEPSEEK_URL,
+    title: "DeepSeek",
+    width: 1120,
         height: 760,
-        minWidth: 860,
-        minHeight: 620,
-        focus: false,
-      });
+    minWidth: 860,
+    minHeight: 620,
+    backgroundColor: WEBVIEW_BACKGROUND,
+    focus: false,
+  });
       webview.once("tauri://error", (event) => {
         setPanelError(
           `DeepSeek 窗口打开失败：${String(event.payload ?? "unknown error")}`,
@@ -269,17 +300,24 @@ async function ensurePanelWebview(bounds: PanelBounds, reloadToken: number) {
     y: Math.round(bounds.y),
     width: Math.max(1, Math.round(bounds.width)),
     height: Math.max(1, Math.round(bounds.height)),
+    backgroundColor: WEBVIEW_BACKGROUND,
     focus: false,
   });
 
   return await waitForWebview(webview);
 }
 
-async function syncPanelWebview(webview: Webview, bounds: PanelBounds) {
+async function syncPanelWebview(
+  webview: Webview,
+  bounds: PanelBounds,
+  shouldShow: boolean,
+) {
   await webview.setAutoResize(false);
   await webview.setPosition(new LogicalPosition(bounds.x, bounds.y));
   await webview.setSize(new LogicalSize(bounds.width, bounds.height));
-  await webview.show();
+  if (shouldShow) {
+    await webview.show();
+  }
 }
 
 async function hidePanelWebview() {
@@ -305,6 +343,15 @@ function readBounds(element: HTMLDivElement | null): PanelBounds | null {
     width: rect.width,
     height: rect.height,
   };
+}
+
+function sameBounds(left: PanelBounds, right: PanelBounds): boolean {
+  return (
+    Math.round(left.x) === Math.round(right.x) &&
+    Math.round(left.y) === Math.round(right.y) &&
+    Math.round(left.width) === Math.round(right.width) &&
+    Math.round(left.height) === Math.round(right.height)
+  );
 }
 
 function waitForWebview(webview: Webview): Promise<Webview> {

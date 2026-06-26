@@ -13,7 +13,7 @@ use super::compaction_phase::CompactionResult;
 use crate::config::AgentConfig;
 use crate::error::AgentError;
 use crate::hooks::{HookContext, HookPhase};
-use crate::message::Message;
+use crate::message::{Message, ToolResult};
 use crate::metrics::SessionMetrics;
 use crate::provider::{ModelHint, ModelProvider, StopReason, TokenUsage};
 use crate::runtime::TurnInputReceiver;
@@ -193,6 +193,8 @@ impl AgentSession {
                     ),
                 ));
             }
+
+            self.repair_incomplete_tool_call_tail();
 
             let user_message = Message::user(user_input.clone());
             self.messages.push(user_message.clone());
@@ -471,6 +473,32 @@ impl AgentSession {
         messages
     }
 
+    fn repair_incomplete_tool_call_tail(&mut self) {
+        let Some(last_message) = self.messages.last() else {
+            return;
+        };
+        if last_message.role != crate::message::Role::Assistant {
+            return;
+        }
+
+        let tool_results = last_message
+            .tool_calls()
+            .map(|call| ToolResult {
+                tool_call_id: call.id.clone(),
+                name: call.name.clone(),
+                content: serde_json::json!({
+                    "error": {
+                        "kind": "cancelled",
+                        "message": "Tool execution was interrupted before a result was recorded."
+                    }
+                }),
+                is_error: true,
+            })
+            .collect::<Vec<_>>();
+        if !tool_results.is_empty() {
+            self.messages.push(Message::tool_results(tool_results));
+        }
+    }
     /// Run one turn to completion and return the collected events plus the
     /// final message. Persists the session to [`Storage`](crate::Storage) (if configured)
     /// before returning.

@@ -39,8 +39,8 @@ jobs:
 
       - name: Verify publish packages
         run: |
-          cargo publish --manifest-path core/Cargo.toml --locked --dry-run
-          cargo publish --manifest-path cli/Cargo.toml --locked --dry-run
+          cargo publish --manifest-path core/Cargo.toml --dry-run
+          cargo publish --manifest-path cli/Cargo.toml --dry-run
 
       - name: Publish telos_agent
         env:

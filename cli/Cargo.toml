@@ -1,6 +1,6 @@
 [package]
 name = "telos-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT"
 description = "Terminal interface for telos-agent"
@@ -34,7 +34,7 @@ semver = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "signal"] }
 toml = "0.8"
 telos_agent = { version = "0.1.0", path = "../core" }
-telos_runtime = { package = "telos-runtime", path = "../runtime" }
+telos_runtime = { package = "telos-runtime", version = "0.1.1", path = "../runtime" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }

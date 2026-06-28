@@ -61,9 +61,9 @@ export function Conversation({
   return (
     <section className="h-full min-h-0 overflow-hidden bg-background">
       <ScrollArea className="h-full w-full">
-        <div className="mx-auto flex min-h-full w-full min-w-0 max-w-4xl flex-col px-4 py-6 md:px-6 md:py-8">
+        <div className="mx-auto w-full min-w-0 max-w-4xl px-4 py-6 md:px-6 md:py-8">
           {turns.length === 0 ? (
-            <div className="flex min-h-[420px] flex-1 items-end pb-8 md:pb-12">
+            <div className="flex min-h-[420px] items-end pb-8 md:pb-12">
               <div className="w-full min-w-0">
                 {needsApiKey ? (
                   <OnboardingCard

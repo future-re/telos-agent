@@ -114,16 +114,28 @@ jobs:
 
     steps:
       - name: Download Windows artifacts
+        id: download-windows
         uses: actions/download-artifact@v7
+        continue-on-error: true
         with:
           name: telos-desktop-windows
           path: artifacts/windows
 
       - name: Download macOS artifacts
+        id: download-macos
         uses: actions/download-artifact@v7
+        continue-on-error: true
         with:
           name: telos-desktop-macos
           path: artifacts/macos
+
+      - name: List downloaded artifacts
+        shell: bash
+        run: |
+          echo "=== Windows ==="
+          find artifacts/windows -type f 2>/dev/null || echo "(none)"
+          echo "=== macOS ==="
+          find artifacts/macos -type f 2>/dev/null || echo "(none)"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

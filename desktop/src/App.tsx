@@ -1,4 +1,5 @@
 import { lazy, Suspense, useMemo, useState } from "react";
+import { PanelLeftOpen, PanelRightOpen } from "lucide-react";
 import { AgentStatusRail } from "@/components/AgentStatusRail";
 import { Composer } from "@/components/Composer";
 import { Conversation } from "@/components/Conversation";
@@ -46,6 +47,8 @@ export function App() {
   const [prompt, setPrompt] = useState("");
   const { appearance, setAppearance } = useAppearanceSettings();
   const {
+    agentRailOpen,
+    agentRailWidth,
     inspectorOpen,
     openDeepSeekPanel,
     openSettings,
@@ -56,7 +59,9 @@ export function App() {
     settingsSection,
     sideWorkspaceTab,
     sideWorkspaceWidth,
+    startAgentRailResize,
     startSideWorkspaceResize,
+    toggleAgentRail,
     toggleInspector,
   } = useWorkspacePanel();
   const resetSessionsAndApprovals = () => {
@@ -175,57 +180,83 @@ export function App() {
     <TooltipProvider delayDuration={250}>
       <main
         style={
-          inspectorOpen
-            ? ({
-                "--side-workspace-width": `${sideWorkspaceWidth}px`,
-              } as React.CSSProperties)
-            : undefined
+          {
+            "--agent-rail-width": `${agentRailWidth}px`,
+            "--side-workspace-width": `${sideWorkspaceWidth}px`,
+          } as React.CSSProperties
         }
         className={cn(
-          "grid h-screen w-full overflow-hidden bg-muted/40 text-foreground",
-          inspectorOpen
-            ? "lg:grid-cols-[minmax(0,1fr)_8px_var(--side-workspace-width)]"
-            : "grid-cols-1",
+          "relative grid h-screen w-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-background text-foreground",
         )}
       >
-        <section className="grid h-screen w-full min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-background">
-          <TopBar
-            apiKeyDraft={apiKeyDraft}
-            metadata={display.runMetadata}
-            onApiKeyDraftChange={setApiKeyDraft}
-            onOverridesChange={updateOverrides}
-            onAppearanceChange={setAppearance}
-            onNewConversation={startNewConversation}
-            onSaveApiKey={saveApiKey}
-            onOpenDeepSeek={openDeepSeekPanel}
-            onTogglePanel={toggleInspector}
-            overrides={overrides}
-            panelOpen={inspectorOpen}
-            savingKey={savingKey}
-            sessionUsage={sessionUsage}
-            settings={settings}
-            settingsOpen={settingsOpen}
-            todayUsage={todayUsage}
-            tokenHistory={usageHistory}
-            onSettingsOpenChange={setSettingsOpen}
-            settingsSection={settingsSection}
-            onSettingsSectionChange={setSettingsSection}
-            sideWorkspaceTab={sideWorkspaceTab}
-            appearance={appearance}
-            turnUsage={state.currentTurnUsage}
-            turnModel={state.currentTurnUsage?.model}
-          />
-          <div className="grid h-full min-h-0 min-w-0 overflow-hidden grid-cols-1 min-[1180px]:grid-cols-[340px_minmax(0,1fr)]">
-            <AgentStatusRail
-              activeSessionId={activeSessionId}
-              sessions={sessions}
-              onDeleteSession={removeConversation}
-              onNewSession={startNewConversation}
-              onSelectSession={selectSession}
-              running={state.running}
-              status={state.status}
-              tools={state.tools}
-            />
+        <TopBar
+          agentRailOpen={agentRailOpen}
+          apiKeyDraft={apiKeyDraft}
+          metadata={display.runMetadata}
+          onApiKeyDraftChange={setApiKeyDraft}
+          onOverridesChange={updateOverrides}
+          onAppearanceChange={setAppearance}
+          onNewConversation={startNewConversation}
+          onSaveApiKey={saveApiKey}
+          onOpenDeepSeek={openDeepSeekPanel}
+          onToggleAgentRail={toggleAgentRail}
+          onTogglePanel={toggleInspector}
+          overrides={overrides}
+          panelOpen={inspectorOpen}
+          savingKey={savingKey}
+          sessionUsage={sessionUsage}
+          settings={settings}
+          settingsOpen={settingsOpen}
+          todayUsage={todayUsage}
+          tokenHistory={usageHistory}
+          onSettingsOpenChange={setSettingsOpen}
+          settingsSection={settingsSection}
+          onSettingsSectionChange={setSettingsSection}
+          sideWorkspaceTab={sideWorkspaceTab}
+          appearance={appearance}
+          turnUsage={state.currentTurnUsage}
+          turnModel={state.currentTurnUsage?.model}
+        />
+
+        <section
+          className={cn(
+            "relative grid min-h-0 w-full min-w-0 overflow-hidden",
+            inspectorOpen
+              ? "lg:grid-cols-[minmax(0,1fr)_var(--side-workspace-width)]"
+              : "grid-cols-1",
+          )}
+        >
+          <div
+            className={cn(
+              "relative grid h-full min-h-0 min-w-0 overflow-hidden grid-cols-1",
+              agentRailOpen &&
+                "min-[1180px]:grid-cols-[var(--agent-rail-width)_minmax(0,1fr)]",
+            )}
+          >
+            {agentRailOpen && (
+              <AgentStatusRail
+                activeSessionId={activeSessionId}
+                sessions={sessions}
+                onDeleteSession={removeConversation}
+                onNewSession={startNewConversation}
+                onSelectSession={selectSession}
+                running={state.running}
+                status={state.status}
+                tools={state.tools}
+              />
+            )}
+            {agentRailOpen && (
+              <div
+                className="absolute inset-y-0 z-20 hidden w-3 cursor-col-resize min-[1180px]:block"
+                style={{ left: "var(--agent-rail-width)" }}
+                role="separator"
+                aria-label="调整左侧面板宽度"
+                aria-orientation="vertical"
+                onMouseDown={startAgentRailResize}
+              >
+                <span className="absolute inset-y-0 left-0 w-px bg-border/0 transition-colors hover:bg-ring/50" />
+              </div>
+            )}
             <div className="grid min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto]">
               <Conversation
                 messages={state.messages}
@@ -249,31 +280,54 @@ export function App() {
               />
             </div>
           </div>
-        </section>
 
-        {inspectorOpen && (
-          <Suspense fallback={null}>
-            <div
-              className="hidden bg-border/70 transition-colors hover:bg-ring/50 lg:block"
-              role="separator"
-              aria-label="调整侧边栏宽度"
-              aria-orientation="vertical"
-              onMouseDown={startSideWorkspaceResize}
-            />
-            <SideWorkspace
-              activeTab={sideWorkspaceTab}
-              display={display}
-              onChooseDirectory={chooseDirectory}
-              onConfigure={openSettings}
-              onOpenMemory={openMemoryOverview}
-              onSyncDeepSeek={syncDeepSeek}
-              onTabChange={setSideWorkspaceTab}
-              running={state.running}
-              status={state.status}
-              tools={state.tools}
-            />
-          </Suspense>
-        )}
+          {inspectorOpen && (
+            <Suspense fallback={null}>
+              <div
+                className="absolute inset-y-0 z-20 hidden w-3 cursor-col-resize lg:block"
+                style={{ right: "var(--side-workspace-width)" }}
+                role="separator"
+                aria-label="调整侧边栏宽度"
+                aria-orientation="vertical"
+                onMouseDown={startSideWorkspaceResize}
+              >
+                <span className="absolute inset-y-0 right-0 w-px bg-border/0 transition-colors hover:bg-ring/50" />
+              </div>
+              <SideWorkspace
+                activeTab={sideWorkspaceTab}
+                display={display}
+                onChooseDirectory={chooseDirectory}
+                onConfigure={openSettings}
+                onOpenMemory={openMemoryOverview}
+                onSyncDeepSeek={syncDeepSeek}
+                onTabChange={setSideWorkspaceTab}
+                running={state.running}
+                status={state.status}
+                tools={state.tools}
+              />
+            </Suspense>
+          )}
+          {!agentRailOpen && (
+            <button
+              type="button"
+              className="absolute left-0 top-1/2 z-30 hidden h-14 w-8 -translate-y-1/2 items-center justify-center rounded-r-lg border-y border-r bg-card/95 text-muted-foreground shadow-[0_10px_24px_rgba(15,23,42,0.12)] transition-colors hover:text-foreground min-[1180px]:flex"
+              aria-label="展开左侧面板"
+              onClick={toggleAgentRail}
+            >
+              <PanelLeftOpen className="size-4" aria-hidden="true" />
+            </button>
+          )}
+          {!inspectorOpen && (
+            <button
+              type="button"
+              className="absolute right-0 top-1/2 z-30 hidden h-14 w-8 -translate-y-1/2 items-center justify-center rounded-l-lg border-y border-l bg-card/95 text-muted-foreground shadow-[0_10px_24px_rgba(15,23,42,0.12)] transition-colors hover:text-foreground lg:flex"
+              aria-label="展开右侧面板"
+              onClick={toggleInspector}
+            >
+              <PanelRightOpen className="size-4" aria-hidden="true" />
+            </button>
+          )}
+        </section>
       </main>
       {memoryOpen && (
         <Suspense fallback={null}>

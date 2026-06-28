@@ -36,11 +36,11 @@ export function Composer({
 
   return (
     <form
-      className="w-full shrink-0 border-t bg-background px-4 py-3 shadow-[0_-12px_36px_rgba(15,23,42,0.06)] md:px-6"
+      className="w-full shrink-0 bg-transparent px-4 pb-4 pt-2 md:px-8"
       onSubmit={onSubmit}
     >
-      <div className="mx-auto w-full max-w-4xl">
-        <div className="flex min-h-14 items-center gap-2 rounded-lg border bg-card px-3 py-2 shadow-[0_8px_24px_rgba(15,23,42,0.07)] transition-colors focus-within:border-ring">
+      <div className="mx-auto w-full max-w-[58rem]">
+        <div className="flex min-h-14 items-center gap-3 rounded-xl border bg-card/95 px-3 py-2 shadow-[0_16px_36px_rgba(15,23,42,0.09)] transition-colors focus-within:border-ring/60">
           <Textarea
             ref={textareaRef}
             value={value}
@@ -68,7 +68,7 @@ export function Composer({
             onClick={running ? onStop : undefined}
             size="icon"
             variant={running ? "outline" : "default"}
-            className="flex size-10 shrink-0 items-center justify-center rounded-md p-0 shadow-sm"
+            className="flex size-10 shrink-0 items-center justify-center rounded-md p-0"
             aria-label={running ? "停止当前任务" : "发送"}
           >
             {running ? (

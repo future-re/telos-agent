@@ -5,6 +5,8 @@ import {
   Globe,
   KeyRound,
   Palette,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
   Plus,
@@ -60,6 +62,7 @@ import {
 } from "@/tokenUsageDashboard";
 
 interface TopBarProps {
+  agentRailOpen: boolean;
   metadata: string;
   panelOpen: boolean;
   settingsOpen: boolean;
@@ -79,6 +82,7 @@ interface TopBarProps {
   onSettingsSectionChange: (section: SettingsSection) => void;
   onSaveApiKey: () => void;
   onOpenDeepSeek: () => void;
+  onToggleAgentRail: () => void;
   onTogglePanel: () => void;
   onNewConversation: () => void;
   sideWorkspaceTab: SideWorkspaceTab;
@@ -87,6 +91,7 @@ interface TopBarProps {
 }
 
 export function TopBar({
+  agentRailOpen,
   apiKeyDraft,
   appearance,
   metadata,
@@ -97,6 +102,7 @@ export function TopBar({
   onSaveApiKey,
   onSettingsOpenChange,
   onSettingsSectionChange,
+  onToggleAgentRail,
   onTogglePanel,
   onOpenDeepSeek,
   overrides,
@@ -116,16 +122,16 @@ export function TopBar({
   const mergedCwd = overrides.cwd ?? settings.cwd;
 
   return (
-    <header className="flex min-h-16 w-full min-w-0 items-center justify-between gap-3 border-b bg-background px-4 py-3 md:px-5">
+    <header className="flex min-h-[4.25rem] w-full min-w-0 items-center justify-between gap-4 border-b bg-background/[0.92] px-4 py-3 backdrop-blur md:px-5">
       <div className="flex min-w-0 items-center gap-3">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-[0_8px_18px_rgba(23,32,44,0.18)]">
           <Bot className="size-4" aria-hidden="true" />
         </span>
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold leading-none tracking-normal">
+          <h1 className="text-2xl font-semibold leading-none">
             telos
           </h1>
-          <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+          <p className="mt-1 truncate text-sm text-muted-foreground">
             {metadata}
           </p>
         </div>
@@ -134,6 +140,26 @@ export function TopBar({
       <TokenTopStrip usage={todayUsage} />
 
       <div className="flex shrink-0 items-center gap-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label={agentRailOpen ? "隐藏左侧面板" : "显示左侧面板"}
+              onClick={onToggleAgentRail}
+            >
+              {agentRailOpen ? (
+                <PanelLeftClose className="size-4" aria-hidden="true" />
+              ) : (
+                <PanelLeftOpen className="size-4" aria-hidden="true" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {agentRailOpen ? "隐藏左侧面板" : "显示左侧面板"}
+          </TooltipContent>
+        </Tooltip>
         <SettingsDialog
           apiKeyDraft={apiKeyDraft}
           appearance={appearance}
@@ -540,15 +566,18 @@ function TokenTopStrip({ usage }: { usage?: TokenUsage }) {
 
   return (
     <div
-      className="hidden min-w-0 max-w-[36rem] flex-1 items-center justify-center px-2 text-[13px] text-muted-foreground lg:flex"
+      className="hidden min-w-0 flex-1 items-center justify-center px-2 xl:flex"
       aria-label="今日 Token 统计"
     >
-      <span className="mr-3 shrink-0 text-sm font-medium text-foreground">
-        今日 Token
-      </span>
-      <span className="flex min-w-0 flex-wrap justify-center gap-x-4 gap-y-1">
+      <span className="flex min-w-0 flex-wrap items-center justify-center gap-2 rounded-lg border bg-white/80 px-3 py-2 shadow-[0_6px_16px_rgba(15,23,42,0.045)]">
+        <span className="shrink-0 text-xs font-semibold uppercase text-muted-foreground">
+          Today
+        </span>
         {metrics.map((item) => (
-          <span key={item.id} className="whitespace-nowrap">
+          <span
+            key={item.id}
+            className="whitespace-nowrap rounded-md bg-background px-2.5 py-1 text-[13px] text-muted-foreground"
+          >
             {item.label}{" "}
             <strong className="font-mono text-sm font-semibold text-foreground">
               {item.value}

@@ -37,25 +37,25 @@
     "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC",
     Inter, "Segoe UI", ui-sans-serif, system-ui, -apple-system,
     BlinkMacSystemFont, sans-serif;
-  --background: #f8fafc;
-  --foreground: #172027;
+  --background: #f5f7fb;
+  --foreground: #17202c;
   --card: #ffffff;
-  --card-foreground: #172027;
+  --card-foreground: #17202c;
   --popover: #ffffff;
-  --popover-foreground: #172027;
-  --primary: #111827;
+  --popover-foreground: #17202c;
+  --primary: #17202c;
   --primary-foreground: #f8fafc;
-  --secondary: #eef2f7;
-  --secondary-foreground: #172027;
-  --muted: #eef2f7;
-  --muted-foreground: #5b6673;
-  --accent: #e6ebf1;
-  --accent-foreground: #172027;
+  --secondary: #eef2f6;
+  --secondary-foreground: #17202c;
+  --muted: #eef2f6;
+  --muted-foreground: #5f6b7a;
+  --accent: #e8edf4;
+  --accent-foreground: #17202c;
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
-  --border: #d9e0e7;
-  --input: #cfd8e3;
-  --ring: #2563eb;
+  --border: #d8e0ea;
+  --input: #cfd8e4;
+  --ring: #0d9488;
   color: var(--foreground);
   background: var(--background);
   font-family: var(--font-sans);
@@ -163,6 +163,9 @@ body {
   min-width: 320px;
   height: 100%;
   overscroll-behavior: none;
+  background:
+    linear-gradient(180deg, rgba(13, 148, 136, 0.045), transparent 18rem),
+    linear-gradient(180deg, #fafbfc 0%, #f5f7fb 36%, #eef2f6 100%);
 }
 
 html,
@@ -171,7 +174,20 @@ body,
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
-  background: var(--background);
+  background: transparent;
+}
+
+.telos-canvas {
+  background:
+    linear-gradient(var(--background), var(--background)) padding-box,
+    linear-gradient(90deg, rgba(23, 32, 44, 0.035) 1px, transparent 1px),
+    linear-gradient(rgba(23, 32, 44, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, #f7f9fc 0%, #f3f6fa 100%);
+  background-size:
+    auto,
+    28px 28px,
+    28px 28px,
+    auto;
 }
 
 button,
@@ -189,7 +205,7 @@ button:disabled {
 }
 
 ::selection {
-  background: rgba(37, 99, 235, 0.18);
+  background: rgba(13, 148, 136, 0.18);
 }
 
 .no-scrollbar {

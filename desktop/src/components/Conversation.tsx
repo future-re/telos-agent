@@ -59,11 +59,11 @@ export function Conversation({
   }, [turns]);
 
   return (
-    <section className="h-full min-h-0 overflow-hidden bg-background">
+    <section className="telos-canvas h-full min-h-0 overflow-hidden">
       <ScrollArea className="h-full w-full">
-        <div className="mx-auto w-full min-w-0 max-w-4xl px-4 py-6 md:px-6 md:py-8">
+        <div className="mx-auto w-full min-w-0 max-w-[58rem] px-4 py-8 md:px-8 md:py-10">
           {turns.length === 0 ? (
-            <div className="flex min-h-[420px] items-end pb-8 md:pb-12">
+            <div className="flex min-h-[420px] items-center pb-8 md:pb-12">
               <div className="w-full min-w-0">
                 {needsApiKey ? (
                   <OnboardingCard
@@ -119,7 +119,7 @@ function MessageTurn({
           <div className="mb-1.5 pr-1 text-right text-[13px] font-medium text-muted-foreground">
             {roleLabels.user}
           </div>
-          <div className="min-w-0 overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-3 text-[15px] leading-7 text-primary-foreground shadow-sm">
+          <div className="min-w-0 overflow-hidden rounded-lg rounded-br-sm bg-primary px-4 py-3 text-[15px] leading-7 text-primary-foreground shadow-[0_10px_24px_rgba(23,32,44,0.18)]">
             <Suspense fallback={<div className="min-w-0" />}>
               <MarkdownContent
                 className="markdown-body markdown-body-user"
@@ -190,7 +190,7 @@ function MessageTurn({
 
   return (
     <article className="min-w-0">
-      <div className="min-w-0 border-l pl-4">
+      <div className="min-w-0 border-l border-border/80 pl-5">
         <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
           <span>{roleLabels.assistant}</span>
           {assistantTurn.streaming && (
@@ -613,11 +613,11 @@ function OnboardingCard({
 function PromptStarter() {
   return (
     <div className="mx-auto grid w-full max-w-2xl justify-items-center gap-4 text-center">
-      <div className="flex size-11 items-center justify-center rounded-xl border bg-background text-muted-foreground shadow-sm">
+      <div className="flex size-11 items-center justify-center rounded-xl border bg-card/90 text-muted-foreground shadow-[0_10px_26px_rgba(15,23,42,0.06)]">
         <Sparkles className="size-5" aria-hidden="true" />
       </div>
       <div className="grid gap-2">
-        <h2 className="text-3xl font-semibold leading-tight tracking-normal text-foreground">
+        <h2 className="text-2xl font-semibold leading-tight text-foreground">
           给 telos 一个明确任务
         </h2>
       </div>

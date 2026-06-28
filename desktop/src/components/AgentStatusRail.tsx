@@ -37,8 +37,8 @@ export function AgentStatusRail({
   const phase = resolvePhase(status, tools);
 
   return (
-    <aside className="hidden h-full min-h-0 min-w-0 overflow-hidden border-r bg-muted p-3 min-[1180px]:block">
-      <div className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-md border bg-background shadow-sm">
+    <aside className="hidden h-full min-h-0 min-w-0 overflow-hidden border-r bg-card/95 shadow-[0_14px_34px_rgba(15,23,42,0.07)] min-[1180px]:block">
+      <div className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
         <section className="border-b p-3">
           <div className="flex items-center gap-2">
             <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground">
@@ -52,9 +52,9 @@ export function AgentStatusRail({
             </div>
           </div>
 
-          <div className="mt-3 rounded-md border bg-muted/30 p-2.5">
+          <div className="mt-3 rounded-lg border bg-muted/45 p-2.5">
             <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              <span className="text-[0.68rem] font-semibold uppercase text-muted-foreground">
                 Runtime
               </span>
               <span
@@ -113,9 +113,9 @@ export function AgentStatusRail({
                 <div
                   key={session.id}
                   className={cn(
-                    "group flex w-full min-w-0 max-w-full shrink-0 items-center gap-2 overflow-hidden rounded-md border px-2 py-1.5 text-left text-xs transition-colors hover:border-ring hover:bg-accent/60",
+                    "group flex w-full min-w-0 max-w-full shrink-0 items-center gap-2 overflow-hidden rounded-lg border px-2.5 py-2 text-left text-xs transition-[background-color,border-color,box-shadow] hover:border-ring/40 hover:bg-white hover:shadow-[0_6px_16px_rgba(15,23,42,0.06)]",
                     session.id === activeSessionId
-                      ? "border-primary/35 bg-primary/10 text-foreground"
+                      ? "border-primary/25 bg-primary/[0.07] text-foreground"
                       : "bg-background text-muted-foreground",
                   )}
                 >
@@ -124,7 +124,7 @@ export function AgentStatusRail({
                     className="flex min-w-0 flex-1 basis-0 items-center gap-2 overflow-hidden rounded-[calc(var(--radius)-3px)] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => onSelectSession(session.id)}
                   >
-                    <span className="flex size-6 shrink-0 items-center justify-center rounded-md border bg-background">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background">
                       <MessageSquare className="size-3.5" aria-hidden="true" />
                     </span>
                     <span className="min-w-0 flex-1 basis-0 overflow-hidden">

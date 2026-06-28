@@ -113,6 +113,10 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
       - name: Download Windows artifacts
         id: download-windows
         uses: actions/download-artifact@v7
@@ -129,34 +133,53 @@ jobs:
           name: telos-desktop-macos
           path: artifacts/macos
 
-      - name: List downloaded artifacts
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --tag ${{ github.ref_name }} --output CHANGELOG_RELEASE.md
+
+      - name: Calculate SHA256 checksums
         shell: bash
         run: |
-          echo "=== Windows ==="
-          find artifacts/windows -type f 2>/dev/null || echo "(none)"
-          echo "=== macOS ==="
-          find artifacts/macos -type f 2>/dev/null || echo "(none)"
+          echo '## 校验' > checksums.md
+          echo '```' >> checksums.md
+          echo '# SHA256' >> checksums.md
+          echo '' >> checksums.md
+          for f in $(find artifacts -type f | sort); do
+            name=$(basename "$f")
+            sha=$(sha256sum "$f" | cut -d' ' -f1)
+            echo "$name" >> checksums.md
+            echo "$sha" >> checksums.md
+            echo '' >> checksums.md
+          done
+          echo '```' >> checksums.md
+
+      - name: Build release body
+        shell: bash
+        run: |
+          cat > RELEASE_BODY.md <<'EOF'
+          ## 安装
+
+          ### Windows
+          下载 \`telos_*_x64-setup.exe\` 双击安装。
+
+          ### macOS
+          下载 \`telos_*.dmg\`，双击挂载后将 \`telos.app\` 拖入 Applications 文件夹。
+          > 首次打开如果提示"无法验证开发者"，请在系统设置 → 隐私与安全中点击"仍然打开"。
+
+          EOF
+          cat checksums.md >> RELEASE_BODY.md
+          echo '' >> RELEASE_BODY.md
+          cat CHANGELOG_RELEASE.md >> RELEASE_BODY.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: telos ${{ github.ref_name }}
-          body: |
-            ## 安装
-
-            ### Windows
-            下载 `telos_*_x64-setup.exe` 双击安装。
-
-            ### macOS
-            下载 `telos_*.dmg`，双击挂载后将 `telos.app` 拖入 Applications 文件夹。
-            > 首次打开如果提示"无法验证开发者"，请在系统设置 → 隐私与安全中点击"仍然打开"。
-
-            ## 校验
-            ```
-            # sha256
+          body_path: RELEASE_BODY.md
           files: |
             artifacts/windows/*
             artifacts/macos/*
           draft: false
           prerelease: false
-          generate_release_notes: true

@@ -78,7 +78,7 @@ export function Conversation({
               </div>
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1 flex-col gap-6">
+            <div className="flex flex-col gap-6">
               {turns.map((turn) => (
                 <MessageTurn
                   key={turn.id}

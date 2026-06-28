@@ -202,7 +202,11 @@ impl Tool for CommandTool {
         })?;
 
         let output = tokio::time::timeout(self.timeout, async {
-            stdin.write_all(&args_json).await?;
+            match stdin.write_all(&args_json).await {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+                Err(e) => return Err(e),
+            }
             drop(stdin);
             child.wait_with_output().await
         })

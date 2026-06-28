@@ -20,7 +20,7 @@ trim = true
 [git]
 conventional_commits = true
 filter_commits = true
-tag_pattern = "v[0-9]+.*"
+tag_pattern = "v?[0-9]+.*"
 
 commit_parsers = [
   { body = "BREAKING[ -]CHANGE", group = "Breaking" },

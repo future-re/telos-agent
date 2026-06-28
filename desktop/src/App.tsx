@@ -1,11 +1,18 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { AgentStatusRail } from "@/components/AgentStatusRail";
-import { ApprovalDialog } from "@/components/ApprovalDialog";
 import { Composer } from "@/components/Composer";
 import { Conversation } from "@/components/Conversation";
-import { MemoryOverviewDialog } from "@/components/MemoryOverviewDialog";
-import { SideWorkspace } from "@/components/SideWorkspace";
 import { TopBar } from "@/components/TopBar";
+
+const SideWorkspace = lazy(() =>
+  import("@/components/SideWorkspace").then((m) => ({ default: m.SideWorkspace })),
+);
+const MemoryOverviewDialog = lazy(() =>
+  import("@/components/MemoryOverviewDialog").then((m) => ({ default: m.MemoryOverviewDialog })),
+);
+const ApprovalDialog = lazy(() =>
+  import("@/components/ApprovalDialog").then((m) => ({ default: m.ApprovalDialog })),
+);
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { groupConversationMessages } from "@/conversationView";
 import { cn } from "@/lib/utils";
@@ -245,7 +252,7 @@ export function App() {
         </section>
 
         {inspectorOpen && (
-          <>
+          <Suspense fallback={null}>
             <div
               className="hidden bg-border/70 transition-colors hover:bg-ring/50 lg:block"
               role="separator"
@@ -265,27 +272,35 @@ export function App() {
               status={state.status}
               tools={state.tools}
             />
-          </>
+          </Suspense>
         )}
       </main>
-      <MemoryOverviewDialog
-        loading={memoryLoading}
-        memory={memoryOverview}
-        open={memoryOpen}
-        onOpenChange={setMemoryOpen}
-      />
-      <ApprovalDialog
-        approval={pendingApproval}
-        draft={approvalDraft}
-        error={approvalError}
-        onDraftChange={(value) => {
-          setApprovalDraft(value);
-          setApprovalError("");
-        }}
-        onApprove={() => resolveApproval("allow")}
-        onDeny={() => resolveApproval("deny")}
-        onModify={() => resolveApproval("modify")}
-      />
+      {memoryOpen && (
+        <Suspense fallback={null}>
+          <MemoryOverviewDialog
+            loading={memoryLoading}
+            memory={memoryOverview}
+            open={memoryOpen}
+            onOpenChange={setMemoryOpen}
+          />
+        </Suspense>
+      )}
+      {pendingApproval && (
+        <Suspense fallback={null}>
+          <ApprovalDialog
+            approval={pendingApproval}
+            draft={approvalDraft}
+            error={approvalError}
+            onDraftChange={(value: string) => {
+              setApprovalDraft(value);
+              setApprovalError("");
+            }}
+            onApprove={() => resolveApproval("allow")}
+            onDeny={() => resolveApproval("deny")}
+            onModify={() => resolveApproval("modify")}
+          />
+        </Suspense>
+      )}
     </TooltipProvider>
   );
 }

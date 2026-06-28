@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef } from "react";
 import {
   Check,
   Clock3,
@@ -10,8 +10,6 @@ import {
   TerminalSquare,
   XCircle,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { ChatMessage, TokenUsage } from "@/chatState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +20,10 @@ import {
 } from "@/conversationView";
 import { cn } from "@/lib/utils";
 import { estimateCost, formatCost, formatTokenCount } from "@/tokenUsage";
+
+const MarkdownContent = lazy(() =>
+  import("./MarkdownContent").then((m) => ({ default: m.MarkdownContent })),
+);
 
 interface ConversationProps {
   messages: ChatMessage[];
@@ -118,10 +120,12 @@ function MessageTurn({
             {roleLabels.user}
           </div>
           <div className="min-w-0 overflow-hidden rounded-2xl rounded-br-md bg-primary px-4 py-3 text-[15px] leading-7 text-primary-foreground shadow-sm">
-            <MarkdownContent
-              className="markdown-body markdown-body-user"
-              content={turn.content}
-            />
+            <Suspense fallback={<div className="min-w-0" />}>
+              <MarkdownContent
+                className="markdown-body markdown-body-user"
+                content={turn.content}
+              />
+            </Suspense>
           </div>
         </div>
       </article>
@@ -227,13 +231,15 @@ function MessageTurn({
             </div>
           </details>
         )}
-        <MarkdownContent
-          className="markdown-body text-[15px] leading-8 text-foreground"
-          content={
-            assistantTurn.content ||
-            (assistantTurn.streaming ? "正在生成..." : "")
-          }
-        />
+        <Suspense fallback={<div className="min-w-0" />}>
+          <MarkdownContent
+            className="markdown-body text-[15px] leading-8 text-foreground"
+            content={
+              assistantTurn.content ||
+              (assistantTurn.streaming ? "正在生成..." : "")
+            }
+          />
+        </Suspense>
       </div>
     </article>
   );
@@ -248,10 +254,12 @@ function ToolMessageBody({
 
   if (!view) {
     return (
-      <MarkdownContent
-        className="markdown-body text-[14px] leading-7 text-foreground"
-        content={turn.content}
-      />
+      <Suspense fallback={<div className="min-w-0" />}>
+        <MarkdownContent
+          className="markdown-body text-[14px] leading-7 text-foreground"
+          content={turn.content}
+        />
+      </Suspense>
     );
   }
 
@@ -309,10 +317,12 @@ function ToolMessageBody({
       ) : null}
 
       {view.fallback && !view.output ? (
-        <MarkdownContent
-          className="markdown-body text-[14px] leading-7 text-foreground"
-          content={view.fallback}
-        />
+        <Suspense fallback={<div className="min-w-0" />}>
+          <MarkdownContent
+            className="markdown-body text-[14px] leading-7 text-foreground"
+            content={view.fallback}
+          />
+        </Suspense>
       ) : null}
     </div>
   );
@@ -549,36 +559,6 @@ function nestedErrorMessage(
       ? (value.error as Record<string, unknown>)
       : undefined;
   return typeof error?.message === "string" ? error.message : undefined;
-}
-
-function MarkdownContent({
-  className,
-  content,
-}: {
-  className?: string;
-  content: string;
-}) {
-  return (
-    <div className={cn("min-w-0", className)}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: ({ children, href }) => (
-            <a href={href} rel="noreferrer" target="_blank">
-              {children}
-            </a>
-          ),
-          table: ({ children }) => (
-            <div className="markdown-table-wrap">
-              <table>{children}</table>
-            </div>
-          ),
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
-  );
 }
 
 function OnboardingCard({

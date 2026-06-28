@@ -1,6 +1,6 @@
+use crate::prompt::{PromptAssembly, PromptSection, PromptStability};
 use async_trait::async_trait;
 use std::path::Path;
-use telos_agent::prompt::{PromptAssembly, PromptSection, PromptStability};
 
 #[derive(Debug, Clone, Default)]
 pub struct ProjectContext {

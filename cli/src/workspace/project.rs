@@ -1,1 +1,1 @@
-pub use telos_runtime::project::*;
+pub use telos_agent::frontend::project::*;

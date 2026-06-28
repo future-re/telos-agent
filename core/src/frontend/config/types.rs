@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+pub use crate::DefaultShell;
 use serde::{Deserialize, Serialize};
-pub use telos_agent::DefaultShell;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct FileConfig {

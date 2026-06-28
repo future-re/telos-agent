@@ -1,5 +1,5 @@
 #[allow(deprecated)]
-pub use telos_runtime::config::{
+pub use telos_agent::frontend::config::{
     AgentSection, ApprovalSection, BillingModelPricing, BillingSection, DefaultShell,
     DiagnosticsGithubSection, DiagnosticsSection, FileConfig, ModelsSection, ResolvedProvider,
     TuiDensity, TuiSection, apply_config_env, default_cwd, load_config_file, load_project_config,
@@ -9,21 +9,25 @@ pub use telos_runtime::config::{
 use std::sync::Arc;
 
 use anyhow::Result;
-use telos_runtime::{ProviderKind, ProviderSetup};
+use telos_agent::frontend::{ProviderKind, ProviderSetup};
 
 pub fn build_agent_config(
     options: &crate::cli::SharedOptions,
     config: &FileConfig,
     approval_handler: Option<Arc<dyn telos_agent::ApprovalHandler>>,
 ) -> Result<telos_agent::AgentConfig> {
-    telos_runtime::config::build_agent_config(&options.to_runtime(), config, approval_handler)
+    telos_agent::frontend::config::build_agent_config(
+        &options.to_runtime(),
+        config,
+        approval_handler,
+    )
 }
 
 pub fn build_provider(
     options: &crate::cli::SharedOptions,
     config: &FileConfig,
 ) -> Result<ResolvedProvider> {
-    telos_runtime::config::build_provider(&options.to_runtime(), config)
+    telos_agent::frontend::config::build_provider(&options.to_runtime(), config)
 }
 
 pub fn build_provider_from_onboarding(
@@ -38,7 +42,7 @@ pub fn build_provider_from_onboarding(
         thinking_model: result.thinking_model.clone(),
         fast_model: result.fast_model.clone(),
     };
-    telos_runtime::config::build_provider_from_setup(&setup)
+    telos_agent::frontend::config::build_provider_from_setup(&setup)
 }
 
 #[cfg(test)]

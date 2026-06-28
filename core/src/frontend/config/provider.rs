@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::sync::Arc;
 
+use crate::{AgentConfig, ApprovalHandler, DeepSeekConfig, DeepSeekProvider, MockProvider};
 use anyhow::{Context, Result};
-use telos_agent::{AgentConfig, ApprovalHandler, DeepSeekConfig, DeepSeekProvider, MockProvider};
 
 use super::FileConfig;
-use crate::options::{ProviderKind, ProviderSetup, SharedOptions};
+use crate::frontend::options::{ProviderKind, ProviderSetup, SharedOptions};
 
 const DEEPSEEK_PRO_ALIAS: &str = "pro";
 const DEEPSEEK_FLASH_ALIAS: &str = "flash";
@@ -34,7 +34,7 @@ pub fn build_agent_config(
     agent_config.auto_validate_schema = !options.no_validate_schema;
     agent_config.approval_handler = approval_handler;
 
-    let mut env = telos_agent::platform_base_env();
+    let mut env = crate::platform_base_env();
     if let Some(config_env) = &config.env {
         for (key, value) in config_env {
             env.insert(key.clone(), value.clone());

@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result};
-use telos_agent::memory::unix_timestamp;
-use telos_agent::{
+use crate::memory::unix_timestamp;
+use crate::{
     MemoryCategory, MemoryEntry, MemoryMaintenancePolicy, MemorySection, MemoryStatus, MemoryStore,
     ToolRegistry, ToolResult,
 };
+use anyhow::{Context, Result};
 
 pub fn memory_root(project_root: Option<&Path>) -> Result<PathBuf> {
     if let Some(root) = project_root {
@@ -34,10 +34,10 @@ pub fn open_memory_store(project_root: Option<&Path>) -> Result<Arc<Mutex<Memory
 
 pub fn register_memory_runtime(
     tools: &mut ToolRegistry,
-    assembly: &mut telos_agent::PromptAssembly,
+    assembly: &mut crate::PromptAssembly,
     store: Arc<Mutex<MemoryStore>>,
 ) {
-    telos_agent::register_memory_tools(tools, store.clone());
+    crate::register_memory_tools(tools, store.clone());
     assembly.add(MemorySection::new(store));
 }
 

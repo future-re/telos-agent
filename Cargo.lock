@@ -4144,7 +4144,7 @@ dependencies = [
 
 [[package]]
 name = "telos-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -4162,7 +4162,6 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "telos-runtime",
  "telos_agent",
  "tempfile",
  "tokio",
@@ -4188,7 +4187,6 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
- "telos-runtime",
  "telos_agent",
  "tempfile",
  "tokio",
@@ -4197,30 +4195,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "telos-runtime"
-version = "0.1.1"
+name = "telos_agent"
+version = "0.1.2"
 dependencies = [
  "anyhow",
- "async-trait",
- "dirs 5.0.1",
- "glob",
- "rpassword",
- "serde",
- "serde_json",
- "telos_agent",
- "tempfile",
- "tokio",
- "toml 0.8.2",
- "tracing",
-]
-
-[[package]]
-name = "telos_agent"
-version = "0.1.1"
-dependencies = [
  "async-stream",
  "async-trait",
  "base64 0.22.1",
+ "dirs 5.0.1",
  "dotenvy",
  "futures-core",
  "futures-util",
@@ -4228,6 +4210,7 @@ dependencies = [
  "jsonschema",
  "libc",
  "reqwest 0.12.28",
+ "rpassword",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -4237,6 +4220,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-tungstenite",
+ "toml 0.8.2",
  "tracing",
  "tree-sitter",
  "tree-sitter-bash",

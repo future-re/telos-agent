@@ -1,6 +1,6 @@
 [package]
 name = "telos_agent"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "telos — an intent-driven agent runtime. Loop: intent → execute → think → complete"
 license = "MIT"
@@ -11,9 +11,11 @@ categories = ["development-tools", "api-bindings", "asynchronous"]
 rust-version = "1.96"
 
 [dependencies]
+anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 base64 = "0.22"
+dirs = "5"
 futures-core = "0.3"
 futures-util = "0.3"
 glob = "0.3"
@@ -37,10 +39,12 @@ tokio = { version = "1", features = [
     "time",
 ] }
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect"] }
+toml = "0.8"
 tracing = "0.1"
 tree-sitter = "0.25"
 tree-sitter-bash = "0.25"
 tree-sitter-pwsh = "0.38.1"
+rpassword = "7"
 url = "2"
 
 [dev-dependencies]

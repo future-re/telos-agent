@@ -9,9 +9,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agent_host::{
     AgentHost, DesktopSettingsOverrides, MemoryOverview, ResolvedDesktopSettings, SessionSummary,
-    list_sessions as list_sessions_impl, load_session_messages, delete_session_files,
-    memory_overview,
-    resolve_desktop_settings, save_deepseek_api_key,
+    delete_session_files, list_sessions as list_sessions_impl, load_session_messages,
+    memory_overview, resolve_desktop_settings, save_deepseek_api_key,
 };
 
 type HostMap = Mutex<HashMap<String, HostEntry>>;

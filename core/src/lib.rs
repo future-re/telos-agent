@@ -148,6 +148,10 @@ pub mod subagent;
 pub mod tasks;
 /// Multi-agent team collaboration.
 pub mod team;
+
+/// Frontend helpers — config loading, project context, runtime setup.
+/// Used by CLI and desktop frontends.
+pub mod frontend;
 /// Token-counting helpers.
 pub mod tokens;
 /// Tool trait, registry, validation, and execution context.

@@ -1,1 +1,1 @@
-pub use telos_runtime::memory_runtime::*;
+pub use telos_agent::frontend::memory_runtime::*;

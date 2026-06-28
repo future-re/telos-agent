@@ -2,16 +2,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::{AgentConfig, ApprovalHandler, DefaultShell, MemoryStore, ModelProvider, ToolRegistry};
 use anyhow::Result;
-use telos_agent::{
-    AgentConfig, ApprovalHandler, DefaultShell, MemoryStore, ModelProvider, ToolRegistry,
-};
 
-use crate::config::{self, FileConfig};
-use crate::context::{self, ProjectContext};
-use crate::memory_runtime;
-use crate::options::SharedOptions;
-use crate::project;
+use crate::frontend::config::{self, FileConfig};
+use crate::frontend::context::{self, ProjectContext};
+use crate::frontend::memory_runtime;
+use crate::frontend::options::SharedOptions;
+use crate::frontend::project;
 
 pub struct PreparedRuntime {
     pub agent_config: AgentConfig,
@@ -42,24 +40,22 @@ pub fn prepare_runtime(
 
     let mut tools = ToolRegistry::new();
     let default_shell = resolve_default_shell(file_config);
-    telos_agent::register_core_tools_with_shell(&mut tools, default_shell);
+    crate::register_core_tools_with_shell(&mut tools, default_shell);
     register_task_tools(&mut tools, task_manager);
-    telos_agent::register_memory_tools(&mut tools, memory_store.clone());
-    agent_config.memory_injector =
-        Some(Arc::new(telos_agent::MemoryInjector::new(memory_store.clone())));
+    crate::register_memory_tools(&mut tools, memory_store.clone());
+    agent_config.memory_injector = Some(Arc::new(crate::MemoryInjector::new(memory_store.clone())));
     if let Some(skill_registry) = agent_config.skill_registry.clone() {
-        agent_config.skill_injector =
-            Some(Arc::new(telos_agent::SkillInjector::new(skill_registry)));
+        agent_config.skill_injector = Some(Arc::new(crate::SkillInjector::new(skill_registry)));
     }
 
     // Load project MCP servers
     let mcp_config_path = project_root_or_cwd.join(".tiny-agent").join("mcp.json");
-    let mcp_manager = telos_agent::McpManager::load_config(&mcp_config_path)
+    let mcp_manager = crate::McpManager::load_config(&mcp_config_path)
         .unwrap_or_else(|e| {
             if mcp_config_path.exists() {
                 tracing::warn!(path = %mcp_config_path.display(), error = %e, "failed to load MCP config");
             }
-            telos_agent::McpManager::new(HashMap::new())
+            crate::McpManager::new(HashMap::new())
         });
 
     // Create plugin registry and discover installed plugins
@@ -88,8 +84,7 @@ pub fn prepare_runtime(
         tokio::runtime::Handle::current().block_on(async {
             mcp_manager.connect_all().await;
             for (server_id, mcp_tool) in mcp_manager.all_tools().await {
-                let bridge =
-                    telos_agent::McpToolBridge::new(server_id, mcp_tool, mcp_manager.clone());
+                let bridge = crate::McpToolBridge::new(server_id, mcp_tool, mcp_manager.clone());
                 tools.register(bridge);
             }
         });
@@ -97,7 +92,7 @@ pub fn prepare_runtime(
     agent_config.mcp_manager = Some(mcp_manager.clone());
 
     // Add MCP section to the plugin-applied prompt assembly
-    prompt.add(telos_agent::McpSection::new(mcp_manager.clone()));
+    prompt.add(crate::McpSection::new(mcp_manager.clone()));
     agent_config.prompt_assembly = Some(Arc::new(prompt));
 
     Ok(PreparedRuntime { agent_config, tools, project_root, context, memory_store })
@@ -108,7 +103,7 @@ pub fn register_subagent_tool(
     agent_config: &AgentConfig,
     provider: Arc<dyn ModelProvider + Send + Sync>,
 ) -> Result<()> {
-    telos_agent::register_subagent_tool(tools, provider, agent_config)?;
+    crate::register_subagent_tool(tools, provider, agent_config)?;
     Ok(())
 }
 
@@ -126,7 +121,7 @@ pub fn rebuild_prompt_assembly(runtime: &mut PreparedRuntime) {
     }
 
     if let Some(mcp_manager) = runtime.agent_config.mcp_manager.clone() {
-        prompt.add(telos_agent::McpSection::new(mcp_manager));
+        prompt.add(crate::McpSection::new(mcp_manager));
     }
 
     runtime.agent_config.prompt_assembly = Some(Arc::new(prompt));
@@ -137,8 +132,8 @@ fn build_prompt_assembly(
     tools: &ToolRegistry,
     context: &ProjectContext,
     _memory_store: Arc<Mutex<MemoryStore>>,
-) -> telos_agent::PromptAssembly {
-    let mut assembly = telos_agent::prompt::default_coding_assembly_for_profile(
+) -> crate::PromptAssembly {
+    let mut assembly = crate::prompt::default_coding_assembly_for_profile(
         Arc::new(tools.clone()),
         agent_config.cwd.clone(),
         agent_config.skill_registry.clone(),
@@ -149,14 +144,14 @@ fn build_prompt_assembly(
     assembly
 }
 
-fn hook_registry_for_config(agent_config: &AgentConfig) -> telos_agent::HookRegistry {
+fn hook_registry_for_config(agent_config: &AgentConfig) -> crate::HookRegistry {
     agent_config.hooks.as_ref().clone()
 }
 
-fn create_plugin_registry(project_root_or_cwd: &Path) -> Option<Arc<telos_agent::PluginRegistry>> {
+fn create_plugin_registry(project_root_or_cwd: &Path) -> Option<Arc<crate::PluginRegistry>> {
     let telos_dir = project_root_or_cwd.join(".telos");
     let plugins_root = telos_dir.join("plugins");
-    let mut registry = telos_agent::PluginRegistry::new(&plugins_root);
+    let mut registry = crate::PluginRegistry::new(&plugins_root);
 
     let installed_dir = registry.installed_dir();
     if let Err(e) = std::fs::create_dir_all(&installed_dir) {
@@ -185,15 +180,12 @@ fn create_plugin_registry(project_root_or_cwd: &Path) -> Option<Arc<telos_agent:
     Some(Arc::new(registry))
 }
 
-pub fn task_manager_for_root(project_root_or_cwd: &Path) -> Arc<telos_agent::TaskManager> {
-    Arc::new(telos_agent::TaskManager::new(project_root_or_cwd.join(".telos").join("tasks")))
+pub fn task_manager_for_root(project_root_or_cwd: &Path) -> Arc<crate::TaskManager> {
+    Arc::new(crate::TaskManager::new(project_root_or_cwd.join(".telos").join("tasks")))
 }
 
-pub fn register_task_tools(
-    registry: &mut ToolRegistry,
-    task_manager: Arc<telos_agent::TaskManager>,
-) {
-    telos_agent::register_task_tools(registry, task_manager);
+pub fn register_task_tools(registry: &mut ToolRegistry, task_manager: Arc<crate::TaskManager>) {
+    crate::register_task_tools(registry, task_manager);
 }
 
 pub fn resolve_default_shell(file_config: &FileConfig) -> DefaultShell {

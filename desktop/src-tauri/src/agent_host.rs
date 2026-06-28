@@ -5,15 +5,15 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use telos_agent::frontend::config::{self, FileConfig, ResolvedProvider};
+use telos_agent::frontend::context::ProjectContext;
+use telos_agent::frontend::runtime as shared_runtime;
+use telos_agent::frontend::{ProviderKind as RuntimeProviderKind, SharedOptions};
 use telos_agent::{
     AgentSession, ApprovalDecision, ApprovalHandler, AutoDenyHandler, CompletionResponse,
     FixedDecisionHandler, JsonlStorage, MemoryCategory, MemoryEntry, MemoryQuery, MemorySort,
     MemoryStatus, Message, MockProvider, ModelProvider, Role, StopReason, Storage, ToolRegistry,
 };
-use telos_runtime::config::{self, FileConfig, ResolvedProvider};
-use telos_runtime::context::ProjectContext;
-use telos_runtime::runtime as shared_runtime;
-use telos_runtime::{ProviderKind as RuntimeProviderKind, SharedOptions};
 
 use crate::desktop_event::{DesktopEvent, map_turn_event};
 
@@ -261,7 +261,8 @@ impl AgentHost {
     where
         F: FnMut(DesktopEvent),
     {
-        telos_runtime::memory_runtime::record_user_preference(&self.memory_store, &prompt).await;
+        telos_agent::frontend::memory_runtime::record_user_preference(&self.memory_store, &prompt)
+            .await;
 
         let erased = telos_agent::ErasedProvider(self.provider.as_ref());
         let mut final_text = String::new();
@@ -320,7 +321,7 @@ async fn record_memory_from_event(
             tool_details.insert(tool_call_id.clone(), detail.clone());
         }
         telos_agent::TurnEvent::ToolCompleted { tool_call_id, name, is_error: false, .. } => {
-            telos_runtime::memory_runtime::record_successful_tool(
+            telos_agent::frontend::memory_runtime::record_successful_tool(
                 memory_store,
                 name,
                 tool_call_id,
@@ -330,9 +331,13 @@ async fn record_memory_from_event(
         }
         telos_agent::TurnEvent::ToolResult(message) => {
             for result in message.tool_results_iter() {
-                telos_runtime::memory_runtime::record_subagent_learning(memory_store, result).await;
+                telos_agent::frontend::memory_runtime::record_subagent_learning(
+                    memory_store,
+                    result,
+                )
+                .await;
                 if result.is_error {
-                    telos_runtime::memory_runtime::record_tool_error(
+                    telos_agent::frontend::memory_runtime::record_tool_error(
                         memory_store,
                         result,
                         tool_details.get(&result.tool_call_id).map(String::as_str),
@@ -351,16 +356,16 @@ pub fn resolve_desktop_settings(
     let cwd = clean_path(overrides.cwd.clone().unwrap_or_else(config::default_cwd));
     let merged = load_merged_config(&cwd)?;
     let shared = shared_options(overrides, &settings_from_config(&merged, cwd.clone())?);
-    let project_root = telos_runtime::find_project_root(&cwd).ok().map(clean_path);
+    let project_root = telos_agent::frontend::find_project_root(&cwd).ok().map(clean_path);
     let project_root_or_cwd = project_root.clone().unwrap_or_else(|| cwd.clone());
     let memory_root = clean_path(
-        telos_runtime::memory_runtime::memory_root(project_root.as_deref())
+        telos_agent::frontend::memory_runtime::memory_root(project_root.as_deref())
             .map_err(|e| e.to_string())?,
     );
     let memory_count = telos_agent::MemoryStore::new(memory_root.clone()).list().len();
     let context = project_root
         .as_deref()
-        .map(telos_runtime::context::load_project_context)
+        .map(telos_agent::frontend::context::load_project_context)
         .unwrap_or_else(ProjectContext::empty);
 
     let provider = overrides
@@ -524,7 +529,7 @@ fn is_auto_tool_error_memory(entry: &MemoryEntry) -> bool {
 
 fn load_merged_config(cwd: &Path) -> Result<FileConfig, String> {
     let user = config::load_user_config(None).map_err(|e| e.to_string())?;
-    let project = telos_runtime::find_project_root(cwd)
+    let project = telos_agent::frontend::find_project_root(cwd)
         .ok()
         .map(|root| config::load_project_config(&root).map_err(|e| e.to_string()))
         .transpose()?
@@ -537,10 +542,10 @@ fn settings_from_config(
     cwd: PathBuf,
 ) -> Result<ResolvedDesktopSettings, String> {
     let cwd = clean_path(cwd);
-    let project_root = telos_runtime::find_project_root(&cwd).ok().map(clean_path);
+    let project_root = telos_agent::frontend::find_project_root(&cwd).ok().map(clean_path);
     let project_root_or_cwd = project_root.clone().unwrap_or_else(|| cwd.clone());
     let memory_root = clean_path(
-        telos_runtime::memory_runtime::memory_root(project_root.as_deref())
+        telos_agent::frontend::memory_runtime::memory_root(project_root.as_deref())
             .map_err(|e| e.to_string())?,
     );
     Ok(ResolvedDesktopSettings {

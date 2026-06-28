@@ -9,7 +9,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agent_host::{
     AgentHost, DesktopSettingsOverrides, MemoryOverview, ResolvedDesktopSettings, SessionSummary,
-    list_sessions as list_sessions_impl, load_session_messages, memory_overview,
+    list_sessions as list_sessions_impl, load_session_messages, delete_session_files,
+    memory_overview,
     resolve_desktop_settings, save_deepseek_api_key,
 };
 
@@ -248,7 +249,8 @@ async fn reset_session(state: State<'_, AppState>, request: SessionRequest) -> R
         token.cancel();
     }
     deny_pending_approvals(&state.approvals, Some(&request.session_id), "session reset").await;
-    state.hosts.lock().await.remove(&request.session_id);
+    let cwd = state.hosts.lock().await.remove(&request.session_id).and_then(|e| e.settings.cwd);
+    delete_session_files(&request.session_id, cwd).await.ok();
     Ok(())
 }
 

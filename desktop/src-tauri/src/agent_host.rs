@@ -184,6 +184,15 @@ pub async fn load_session_messages(
     Ok(values)
 }
 
+#[allow(dead_code)] // Called by reset_session Tauri command.
+pub async fn delete_session_files(session_id: &str, cwd: Option<PathBuf>) -> Result<(), String> {
+    let resolved =
+        resolve_desktop_settings(&DesktopSettingsOverrides { cwd, ..Default::default() })?;
+    let sessions_dir = resolved.project_root_or_cwd.join(".telos").join("desktop-sessions");
+    let storage = JsonlStorage::new(sessions_dir).map_err(|e| e.to_string())?;
+    storage.delete(session_id).await.map_err(|e| e.to_string())
+}
+
 pub struct AgentHost {
     session: AgentSession,
     provider: Arc<dyn ModelProvider + Send + Sync>,

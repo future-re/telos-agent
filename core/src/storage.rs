@@ -62,6 +62,10 @@ pub trait Storage: Send + Sync + std::fmt::Debug {
     ) -> Result<Option<SessionMetadata>, AgentError> {
         Ok(None)
     }
+    /// Delete all persisted data for a session. The default is a no-op.
+    async fn delete(&self, _session_id: &str) -> Result<(), AgentError> {
+        Ok(())
+    }
 }
 
 /// On-disk JSONL backend. Each message is serialised to one line; the file is
@@ -249,6 +253,22 @@ impl Storage for JsonlStorage {
         let metadata = serde_json::from_slice(&bytes)
             .map_err(|e| AgentError::Config(format!("deserialize metadata failed: {e}")))?;
         Ok(Some(metadata))
+    }
+
+    async fn delete(&self, session_id: &str) -> Result<(), AgentError> {
+        let jsonl_path = self.path(session_id)?;
+        if jsonl_path.exists() {
+            tokio::fs::remove_file(&jsonl_path)
+                .await
+                .map_err(|e| AgentError::Config(format!("storage delete failed: {e}")))?;
+        }
+        let metadata_path = self.metadata_path(session_id)?;
+        if metadata_path.exists() {
+            tokio::fs::remove_file(&metadata_path)
+                .await
+                .map_err(|e| AgentError::Config(format!("storage metadata delete failed: {e}")))?;
+        }
+        Ok(())
     }
 }
 

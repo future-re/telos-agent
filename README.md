@@ -342,10 +342,33 @@ npm run dev
 
 ### 构建 desktop
 
+前端构建需要 Node.js 22（至少 22.12.0）。只验证前端：
+
 ```bash
 cd desktop
 npm run build
 ```
+
+打包当前系统的 Tauri 桌面安装包：
+
+```bash
+cd desktop
+npm run tauri build
+```
+
+desktop 后端通过 `desktop/src-tauri/Cargo.toml` 里的 `telos_agent = { path = "../../core" }`
+依赖本仓库的 `core/`，发布构建会使用当前 checkout/tag 的本地源码。
+
+Windows 和 macOS 发布包通过 GitHub Actions 构建。推送版本 tag 后会分别在
+Windows/macOS runner 上构建安装包并上传到 GitHub Release：
+
+```bash
+git tag v0.1.2
+git push origin v0.1.2
+```
+
+也可以在 GitHub Actions 里手动运行 `Release Desktop` workflow，并填写
+`version` 输入来覆盖 `tauri.conf.json` 里的版本号。
 
 ## License
 

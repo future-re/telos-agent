@@ -35,7 +35,6 @@ jobs:
             os: macos-latest
             artifact_glob: |
               desktop/src-tauri/target/release/bundle/**/*.dmg
-              desktop/src-tauri/target/release/bundle/**/*.app
               desktop/src-tauri/target/release/bundle/**/*.tar.gz
 
     runs-on: ${{ matrix.os }}
@@ -71,15 +70,27 @@ jobs:
         working-directory: desktop
         run: npm ci
 
-      - name: Override version (if set)
-        if: inputs.version != ''
+      - name: Determine app version
+        id: app-version
         shell: bash
         run: |
-          echo "Overriding version to ${{ inputs.version }}"
+          if [ -n "${{ inputs.version }}" ]; then
+            version="${{ inputs.version }}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(node -e "console.log(require('./desktop/src-tauri/tauri.conf.json').version)")"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Override app version
+        shell: bash
+        run: |
+          echo "Overriding version to ${{ steps.app-version.outputs.version }}"
           node -e "
             const fs = require('fs');
             const conf = JSON.parse(fs.readFileSync('desktop/src-tauri/tauri.conf.json','utf8'));
-            conf.version = '${{ inputs.version }}';
+            conf.version = '${{ steps.app-version.outputs.version }}';
             fs.writeFileSync('desktop/src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
           "
 
@@ -102,7 +113,7 @@ jobs:
         with:
           name: telos-desktop-${{ matrix.target }}
           path: ${{ matrix.artifact_glob }}
-          if-no-files-found: warn
+          if-no-files-found: error
 
   release:
     name: Create Release
@@ -146,7 +157,7 @@ jobs:
           echo '```' >> checksums.md
           echo '# SHA256' >> checksums.md
           echo '' >> checksums.md
-          for f in $(find artifacts -type f | sort); do
+          find artifacts -type f -print0 | sort -z | while IFS= read -r -d '' f; do
             name=$(basename "$f")
             sha=$(sha256sum "$f" | cut -d' ' -f1)
             echo "$name" >> checksums.md

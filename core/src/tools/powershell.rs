@@ -102,7 +102,18 @@ impl Tool for PowerShellTool {
             "Use the PowerShell tool for shell commands in this environment. \
 Prefer Read, Edit, Write, Glob, or Grep for file operations. \
 Use PowerShell syntax, not Bash syntax. \
-Provide a short `description` summarizing the command's intent.",
+Provide a short `description` summarizing the command's intent. \
+\
+When chaining commands with `&&`, be aware that cmdlets like `cmdkey` misparse \
+target names containing `@` or `/` — the entire chain aborts including earlier \
+commands that already succeeded. Split such commands into separate calls. \
+\
+For Windows Credential Manager operations with special characters in target names, \
+use P/Invoke via Add-Type rather than cmdkey. \
+Always use fully-qualified .NET namespace paths in P/Invoke code. \
+\
+For PowerShell script/module/GUI development, use the `powershell-use` skill \
+(best practices, Windows Forms/WPF, PowerShell Gallery, PSResourceGet).",
         )
     }
 

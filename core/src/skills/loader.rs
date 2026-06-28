@@ -13,6 +13,7 @@ impl SkillLoader {
             ("update-config.md", include_str!("bundled/update-config.md")),
             ("explore.md", include_str!("bundled/explore.md")),
             ("web-access.md", include_str!("bundled/web-access.md")),
+            ("powershell-use.md", include_str!("bundled/powershell-use.md")),
         ];
         for (_name, content) in files {
             if let Some(skill) = Self::parse_skill(content, SkillSource::Bundled) {

@@ -215,7 +215,7 @@ export function App() {
             turnUsage={state.currentTurnUsage}
             turnModel={state.currentTurnUsage?.model}
           />
-          <div className="grid min-h-0 min-w-0 grid-cols-1 min-[1180px]:grid-cols-[340px_minmax(0,1fr)]">
+          <div className="grid h-full min-h-0 min-w-0 overflow-hidden grid-cols-1 min-[1180px]:grid-cols-[340px_minmax(0,1fr)]">
             <AgentStatusRail
               activeSessionId={activeSessionId}
               sessions={sessions}

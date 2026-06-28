@@ -37,7 +37,7 @@ export function AgentStatusRail({
   const phase = resolvePhase(status, tools);
 
   return (
-    <aside className="hidden min-h-0 min-w-0 overflow-hidden border-r bg-muted p-3 min-[1180px]:block">
+    <aside className="hidden h-full min-h-0 min-w-0 overflow-hidden border-r bg-muted p-3 min-[1180px]:block">
       <div className="grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-md border bg-background shadow-sm">
         <section className="border-b p-3">
           <div className="flex items-center gap-2">
@@ -104,7 +104,7 @@ export function AgentStatusRail({
               <Plus className="size-3.5" aria-hidden="true" />
             </Button>
           </div>
-          <div className="no-scrollbar grid min-h-0 min-w-0 content-start gap-1.5 overflow-x-hidden overflow-y-auto pr-1">
+          <div className="flex h-full min-h-0 min-w-0 flex-col gap-1.5 overflow-x-hidden overflow-y-auto pr-1">
             {sessions.map((session) => {
               const messageCount = session.state.messages.filter(
                 (message) => message.role === "user",
@@ -113,7 +113,7 @@ export function AgentStatusRail({
                 <div
                   key={session.id}
                   className={cn(
-                    "group flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-md border px-2 py-1.5 text-left text-xs transition-colors hover:border-ring hover:bg-accent/60",
+                    "group flex w-full min-w-0 max-w-full shrink-0 items-center gap-2 overflow-hidden rounded-md border px-2 py-1.5 text-left text-xs transition-colors hover:border-ring hover:bg-accent/60",
                     session.id === activeSessionId
                       ? "border-primary/35 bg-primary/10 text-foreground"
                       : "bg-background text-muted-foreground",

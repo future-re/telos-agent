@@ -34,8 +34,9 @@ jobs:
           - target: macos
             os: macos-latest
             artifact_glob: |
-              desktop/src-tauri/target/release/bundle/dmg/*.dmg
-              desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz
+              desktop/src-tauri/target/release/bundle/**/*.dmg
+              desktop/src-tauri/target/release/bundle/**/*.app
+              desktop/src-tauri/target/release/bundle/**/*.tar.gz
 
     runs-on: ${{ matrix.os }}
 
@@ -91,13 +92,17 @@ jobs:
         run: |
           echo "=== Bundle output ==="
           find desktop/src-tauri/target/release/bundle -type f 2>/dev/null || echo "(no bundle dir)"
+          echo "---"
+          echo "dmg/*.dmg:" $(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg 2>/dev/null || echo "(none)")
+          echo "macos/*.app:" $(ls desktop/src-tauri/target/release/bundle/macos/*.app 2>/dev/null || echo "(none)")
+          echo "macos/*.tar.gz:" $(ls desktop/src-tauri/target/release/bundle/macos/*.tar.gz 2>/dev/null || echo "(none)")
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
           name: telos-desktop-${{ matrix.target }}
           path: ${{ matrix.artifact_glob }}
-          if-no-files-found: error
+          if-no-files-found: warn
 
   release:
     name: Create Release

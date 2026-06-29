@@ -190,7 +190,6 @@ jobs:
           name: telos ${{ github.ref_name }}
           body_path: RELEASE_BODY.md
           files: |
-            artifacts/windows/*
-            artifacts/macos/*
+            artifacts/**/*
           draft: false
           prerelease: false

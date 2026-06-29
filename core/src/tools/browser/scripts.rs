@@ -9,19 +9,53 @@ pub(super) const PAGE_SUMMARY_SCRIPT: &str = r#"
 
 pub(super) const BROWSER_STATE_SCRIPT: &str = r#"
 (() => {
-  const candidates = Array.from(document.querySelectorAll(
-    'a,button,input,textarea,select,[role="button"],[role="link"],[onclick],[contenteditable="true"]'
-  ));
-  const visible = (el) => {
+  const visibleTelosElement = (el) => {
     const rect = el.getBoundingClientRect();
     const style = window.getComputedStyle(el);
-    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    return rect.width > 0
+      && rect.height > 0
+      && style.visibility !== 'hidden'
+      && style.display !== 'none'
+      && style.pointerEvents !== 'none'
+      && !el.closest('[aria-hidden="true"],[hidden]');
   };
+  const interactiveTelosElements = () => {
+    const selector = [
+      'a',
+      'button',
+      'input',
+      'textarea',
+      'select',
+      'label',
+      'summary',
+      '[onclick]',
+      '[contenteditable="true"]',
+      '[role="button"]',
+      '[role="link"]',
+      '[role="tab"]',
+      '[role="menuitem"]',
+      '[role="option"]',
+      '[role="checkbox"]',
+      '[role="radio"]',
+      '[tabindex]:not([tabindex="-1"])'
+    ].join(',');
+    return Array.from(document.querySelectorAll(selector)).filter(visibleTelosElement);
+  };
+  const normalizeTelosText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+  const telosElementText = (el) => normalizeTelosText([
+    el.innerText,
+    el.textContent,
+    el.getAttribute('aria-label'),
+    el.getAttribute('title'),
+    el.getAttribute('placeholder'),
+    el.value,
+    el.getAttribute('alt')
+  ].find(value => value && String(value).trim()) || '');
+  const candidates = interactiveTelosElements();
   let index = 0;
   const elements = [];
   for (const el of candidates) {
     if (elements.length >= 120) break;
-    if (!visible(el)) continue;
     index += 1;
     const id = `e${index}`;
     el.setAttribute('data-telos-id', id);
@@ -32,8 +66,9 @@ pub(super) const BROWSER_STATE_SCRIPT: &str = r#"
     elements.push({
       element_id: id,
       tag,
+      role: el.getAttribute('role') || '',
       type: inputType,
-      text: (el.innerText || el.getAttribute('aria-label') || el.getAttribute('title') || el.value || '').replace(/\s+/g, ' ').trim().slice(0, 300),
+      text: telosElementText(el).slice(0, 300),
       placeholder: el.getAttribute('placeholder') || '',
       name: el.getAttribute('name') || '',
       href: el.href || '',
@@ -107,21 +142,108 @@ function findTelosElement(args) {
     if (byId) return byId;
   }
   if (args.selector) {
-    const bySelector = document.querySelector(args.selector);
-    if (bySelector) return bySelector;
+    const selector = String(args.selector).trim();
+    const byLocator = findTelosLocator(selector);
+    if (byLocator) return byLocator;
   }
   if (args.text) {
-    const target = String(args.text).toLowerCase();
-    const all = Array.from(document.querySelectorAll('a,button,input,textarea,select,[role="button"],[role="link"],[onclick],[contenteditable="true"]'));
-    return all.find(el => ((el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || '').toLowerCase()).includes(target));
+    return findTelosByText(String(args.text));
   }
   return null;
+}
+function findTelosLocator(selector) {
+  if (!selector) return null;
+  const lower = selector.toLowerCase();
+  if (lower.startsWith('text=')) return findTelosByText(selector.slice(5));
+  if (lower.startsWith('css=')) return queryTelosSelector(selector.slice(4));
+  if (lower.startsWith('xpath=')) return findTelosByXPath(selector.slice(6));
+  if (lower.startsWith('//') || lower.startsWith('(')) {
+    const byXPath = findTelosByXPath(selector);
+    if (byXPath) return byXPath;
+  }
+  return queryTelosSelector(selector);
+}
+function queryTelosSelector(selector) {
+  try {
+    return document.querySelector(selector);
+  } catch (_err) {
+    return null;
+  }
+}
+function findTelosByXPath(xpath) {
+  try {
+    const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+    const node = result.singleNodeValue;
+    return node && node.nodeType === Node.ELEMENT_NODE ? node : null;
+  } catch (_err) {
+    return null;
+  }
+}
+function findTelosByText(text) {
+  const target = normalizeTelosText(text).toLowerCase();
+  if (!target) return null;
+  const exact = [];
+  const partial = [];
+  for (const el of interactiveTelosElements()) {
+    const value = telosElementText(el).toLowerCase();
+    if (!value) continue;
+    if (value === target) exact.push(el);
+    else if (value.includes(target)) partial.push(el);
+  }
+  return exact[0] || partial[0] || null;
+}
+function interactiveTelosElements() {
+  const selector = [
+    'a',
+    'button',
+    'input',
+    'textarea',
+    'select',
+    'label',
+    'summary',
+    '[onclick]',
+    '[contenteditable="true"]',
+    '[role="button"]',
+    '[role="link"]',
+    '[role="tab"]',
+    '[role="menuitem"]',
+    '[role="option"]',
+    '[role="checkbox"]',
+    '[role="radio"]',
+    '[tabindex]:not([tabindex="-1"])'
+  ].join(',');
+  return Array.from(document.querySelectorAll(selector)).filter(visibleTelosElement);
+}
+function visibleTelosElement(el) {
+  const rect = el.getBoundingClientRect();
+  const style = window.getComputedStyle(el);
+  return rect.width > 0
+    && rect.height > 0
+    && style.visibility !== 'hidden'
+    && style.display !== 'none'
+    && style.pointerEvents !== 'none'
+    && !el.closest('[aria-hidden="true"],[hidden]');
+}
+function telosElementText(el) {
+  return normalizeTelosText([
+    el.innerText,
+    el.textContent,
+    el.getAttribute('aria-label'),
+    el.getAttribute('title'),
+    el.getAttribute('placeholder'),
+    el.value,
+    el.getAttribute('alt')
+  ].find(value => value && String(value).trim()) || '');
+}
+function normalizeTelosText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
 }
 function describeTelosElement(el) {
   return {
     element_id: el.getAttribute('data-telos-id') || '',
     tag: el.tagName.toLowerCase(),
-    text: (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().slice(0, 200)
+    role: el.getAttribute('role') || '',
+    text: telosElementText(el).slice(0, 200)
   };
 }
 "#;

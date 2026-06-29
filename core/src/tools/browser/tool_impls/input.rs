@@ -22,8 +22,9 @@ impl Tool for BrowserClickTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "BrowserClick".into(),
-            description: "Click an indexed browser element. Prefer element_id from BrowserState."
-                .into(),
+            description:
+                "Click a browser element. Prefer element_id from BrowserState. The selector field is CSS, with text=... and xpath=... accepted as locator shorthands."
+                    .into(),
             input_schema: selector_schema(json!({})),
         }
     }
@@ -64,7 +65,7 @@ impl Tool for BrowserTypeTool {
         ToolDefinition {
             name: "BrowserType".into(),
             description:
-                "Type text into an indexed input, textarea, or contenteditable browser element."
+                "Type text into a browser input, textarea, or contenteditable element. Prefer element_id from BrowserState. The selector field is CSS, with text=... and xpath=... accepted as locator shorthands."
                     .into(),
             input_schema: selector_schema(json!({
                 "text": { "type": "string" },
@@ -115,7 +116,9 @@ impl Tool for BrowserSelectTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "BrowserSelect".into(),
-            description: "Select a value in an indexed browser select element.".into(),
+            description:
+                "Select a value in a browser select element. Prefer element_id from BrowserState. The selector field is CSS, with text=... and xpath=... accepted as locator shorthands."
+                    .into(),
             input_schema: selector_schema(json!({
                 "value": { "type": "string" }
             })),

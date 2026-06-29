@@ -330,7 +330,12 @@ async fn send_prompt(
                 window: window.clone(),
                 approvals: state.approvals.clone(),
             });
-            let settings = request.settings.clone();
+            let mut settings = request.settings.clone();
+            if settings.runtime_dir.is_none()
+                && let Ok(resource_dir) = window.app_handle().path().resource_dir()
+            {
+                settings.runtime_dir = Some(resource_dir.join("resources"));
+            }
             let host = Arc::new(Mutex::new(AgentHost::new(
                 settings.clone(),
                 Some(manual_approval_handler),

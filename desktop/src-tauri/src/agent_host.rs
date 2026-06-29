@@ -36,6 +36,8 @@ pub struct DesktopSettingsOverrides {
     pub cwd: Option<PathBuf>,
     pub max_iterations: Option<usize>,
     pub auto_approve: Option<bool>,
+    #[serde(skip)]
+    pub runtime_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,7 +210,7 @@ impl AgentHost {
     ) -> Result<Self, String> {
         let resolved = resolve_desktop_settings(&overrides)?;
         let shared = shared_options(&overrides, &resolved);
-        let merged = load_merged_config(&resolved.cwd)?;
+        let merged = load_merged_config(&resolved.cwd, overrides.runtime_dir.as_deref())?;
         let approval_handler: Option<Arc<dyn telos_agent::ApprovalHandler>> =
             Some(if resolved.auto_approve {
                 Arc::new(FixedDecisionHandler { decision: ApprovalDecision::Allow })
@@ -354,7 +356,7 @@ pub fn resolve_desktop_settings(
     overrides: &DesktopSettingsOverrides,
 ) -> Result<ResolvedDesktopSettings, String> {
     let cwd = clean_path(overrides.cwd.clone().unwrap_or_else(config::default_cwd));
-    let merged = load_merged_config(&cwd)?;
+    let merged = load_merged_config(&cwd, overrides.runtime_dir.as_deref())?;
     let shared = shared_options(overrides, &settings_from_config(&merged, cwd.clone())?);
     let project_root = telos_agent::frontend::find_project_root(&cwd).ok().map(clean_path);
     let project_root_or_cwd = project_root.clone().unwrap_or_else(|| cwd.clone());
@@ -527,14 +529,19 @@ fn is_auto_tool_error_memory(entry: &MemoryEntry) -> bool {
         || entry.name.starts_with("fix-")
 }
 
-fn load_merged_config(cwd: &Path) -> Result<FileConfig, String> {
+fn load_merged_config(cwd: &Path, runtime_dir: Option<&Path>) -> Result<FileConfig, String> {
     let user = config::load_user_config(None).map_err(|e| e.to_string())?;
     let project = telos_agent::frontend::find_project_root(cwd)
         .ok()
         .map(|root| config::load_project_config(&root).map_err(|e| e.to_string()))
         .transpose()?
         .flatten();
-    Ok(config::merge_configs(user, project))
+    let mut config = config::merge_configs(user, project);
+    if let Some(runtime_dir) = runtime_dir {
+        let env = config.env.get_or_insert_with(HashMap::new);
+        env.entry("TELOS_RUNTIME_DIR".into()).or_insert_with(|| runtime_dir.display().to_string());
+    }
+    Ok(config)
 }
 
 fn settings_from_config(

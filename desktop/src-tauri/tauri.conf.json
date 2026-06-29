@@ -28,6 +28,11 @@
     "active": true,
     "targets": "all",
     "icon": ["icons/icon.ico", "icons/icon.png"],
-    "category": "DeveloperTool"
+    "category": "DeveloperTool",
+    "resources": {
+      "resources/runtimes": "resources/runtimes",
+      "resources/playwright-browsers": "resources/playwright-browsers",
+      "resources/runtime-manifest.json": "resources/runtime-manifest.json"
+    }
   }
 }

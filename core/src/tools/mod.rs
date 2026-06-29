@@ -25,6 +25,7 @@ mod glob;
 mod grep;
 mod memory;
 mod powershell;
+mod python;
 mod send_user_message;
 mod shared;
 mod shell;
@@ -55,6 +56,7 @@ pub use memory::{
     MemoryWriteTool,
 };
 pub use powershell::PowerShellTool;
+pub use python::PythonScriptTool;
 pub use send_user_message::SendUserMessageTool;
 pub use shell::ShellTool;
 pub use skill::SkillTool;
@@ -118,6 +120,7 @@ pub fn register_core_tools_with_shell(registry: &mut ToolRegistry, default_shell
     registry.register(CodeIndexRefreshTool);
     registry.register(WebFetchTool::new());
     registry.register(WebSearchTool);
+    registry.register(PythonScriptTool);
     registry.register(BrowserStartTool::new(browser_manager.clone()));
     registry.register(BrowserNavigateTool::new(browser_manager.clone()));
     registry.register(BrowserStateTool::new(browser_manager.clone()));

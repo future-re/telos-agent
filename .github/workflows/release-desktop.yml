@@ -9,6 +9,14 @@ on:
         description: 'Version override (e.g. 0.2.0) — overrides tauri.conf.json'
         required: false
         type: string
+      runtime_source:
+        description: 'Runtime source for full installers: online downloads or vendored offline artifacts'
+        required: false
+        default: online
+        type: choice
+        options:
+          - online
+          - vendored
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,22 +28,25 @@ concurrency:
 
 jobs:
   build:
-    name: Build (${{ matrix.target }})
+    name: Build (${{ matrix.target }}-${{ matrix.variant }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: windows
+            variant: full
             os: windows-latest
-            artifact_glob: |
-              target/release/bundle/nsis/*.exe
-              target/release/bundle/msi/*.msi
+            runtime_bundle: true
+
+          - target: windows
+            variant: online
+            os: windows-latest
+            runtime_bundle: false
 
           - target: macos
+            variant: online
             os: macos-latest
-            artifact_glob: |
-              target/release/bundle/**/*.dmg
-              target/release/bundle/**/*.tar.gz
+            runtime_bundle: false
 
     runs-on: ${{ matrix.os }}
 
@@ -51,6 +62,12 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Python for runtime bundling
+        if: matrix.runtime_bundle
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
       - name: Rust version
         run: rustup show
@@ -94,6 +111,16 @@ jobs:
             fs.writeFileSync('desktop/src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
           "
 
+      - name: Prepare bundled Python automation runtime
+        if: matrix.runtime_bundle
+        shell: pwsh
+        run: |
+          if ("${{ inputs.runtime_source || 'online' }}" -eq "vendored") {
+            ./scripts/prepare-python-runtime.ps1
+          } else {
+            ./scripts/prepare-python-runtime.ps1 -AllowDownload -UseLocalPython
+          }
+
       - name: Build desktop app
         working-directory: desktop
         run: npm run tauri build
@@ -108,11 +135,29 @@ jobs:
           echo "macos/*.app:" $(ls target/release/bundle/macos/*.app 2>/dev/null || echo "(none)")
           echo "macos/*.tar.gz:" $(ls target/release/bundle/macos/*.tar.gz 2>/dev/null || echo "(none)")
 
+      - name: Stage variant artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "dist-desktop/${{ matrix.target }}-${{ matrix.variant }}"
+          find target/release/bundle -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.tar.gz' \) -print0 |
+            while IFS= read -r -d '' file; do
+              base="$(basename "$file")"
+              ext="${base##*.}"
+              stem="${base%.*}"
+              cp "$file" "dist-desktop/${{ matrix.target }}-${{ matrix.variant }}/${stem}-${{ matrix.variant }}.${ext}"
+            done
+          count="$(find "dist-desktop/${{ matrix.target }}-${{ matrix.variant }}" -type f | wc -l | tr -d ' ')"
+          if [ "$count" = "0" ]; then
+            echo "No bundle artifacts staged" >&2
+            exit 1
+          fi
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: telos-desktop-${{ matrix.target }}
-          path: ${{ matrix.artifact_glob }}
+          name: telos-desktop-${{ matrix.target }}-${{ matrix.variant }}
+          path: dist-desktop/${{ matrix.target }}-${{ matrix.variant }}/*
           if-no-files-found: error
 
   release:
@@ -128,21 +173,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download Windows artifacts
-        id: download-windows
+      - name: Download build artifacts
         uses: actions/download-artifact@v7
-        continue-on-error: true
         with:
-          name: telos-desktop-windows
-          path: artifacts/windows
-
-      - name: Download macOS artifacts
-        id: download-macos
-        uses: actions/download-artifact@v7
-        continue-on-error: true
-        with:
-          name: telos-desktop-macos
-          path: artifacts/macos
+          path: artifacts
+          pattern: telos-desktop-*
+          merge-multiple: false
 
       - name: Generate changelog
         uses: orhun/git-cliff-action@v4
@@ -173,7 +209,8 @@ jobs:
           ## 安装
 
           ### Windows
-          下载 \`telos_*_x64-setup.exe\` 双击安装。
+          - \`*-full.*\`：完整离线安装包，内置 Python、Playwright、Chromium 和常用办公/网页解析包。
+          - \`*-online.*\`：轻量安装包，不内置自动化 runtime；适合后续在线下载 runtime 的渠道。
 
           ### macOS
           下载 \`telos_*.dmg\`，双击挂载后将 \`telos.app\` 拖入 Applications 文件夹。

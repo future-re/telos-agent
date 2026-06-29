@@ -1,0 +1,5 @@
+{
+  "schema": 1,
+  "status": "not-prepared",
+  "description": "Run scripts/prepare-python-runtime.ps1 before building the full desktop automation bundle."
+}

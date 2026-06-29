@@ -28,14 +28,14 @@ jobs:
           - target: windows
             os: windows-latest
             artifact_glob: |
-              desktop/src-tauri/target/release/bundle/nsis/*.exe
-              desktop/src-tauri/target/release/bundle/msi/*.msi
+              target/release/bundle/nsis/*.exe
+              target/release/bundle/msi/*.msi
 
           - target: macos
             os: macos-latest
             artifact_glob: |
-              desktop/src-tauri/target/release/bundle/**/*.dmg
-              desktop/src-tauri/target/release/bundle/**/*.tar.gz
+              target/release/bundle/**/*.dmg
+              target/release/bundle/**/*.tar.gz
 
     runs-on: ${{ matrix.os }}
 
@@ -62,7 +62,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            desktop/src-tauri/target/
+            target/
           key: ${{ runner.os }}-cargo-desktop-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-desktop-
 
@@ -102,11 +102,11 @@ jobs:
         shell: bash
         run: |
           echo "=== Bundle output ==="
-          find desktop/src-tauri/target/release/bundle -type f 2>/dev/null || echo "(no bundle dir)"
+          find target/release/bundle -type f 2>/dev/null || echo "(no bundle dir)"
           echo "---"
-          echo "dmg/*.dmg:" $(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg 2>/dev/null || echo "(none)")
-          echo "macos/*.app:" $(ls desktop/src-tauri/target/release/bundle/macos/*.app 2>/dev/null || echo "(none)")
-          echo "macos/*.tar.gz:" $(ls desktop/src-tauri/target/release/bundle/macos/*.tar.gz 2>/dev/null || echo "(none)")
+          echo "dmg/*.dmg:" $(ls target/release/bundle/dmg/*.dmg 2>/dev/null || echo "(none)")
+          echo "macos/*.app:" $(ls target/release/bundle/macos/*.app 2>/dev/null || echo "(none)")
+          echo "macos/*.tar.gz:" $(ls target/release/bundle/macos/*.tar.gz 2>/dev/null || echo "(none)")
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7

@@ -65,6 +65,7 @@ impl ApprovalHandler for ServeApprovalHandler {
 
         let event = serde_json::json!({
             "type": "_approval_required",
+            "tool_call_id": request.tool_call_id,
             "name": request.tool_name,
             "arguments": request.arguments,
             "reason": request.reason,

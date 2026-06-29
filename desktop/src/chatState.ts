@@ -214,10 +214,7 @@ export function reduceTelosEvent(
         status: event.reason ?? event.message ?? "等待工具审批",
       };
     case "approval_resolved":
-      return {
-        ...state,
-        status: event.message ?? "审批已处理",
-      };
+      return reduceApprovalResolved(state, event);
     case "provider_retry":
       return appendSystemEvent(state, event.message ?? "provider retry");
     case "token_budget_exceeded":
@@ -345,6 +342,50 @@ function appendSystemEvent(state: ChatState, content: string): ChatState {
       },
     ],
   };
+}
+
+function reduceApprovalResolved(state: ChatState, event: TelosEvent): ChatState {
+  const decision = String(event.message ?? "");
+  if (decision.includes("Deny") || decision.includes("拒绝")) {
+    return {
+      ...state,
+      status: event.detail ?? "已拒绝工具调用",
+    };
+  }
+
+  const toolCallId = event.toolCallId;
+  if (!toolCallId) {
+    return {
+      ...state,
+      status: event.message ?? "开始执行工具",
+      running: true,
+    };
+  }
+
+  const toolName = event.toolName ?? "Tool";
+  const existingTool = state.tools.find((tool) => tool.id === toolCallId);
+  const detail =
+    event.detail ?? existingTool?.detail ?? "审批已通过，正在启动工具";
+  return appendOrUpdateToolMessage(
+    {
+      ...state,
+      running: true,
+      status: "运行工具",
+      tools: upsertTool(state.tools, {
+        id: toolCallId,
+        name: toolName,
+        detail,
+        status: "running",
+        isError: false,
+      }),
+    },
+    toolCallId,
+    toolName,
+    detail,
+    "running",
+    false,
+    undefined,
+  );
 }
 
 function applyProviderUsage(state: ChatState, event: TelosEvent): ChatState {

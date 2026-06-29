@@ -5,6 +5,7 @@ import { TelosEvent } from "@/chatState";
 export interface PendingApproval {
   sessionId: string;
   approvalId: string;
+  toolCallId?: string;
   toolName: string;
   arguments: unknown;
   cwd?: string;
@@ -15,9 +16,11 @@ type ApprovalDecision = "allow" | "deny" | "modify";
 
 export function useApprovals({
   activeSessionId,
+  onResolved,
   onResolveError,
 }: {
   activeSessionId: string;
+  onResolved?: (approval: PendingApproval, decision: ApprovalDecision) => void;
   onResolveError: (sessionId: string, message: string) => void;
 }) {
   const [pendingApprovals, setPendingApprovals] = useState<
@@ -42,6 +45,7 @@ export function useApprovals({
     const nextApproval = {
       sessionId,
       approvalId: event.approvalId,
+      toolCallId: event.toolCallId,
       toolName: event.toolName ?? "Tool",
       arguments: event.arguments ?? {},
       cwd: event.cwd,
@@ -84,7 +88,9 @@ export function useApprovals({
     }
 
     const approvalId = pendingApproval.approvalId;
+    const resolvedApproval = pendingApproval;
     clearApproval(pendingApproval.sessionId);
+    onResolved?.(resolvedApproval, decision);
 
     try {
       if (isTauriRuntime()) {

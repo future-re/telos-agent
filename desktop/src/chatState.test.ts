@@ -45,6 +45,49 @@ describe("reduceTelosEvent", () => {
     ]);
   });
 
+  it("shows a running tool immediately after approval is resolved", () => {
+    const approved = reduceTelosEvent(initialChatState, {
+      kind: "approval_resolved",
+      toolCallId: "call-1",
+      toolName: "PowerShell",
+      detail: "Get-ChildItem",
+    });
+    const echoed = reduceTelosEvent(approved, {
+      kind: "approval_resolved",
+      toolCallId: "call-1",
+      toolName: "PowerShell",
+      message: "Allow",
+    });
+
+    expect(echoed.tools).toEqual([
+      {
+        id: "call-1",
+        name: "PowerShell",
+        detail: "Get-ChildItem",
+        status: "running",
+        isError: false,
+      },
+    ]);
+    expect(echoed.messages[0]).toMatchObject({
+      role: "tool",
+      toolName: "PowerShell",
+      toolStatus: "running",
+      toolDetail: "Get-ChildItem",
+    });
+  });
+
+  it("does not create a running tool when approval is denied", () => {
+    const denied = reduceTelosEvent(initialChatState, {
+      kind: "approval_resolved",
+      message: "Deny",
+      detail: "已拒绝工具调用",
+    });
+
+    expect(denied.status).toBe("已拒绝工具调用");
+    expect(denied.running).toBe(false);
+    expect(denied.tools).toHaveLength(0);
+  });
+
   it("keeps tool failure details from completion events", () => {
     const started = reduceTelosEvent(initialChatState, {
       kind: "tool_call",

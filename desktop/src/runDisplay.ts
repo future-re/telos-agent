@@ -72,8 +72,8 @@ function normalizeModel(model?: string): {
       return { label: "DeepSeek V4 Pro", description: "适合复杂推理和规划" };
     default:
       return {
-        label: model?.trim() || "DeepSeek V4 Flash",
-        description: "来自配置文件的自定义模型",
+        label: "DeepSeek V4 Flash",
+        description: "适合快速响应和轻量任务",
       };
   }
 }

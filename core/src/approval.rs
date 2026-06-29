@@ -15,6 +15,8 @@ use crate::message::Message;
 /// A request presented to an approval handler.
 #[derive(Debug, Clone)]
 pub struct ApprovalRequest {
+    /// ID of the tool call awaiting approval.
+    pub tool_call_id: String,
     /// Canonical tool name.
     pub tool_name: String,
     /// Names the call was invoked under (canonical + aliases).
@@ -83,6 +85,7 @@ mod tests {
         let handler = AutoDenyHandler;
         let decision = handler
             .ask(ApprovalRequest {
+                tool_call_id: "call-1".into(),
                 tool_name: "Bash".into(),
                 invocation_names: vec!["Bash".into()],
                 arguments: json!({"command": "rm -rf /"}),
@@ -99,6 +102,7 @@ mod tests {
         let handler = FixedDecisionHandler { decision: ApprovalDecision::Allow };
         let decision = handler
             .ask(ApprovalRequest {
+                tool_call_id: "call-1".into(),
                 tool_name: "Read".into(),
                 invocation_names: vec!["Read".into()],
                 arguments: json!({"file_path": "/etc/passwd"}),

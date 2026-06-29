@@ -593,10 +593,9 @@ fn shared_options(
 
 fn normalize_desktop_model(model: &str) -> String {
     match model.trim().to_lowercase().as_str() {
-        "" => DESKTOP_DEFAULT_MODEL.into(),
-        "deepseek-v4-flash" => "flash".into(),
-        "deepseek-v4-pro" => "pro".into(),
-        other => other.into(),
+        "" | "flash" | "deepseek-v4-flash" => "flash".into(),
+        "pro" | "deepseek-v4-pro" => "pro".into(),
+        _ => DESKTOP_DEFAULT_MODEL.into(),
     }
 }
 

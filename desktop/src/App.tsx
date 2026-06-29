@@ -98,6 +98,35 @@ export function App() {
     setApprovalError,
   } = useApprovals({
     activeSessionId,
+    onResolved: (approval, decision) => {
+      if (decision === "deny") {
+        dispatch(
+          {
+            type: "event",
+            event: {
+              kind: "approval_resolved",
+              message: "Deny",
+              detail: "已拒绝工具调用",
+            },
+          },
+          approval.sessionId,
+        );
+        return;
+      }
+
+      dispatch(
+        {
+          type: "event",
+          event: {
+            kind: "approval_resolved",
+            toolCallId: approval.toolCallId ?? `approval-${approval.approvalId}`,
+            toolName: approval.toolName,
+            detail: approvalDetail(approval.arguments),
+          },
+        },
+        approval.sessionId,
+      );
+    },
     onResolveError: (sessionId, message) => {
       dispatch({ type: "error", message }, sessionId);
     },
@@ -357,4 +386,17 @@ export function App() {
       )}
     </TooltipProvider>
   );
+}
+
+function approvalDetail(argumentsValue: unknown): string {
+  if (argumentsValue && typeof argumentsValue === "object") {
+    const args = argumentsValue as Record<string, unknown>;
+    if (typeof args.command === "string" && args.command.trim()) {
+      return args.command;
+    }
+    if (typeof args.file_path === "string" && args.file_path.trim()) {
+      return args.file_path;
+    }
+  }
+  return "审批已通过，正在启动工具";
 }

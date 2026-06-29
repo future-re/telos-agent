@@ -48,6 +48,7 @@ pub(crate) async fn invoke_existing_tool(
                             reason: reason.clone(),
                         });
                         let request = crate::approval::ApprovalRequest {
+                            tool_call_id: call.id.clone(),
                             tool_name: canonical_name.clone(),
                             invocation_names: permission_names.clone(),
                             arguments: call.arguments.clone(),

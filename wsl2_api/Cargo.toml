@@ -1,0 +1,9 @@
+[package]
+name = "wsl2_api"
+version = "0.1.0"
+edition = "2024"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_System_SubsystemForLinux",
+] }

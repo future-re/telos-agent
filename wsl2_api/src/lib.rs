@@ -187,15 +187,15 @@ pub fn launch(
     let dist_w = to_wide(distribution)?;
     let cmd_w = command.map(|c| to_wide(c)).transpose()?;
     let cmd_ptr = cmd_w.as_ref().map_or(std::ptr::null(), |v| v.as_ptr());
-    let mut process: HANDLE = 0;
+    let mut process: HANDLE = std::ptr::null_mut();
     let hr = unsafe {
         RawWslLaunch(
             dist_w.as_ptr(),
             cmd_ptr,
             use_cwd as i32,
-            stdin.unwrap_or(0),
-            stdout.unwrap_or(0),
-            stderr.unwrap_or(0),
+            stdin.unwrap_or(std::ptr::null_mut()),
+            stdout.unwrap_or(std::ptr::null_mut()),
+            stderr.unwrap_or(std::ptr::null_mut()),
             &mut process,
         )
     };

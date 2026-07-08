@@ -12,6 +12,7 @@ use tracing::{debug, error, info, info_span, warn};
 use super::compaction_phase::CompactionResult;
 use crate::config::AgentConfig;
 use crate::error::AgentError;
+use crate::event_channel::EventChannel;
 use crate::hooks::{HookContext, HookPhase};
 use crate::message::{Message, ToolResult};
 use crate::metrics::SessionMetrics;
@@ -56,6 +57,8 @@ pub struct AgentSession {
     pub(super) current_turn_memory_injected: bool,
     /// Tracks whether the current turn already notified about memory mutation.
     pub(super) current_turn_memory_mutation_notified: bool,
+    /// Optional bidirectional HTTP event channel for external pub/sub.
+    pub(super) event_channel: Option<EventChannel>,
 }
 
 impl AgentSession {
@@ -73,6 +76,12 @@ impl AgentSession {
             messages.push(Message::system(sp.clone()));
         }
 
+        let event_channel = if let Some(ref ec_config) = config.event_channel {
+            EventChannel::start(ec_config.clone())?
+        } else {
+            None
+        };
+
         Ok(Self {
             config,
             session_id: new_session_id(),
@@ -87,6 +96,7 @@ impl AgentSession {
             memory_state_dirty: false,
             current_turn_memory_injected: false,
             current_turn_memory_mutation_notified: false,
+            event_channel,
         })
     }
 
@@ -122,10 +132,28 @@ impl AgentSession {
         self.memory_state_dirty = false;
         self.current_turn_memory_injected = false;
         self.current_turn_memory_mutation_notified = false;
+        // event_channel survives reset — it's a session-long resource.
     }
 
     pub(super) fn push_system_reminder(&mut self, reminder: crate::message::SystemReminder) {
         self.messages.push(crate::message::Message::system(reminder.render()));
+    }
+
+    fn broadcast_turn_event(&self, event: &TurnEvent) {
+        if let Some(ref ec) = self.event_channel {
+            ec.publish(event);
+        }
+    }
+
+    fn drain_external_events(&mut self) -> Vec<Message> {
+        if let Some(ref mut ec) = self.event_channel {
+            ec.try_drain_incoming()
+                .iter()
+                .map(EventChannel::to_system_message)
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Run one turn, yielding [`TurnEvent`]s as the turn progresses.
@@ -203,11 +231,13 @@ impl AgentSession {
             // (user_input is moved into TurnStarted below).
             let user_input_for_memory = user_input.clone();
 
-            yield TurnEvent::TurnStarted {
+            let started = TurnEvent::TurnStarted {
                 session_id: self.session_id.clone(),
                 turn_id,
-                user_input,
+                user_input: user_input.clone(),
             };
+            self.broadcast_turn_event(&started);
+            yield started;
             yield TurnEvent::User(user_message);
 
             self.metrics.add_turn();
@@ -242,19 +272,24 @@ impl AgentSession {
                     debug!("iteration started");
                 }
 
-                yield TurnEvent::IterationStarted {
+                let iteration_started = TurnEvent::IterationStarted {
                     iteration: iterations,
                     message_count: self.messages.len(),
                 };
-                yield TurnEvent::ProviderRequest {
+                self.broadcast_turn_event(&iteration_started);
+                yield iteration_started;
+                let provider_request = TurnEvent::ProviderRequest {
                     iteration: iterations,
                     message_count: self.messages.len(),
                     tool_count: tool_definitions.len(),
                 };
+                self.broadcast_turn_event(&provider_request);
+                yield provider_request;
 
                 match self.run_compaction_phase(provider, iterations).await? {
                     CompactionResult::Continue { events, compactions } => {
                         for event in events {
+                            self.broadcast_turn_event(&event);
                             yield event;
                         }
                         for _ in 0..compactions {
@@ -263,12 +298,15 @@ impl AgentSession {
                     }
                     CompactionResult::AbortTurn { events } => {
                         for event in events {
+                            self.broadcast_turn_event(&event);
                             yield event;
                         }
-                        yield TurnEvent::TurnFinished {
+                        let aborted = TurnEvent::TurnFinished {
                             stop_reason: StopReason::EndTurn,
                             final_text: String::new(),
                         };
+                        self.broadcast_turn_event(&aborted);
+                        yield aborted;
                         break;
                     }
                 }
@@ -276,7 +314,14 @@ impl AgentSession {
                 for message in Self::drain_turn_input(&mut turn_input) {
                     self.messages.push(message.clone());
                     force_thinking_next_iteration = true;
-                    yield TurnEvent::User(message);
+                    let user_event = TurnEvent::User(message);
+                    self.broadcast_turn_event(&user_event);
+                    yield user_event;
+                }
+
+                for ext_msg in self.drain_external_events() {
+                    self.messages.push(ext_msg.clone());
+                    yield TurnEvent::User(ext_msg);
                 }
 
                 // Dynamic memory injection: score cached memories against
@@ -350,6 +395,7 @@ impl AgentSession {
                 let (assistant_message, stop_reason, usage, actual_model, provider_events) =
                     self.call_provider(provider, &tool_definitions, hint).await?;
                 for event in provider_events {
+                    self.broadcast_turn_event(&event);
                     yield event;
                 }
 
@@ -372,7 +418,7 @@ impl AgentSession {
                         model = ?actual_model,
                         "provider usage"
                     );
-                    yield TurnEvent::ProviderUsage {
+                    let usage_event = TurnEvent::ProviderUsage {
                         input_tokens,
                         output_tokens,
                         total_tokens,
@@ -381,10 +427,14 @@ impl AgentSession {
                         reasoning_tokens,
                         model: actual_model,
                     };
+                    self.broadcast_turn_event(&usage_event);
+                    yield usage_event;
                 }
 
                 self.messages.push(assistant_message.clone());
-                yield TurnEvent::Assistant(assistant_message.clone());
+                let assistant_event = TurnEvent::Assistant(assistant_message.clone());
+                self.broadcast_turn_event(&assistant_event);
+                yield assistant_event;
 
                 let hook_context = HookContext {
                     session_id: self.session_id.clone(),
@@ -396,6 +446,7 @@ impl AgentSession {
                     .run_hook_phase(HookPhase::PostSampling, &hook_context, &assistant_message)
                     .await?;
                 for event in post_events {
+                    self.broadcast_turn_event(&event);
                     yield event;
                 }
 
@@ -414,9 +465,15 @@ impl AgentSession {
                         self.messages.push(message.clone());
                         reconsideration_inputs.push(message);
                     }
+                    for ext_msg in self.drain_external_events() {
+                        self.messages.push(ext_msg.clone());
+                        reconsideration_inputs.push(ext_msg);
+                    }
                     if !reconsideration_inputs.is_empty() {
                         for message in reconsideration_inputs {
-                            yield TurnEvent::User(message);
+                            let user_event = TurnEvent::User(message);
+                            self.broadcast_turn_event(&user_event);
+                            yield user_event;
                         }
                         force_thinking_next_iteration = true;
                         continue;
@@ -426,13 +483,16 @@ impl AgentSession {
                         .run_hook_phase(HookPhase::Stop, &hook_context, &assistant_message)
                         .await?;
                     for event in stop_events {
+                        self.broadcast_turn_event(&event);
                         yield event;
                     }
 
-                    yield TurnEvent::TurnFinished {
+                    let finished = TurnEvent::TurnFinished {
                         stop_reason,
                         final_text: assistant_message.text_content(),
                     };
+                    self.broadcast_turn_event(&finished);
+                    yield finished;
                     info!(?stop_reason, "turn finished");
                     break;
                 }
@@ -444,6 +504,7 @@ impl AgentSession {
                 let (tool_message, tool_events) =
                     self.execute_tool_calls_phase(&tools, tool_calls, turn_id).await?;
                 for event in tool_events {
+                    self.broadcast_turn_event(&event);
                     yield event;
                 }
 
@@ -451,12 +512,21 @@ impl AgentSession {
                 previous_tool_error = tool_message.tool_results_iter().any(|r| r.is_error);
 
                 self.messages.push(tool_message.clone());
-                yield TurnEvent::ToolResult(tool_message);
+                let result_event = TurnEvent::ToolResult(tool_message);
+                self.broadcast_turn_event(&result_event);
+                yield result_event;
 
                 for message in Self::drain_turn_input(&mut turn_input) {
                     self.messages.push(message.clone());
                     force_thinking_next_iteration = true;
-                    yield TurnEvent::User(message);
+                    let user_event = TurnEvent::User(message);
+                    self.broadcast_turn_event(&user_event);
+                    yield user_event;
+                }
+
+                for ext_msg in self.drain_external_events() {
+                    self.messages.push(ext_msg.clone());
+                    yield TurnEvent::User(ext_msg);
                 }
             }
         }

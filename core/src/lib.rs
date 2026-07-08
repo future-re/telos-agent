@@ -112,6 +112,8 @@ pub mod config;
 pub mod diagnostics;
 /// Error types shared across runtime, tools, and providers.
 pub mod error;
+/// Bidirectional HTTP event channel for external pub/sub with agent sessions.
+pub mod event_channel;
 /// Tool-call executor for direct and turn-loop use.
 pub mod executor;
 /// Runtime hook registry and hook phases.
@@ -174,6 +176,8 @@ pub use diagnostics::{
 };
 // Errors — the single failure type used across the crate.
 pub use error::{AgentError, ProviderError};
+// Event channel — bidirectional HTTP event channel for external pub/sub.
+pub use event_channel::{EventChannel, EventChannelConfig, ExternalEvent, Subscription};
 // Tool executor — direct entry points for callers that bypass the turn loop.
 pub use executor::{ToolExecutionEvent, ToolExecutionOutput, execute_tool_calls};
 // Hooks — registry + per-phase hook trait + metadata types.

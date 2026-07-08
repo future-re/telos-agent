@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::config::AgentConfig;
 use crate::error::AgentError;
+use crate::event_channel::EventChannel;
 use crate::message::{Message, Role};
 use crate::metrics::SessionMetrics;
 use crate::runtime::AgentSession;
@@ -71,6 +72,13 @@ impl AgentSession {
         };
 
         config.storage = Some(storage);
+
+        let event_channel = if let Some(ref ec_config) = config.event_channel {
+            EventChannel::start(ec_config.clone())?
+        } else {
+            None
+        };
+
         Ok(Self {
             config,
             session_id,
@@ -85,6 +93,7 @@ impl AgentSession {
             memory_state_dirty: false,
             current_turn_memory_injected: false,
             current_turn_memory_mutation_notified: false,
+            event_channel,
         })
     }
 }

@@ -228,6 +228,11 @@ pub struct AgentConfig {
     /// Optional MCP manager. When set, MCP server tools are bridged into the
     /// tool registry and an MCP tools section is added to the prompt assembly.
     pub mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    /// Optional configuration for the bidirectional HTTP event channel.
+    /// When set and `enabled` is `true`, the session starts an embedded HTTP
+    /// server on the configured address, accepting external event injection
+    /// (`POST /inject`) and streaming TurnEvents via SSE (`GET /events`).
+    pub event_channel: Option<crate::event_channel::EventChannelConfig>,
 }
 
 impl std::fmt::Debug for AgentConfig {
@@ -264,6 +269,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("memory_injector", &self.memory_injector.as_ref().map(|_| "<set>"))
             .field("skill_injector", &self.skill_injector.as_ref().map(|_| "<set>"))
             .field("mcp_manager", &self.mcp_manager.as_ref().map(|_| "<set>"))
+            .field("event_channel", &self.event_channel)
             .finish()
     }
 }
@@ -303,6 +309,7 @@ impl Default for AgentConfig {
             memory_injector: None,
             skill_injector: None,
             mcp_manager: None,
+            event_channel: None,
         }
     }
 }

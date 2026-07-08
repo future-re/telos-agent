@@ -38,7 +38,7 @@ impl ContentCompressor for TruncationCompressor {
 // ── Config ───────────────────────────────────────────────────────────────────
 
 /// Knobs for message-level truncation. `None` disables the corresponding budget.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MessageTruncationConfig {
     /// Maximum serialised bytes for a single content field (text / tool result / thinking).
     pub max_block_content_bytes: Option<usize>,
@@ -46,12 +46,6 @@ pub struct MessageTruncationConfig {
     pub max_message_bytes: Option<usize>,
     /// Compression strategy — defaults to [`TruncationCompressor`] when `None`.
     pub compressor: Option<Arc<dyn ContentCompressor>>,
-}
-
-impl Default for MessageTruncationConfig {
-    fn default() -> Self {
-        Self { max_block_content_bytes: None, max_message_bytes: None, compressor: None }
-    }
 }
 
 // ── Result ───────────────────────────────────────────────────────────────────
@@ -84,11 +78,11 @@ pub fn truncate_message(
         compacted |= compress_blocks_over_cap(&mut blocks, max_block_content_bytes, compressor);
     }
 
-    if let Some(max_message_bytes) = config.max_message_bytes {
-        if message_serialized_len(role, &blocks) > max_message_bytes {
-            let cap = largest_block_cap_for_message(role, &blocks, max_message_bytes, compressor);
-            compacted |= compress_blocks_over_cap(&mut blocks, cap, compressor);
-        }
+    if let Some(max_message_bytes) = config.max_message_bytes
+        && message_serialized_len(role, &blocks) > max_message_bytes
+    {
+        let cap = largest_block_cap_for_message(role, &blocks, max_message_bytes, compressor);
+        compacted |= compress_blocks_over_cap(&mut blocks, cap, compressor);
     }
 
     MessageTruncationResult { message: Message { role, blocks }, compacted }
@@ -129,7 +123,7 @@ fn binary_search_largest_fitting(
     let mut lo = 0usize;
 
     while lo < upper_bound {
-        let mid = (lo + upper_bound + 1) / 2;
+        let mid = (lo + upper_bound).div_ceil(2);
         if fits(mid) {
             lo = mid;
         } else {

@@ -37,9 +37,4 @@ impl ModelProvider for MockProvider {
             ))
         })
     }
-
-    /// Rough 4-chars-per-token heuristic — good enough for budget-test setups.
-    fn estimate_tokens(&self, text: &str) -> usize {
-        (text.len() as f64 / 4.0).ceil() as usize
-    }
 }

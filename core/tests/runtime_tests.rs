@@ -547,7 +547,7 @@ fn token_budget_triggers_auto_compaction() {
         let tools = ToolRegistry::new();
         let mut session = AgentSession::new(AgentConfig {
             base_system_prompt: Some("sys".into()),
-            compaction: Some(Arc::new(SummaryHistoryCompaction { max_tokens: 50, keep_recent: 0 })),
+            compaction: Some(Arc::new(SummaryHistoryCompaction { max_tokens: 1, keep_recent: 0 })),
             token_budget: Some(TokenBudget { max_tokens: 1_000, compact_at_tokens: 10 }),
             ..AgentConfig::default()
         })
@@ -643,7 +643,7 @@ fn compaction_emits_system_reminder() {
         })
         .unwrap();
 
-        let _ = session.run_turn(&provider, &tools, "hello").await.unwrap();
+        let _ = session.run_turn(&provider, &tools, "hello world").await.unwrap();
         let has_reminder = session.messages().iter().any(|m| {
             m.role == telos_agent::Role::System && m.text_content().contains("<system-reminder>")
         });

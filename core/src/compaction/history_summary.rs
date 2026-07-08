@@ -123,7 +123,10 @@ impl HistoryCompactionStrategy for SummaryHistoryCompaction {
 mod tests {
     use super::*;
     use crate::mock::MockProvider;
-    use crate::provider::{CompletionResponse, StopReason};
+    use crate::provider::{CompletionResponse, DeepSeekConfig, DeepSeekProvider, StopReason};
+
+    const TEST_SUMMARY_FIXTURE: &str = include_str!("test_summary.txt");
+    const TEST_SUMMARY_OUTPUT: &str = "test_summary_output.txt";
 
     struct FakeProvider;
 
@@ -139,10 +142,6 @@ mod tests {
                 usage: None,
                 model: None,
             })
-        }
-
-        fn estimate_tokens(&self, text: &str) -> usize {
-            text.len()
         }
     }
 
@@ -172,6 +171,65 @@ mod tests {
         let requests = provider.requests.lock().await;
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].messages, vec![Message::user("first")]);
+    }
+
+    fn real_deepseek_provider() -> Option<DeepSeekProvider> {
+        let _ = dotenvy::from_filename("src/provider/.env");
+        dotenvy::dotenv().ok();
+
+        let api_key = std::env::var("DEEPSEEK_TEST_KEY")
+            .or_else(|_| std::env::var("DEEPSEEK_API_KEY"))
+            .ok()?;
+        if api_key.is_empty() || api_key == "your_deepseek_api_key_here" {
+            return None;
+        }
+
+        Some(DeepSeekProvider::new(DeepSeekConfig {
+            api_key,
+            model: std::env::var("DEEPSEEK_TEST_MODEL").unwrap_or_else(|_| "deepseek-chat".into()),
+            base_url: std::env::var("DEEPSEEK_BASE_URL")
+                .unwrap_or_else(|_| "https://api.deepseek.com".into()),
+        }))
+    }
+
+    #[tokio::test]
+    async fn summarizes_test_summary_fixture_with_real_model() {
+        let provider = match real_deepseek_provider() {
+            Some(provider) => provider,
+            None => {
+                eprintln!("SKIP: DEEPSEEK_TEST_KEY or DEEPSEEK_API_KEY not set");
+                return;
+            }
+        };
+        assert!(!TEST_SUMMARY_FIXTURE.trim().is_empty());
+
+        let compaction = SummaryHistoryCompaction { max_tokens: 1, keep_recent: 1 };
+        let recent_message = Message::assistant("Recent turn remains available verbatim.");
+        let mut messages = vec![
+            Message::system("persona"),
+            Message::user(TEST_SUMMARY_FIXTURE),
+            recent_message.clone(),
+        ];
+
+        let changed = compaction.compact(&mut messages, &provider).await.unwrap();
+
+        assert!(changed);
+        assert_eq!(messages[0], Message::system("persona"));
+        assert!(messages[1].text_content().contains("<compact_boundary"));
+        assert!(messages[2].text_content().contains("<conversation_summary>"));
+        let summary_text = messages[2]
+            .text_content()
+            .replace("<conversation_summary>", "")
+            .replace("</conversation_summary>", "");
+        assert!(!summary_text.trim().is_empty());
+        assert_ne!(summary_text.trim(), TEST_SUMMARY_FIXTURE.trim());
+        let output_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/compaction")
+            .join(TEST_SUMMARY_OUTPUT);
+        std::fs::write(&output_path, summary_text.trim()).unwrap_or_else(|err| {
+            panic!("failed to write summary output to {}: {err}", output_path.display())
+        });
+        assert_eq!(messages[3], recent_message);
     }
 
     #[tokio::test]

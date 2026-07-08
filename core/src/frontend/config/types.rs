@@ -68,6 +68,11 @@ pub struct AgentSection {
     pub max_iterations: Option<usize>,
     pub models: Option<ModelsSection>,
     pub default_shell: Option<DefaultShell>,
+    pub max_context_tokens: Option<usize>,
+    pub keep_recent: Option<usize>,
+    pub max_summary_input_tokens: Option<usize>,
+    pub token_budget_max: Option<usize>,
+    pub token_budget_compact_at: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -91,41 +91,6 @@ impl AgentSession {
             }
         }
 
-        // Only run the general compaction pass if the token-budget pass didn't
-        // already compact (avoids double-compacting the same messages).
-        if compactions == 0
-            && let Some(compaction) = self.config.compaction.clone()
-        {
-            // Save pre-compact snapshot so old messages are not lost.
-            let _ = self.save_pre_compact_snapshot().await;
-            events.push(TurnEvent::CompactionStarted { reason: "char_budget".into() });
-            match compaction.compact(&mut self.messages, provider).await {
-                Ok(true) => {
-                    compactions += 1;
-                    self.consecutive_compaction_failures = 0;
-                    self.push_system_reminder(crate::message::SystemReminder::Compaction {
-                        reason: "char_budget".into(),
-                    });
-                    info!(iteration, "char-budget compaction applied");
-                }
-                Ok(false) => {
-                    // No compaction needed — not a failure.
-                }
-                Err(e) => {
-                    self.consecutive_compaction_failures += 1;
-                    warn!(
-                        iteration,
-                        failures = self.consecutive_compaction_failures,
-                        error = %e,
-                        "compaction failed"
-                    );
-                    events.push(TurnEvent::CompactionCompleted { reason: "char_budget".into() });
-                    return Err(e);
-                }
-            }
-            events.push(TurnEvent::CompactionCompleted { reason: "char_budget".into() });
-        }
-
         Ok(CompactionPhaseResult::Continue { events, compactions })
     }
 }

@@ -2,17 +2,17 @@
 //!
 //! Implementations of [`HistoryCompactionStrategy`] decide whether and how to shorten
 //! the conversation. The default [`SummaryHistoryCompaction`] asks the model to
-//! summarise older turns, then keeps that summary plus the most recent context.
+//! summarise older turns in a single pass, then keeps that summary plus the most
+//! recent context.
 
 use async_trait::async_trait;
 
+use crate::compaction::estimate_message_tokens;
 use crate::error::AgentError;
 use crate::message::{Message, Role};
 use crate::prompt::PromptBlock;
 use crate::provider::{CompletionRequest, ModelHint, ModelProvider};
 
-const DEFAULT_MAX_TOKENS: usize = 50_000;
-const DEFAULT_KEEP_RECENT: usize = 4_000;
 const HISTORY_SUMMARY_PROMPT: &str = include_str!("history_summary_prompt.md");
 
 /// Strategy for compacting conversation history when tokens exceed a budget.
@@ -31,16 +31,12 @@ pub trait HistoryCompactionStrategy: Send + Sync + std::fmt::Debug {
 /// Compacts by asking the model to summarise old messages, keeping the most recent N.
 #[derive(Debug)]
 pub struct SummaryHistoryCompaction {
-    /// Token ceiling — if estimated usage stays under this, no compaction happens.
-    pub max_tokens: usize,
     /// How many most-recent messages to keep verbatim. Everything older may be summarised.
     pub keep_recent: usize,
-}
-
-impl Default for SummaryHistoryCompaction {
-    fn default() -> Self {
-        Self { max_tokens: DEFAULT_MAX_TOKENS, keep_recent: DEFAULT_KEEP_RECENT }
-    }
+    /// Maximum input budget for the summarisation provider call.
+    pub max_summary_input_tokens: usize,
+    /// Output budget reserved for the summarisation provider call.
+    pub summary_output_tokens: usize,
 }
 
 #[async_trait]
@@ -50,72 +46,78 @@ impl HistoryCompactionStrategy for SummaryHistoryCompaction {
         messages: &mut Vec<Message>,
         provider: &dyn ModelProvider,
     ) -> Result<bool, AgentError> {
-        let total_tokens = crate::compaction::estimate_message_tokens(messages, provider);
-
-        if total_tokens <= self.max_tokens {
-            return Ok(false);
-        }
-
-        // Preserve leading system prompts verbatim and splice the summary after them.
         let system_end = messages.iter().take_while(|m| m.role == Role::System).count();
 
-        // Split point: everything before this is summarised; everything after is kept.
-        // Clamp so the summary never replaces leading system prompts.
         let split_point = messages.len().saturating_sub(self.keep_recent);
         let split_point = split_point.max(system_end);
 
-        // If the only messages before the split point are leading system
-        // prompts, summarising would not reduce tokens because they are always
-        // kept verbatim. Skip compaction to avoid pointless loops.
         if split_point <= system_end {
             return Ok(false);
         }
 
-        let to_summarize = messages[system_end..split_point].to_vec();
+        let old_messages = &messages[system_end..split_point];
+        let summary_text = self.summarize_pass(old_messages.to_vec(), provider).await?;
 
+        messages.splice(system_end..split_point, [Message::user(summary_text)]);
+
+        Ok(true)
+    }
+}
+
+impl SummaryHistoryCompaction {
+    /// Summarise old messages in a single pass. If the messages exceed the
+    /// input budget, only the most recent portion (closest to the split point)
+    /// is included; older messages are dropped.
+    async fn summarize_pass(
+        &self,
+        messages: Vec<Message>,
+        provider: &dyn ModelProvider,
+    ) -> Result<String, AgentError> {
+        let prompt_tokens = provider.estimate_tokens(HISTORY_SUMMARY_PROMPT.trim());
+        let budget = self
+            .max_summary_input_tokens
+            .saturating_sub(prompt_tokens)
+            .saturating_sub(self.summary_output_tokens)
+            .max(1);
+
+        let mut selected = Vec::new();
+        let mut tokens_used = 0usize;
+
+        for msg in messages.into_iter().rev() {
+            let msg_tokens = estimate_message_tokens(std::slice::from_ref(&msg), provider);
+            if tokens_used + msg_tokens > budget && !selected.is_empty() {
+                break;
+            }
+            tokens_used += msg_tokens;
+            selected.push(msg);
+        }
+        selected.reverse();
+
+        if selected.is_empty() {
+            return Ok(String::new());
+        }
+
+        self.complete_summary(selected, provider).await
+    }
+
+    async fn complete_summary(
+        &self,
+        messages: Vec<Message>,
+        provider: &dyn ModelProvider,
+    ) -> Result<String, AgentError> {
         let summary_request = CompletionRequest {
             system_prompt_blocks: vec![PromptBlock::dynamic(
                 "history_summary",
                 HISTORY_SUMMARY_PROMPT.trim(),
             )],
-            messages: to_summarize,
+            messages,
             tools: vec![],
             model_hint: Some(ModelHint::Summarization),
-            max_tokens: None,
+            max_tokens: Some(self.summary_output_tokens.min(u32::MAX as usize) as u32),
         };
 
         let response = provider.complete(summary_request).await?;
-        let summary_text = response.message.text_content();
-
-        // Wrap the summary in an identifiable XML-ish tag so subsequent
-        // inspection can locate it without parsing the model's prose.
-        let summary_msg = Message::user(format!(
-            "<conversation_summary>\n{}\n</conversation_summary>",
-            summary_text
-        ));
-
-        // Build the compacted conversation:
-        //   1. Leading system prompt (preserved verbatim)
-        //   2. Compact boundary marker (so future code can locate the split)
-        //   3. Summary of old messages
-        //   4. Recent messages (preserved verbatim)
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let boundary_msg = Message::user(format!(
-            "<compact_boundary timestamp='{ts}' original_count='{oc}' summary_count='1' keep_recent='{kr}'/>",
-            ts = timestamp,
-            oc = split_point,
-            kr = self.keep_recent,
-        ));
-        let mut new_messages = messages[..system_end].to_vec();
-        new_messages.push(boundary_msg);
-        new_messages.push(summary_msg);
-        new_messages.extend(messages[split_point..].iter().cloned());
-        *messages = new_messages;
-
-        Ok(true)
+        Ok(response.message.text_content())
     }
 }
 
@@ -147,7 +149,11 @@ mod tests {
 
     #[tokio::test]
     async fn preserves_leading_system_prompt_without_summarizing_it() {
-        let compaction = SummaryHistoryCompaction { max_tokens: 1, keep_recent: 1 };
+        let compaction = SummaryHistoryCompaction {
+            keep_recent: 1,
+            max_summary_input_tokens: 120_000,
+            summary_output_tokens: 4_000,
+        };
         let mut messages =
             vec![Message::system("persona"), Message::user("first"), Message::user("second")];
         let provider = MockProvider::new(vec![CompletionResponse {
@@ -162,11 +168,8 @@ mod tests {
         assert!(changed);
         assert_eq!(messages[0].role, Role::System);
         assert_eq!(messages[0].text_content(), "persona");
-        // messages[1] is the compact boundary marker (user role so it
-        // doesn't interfere with system prompt caching detection)
         assert_eq!(messages[1].role, Role::User);
-        assert!(messages[1].text_content().contains("<compact_boundary"));
-        assert!(messages[2].text_content().contains("summary text"));
+        assert!(messages[1].text_content().contains("summary text"));
 
         let requests = provider.requests.lock().await;
         assert_eq!(requests.len(), 1);
@@ -203,7 +206,11 @@ mod tests {
         };
         assert!(!TEST_SUMMARY_FIXTURE.trim().is_empty());
 
-        let compaction = SummaryHistoryCompaction { max_tokens: 1, keep_recent: 1 };
+        let compaction = SummaryHistoryCompaction {
+            keep_recent: 1,
+            max_summary_input_tokens: 120_000,
+            summary_output_tokens: 4_000,
+        };
         let recent_message = Message::assistant("Recent turn remains available verbatim.");
         let mut messages = vec![
             Message::system("persona"),
@@ -215,12 +222,7 @@ mod tests {
 
         assert!(changed);
         assert_eq!(messages[0], Message::system("persona"));
-        assert!(messages[1].text_content().contains("<compact_boundary"));
-        assert!(messages[2].text_content().contains("<conversation_summary>"));
-        let summary_text = messages[2]
-            .text_content()
-            .replace("<conversation_summary>", "")
-            .replace("</conversation_summary>", "");
+        let summary_text = messages[1].text_content();
         assert!(!summary_text.trim().is_empty());
         assert_ne!(summary_text.trim(), TEST_SUMMARY_FIXTURE.trim());
         let output_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -229,14 +231,91 @@ mod tests {
         std::fs::write(&output_path, summary_text.trim()).unwrap_or_else(|err| {
             panic!("failed to write summary output to {}: {err}", output_path.display())
         });
-        assert_eq!(messages[3], recent_message);
+        assert_eq!(messages[2], recent_message);
     }
 
     #[tokio::test]
     async fn skips_compaction_when_only_system_prompt_is_old() {
-        let compaction = SummaryHistoryCompaction { max_tokens: 5, keep_recent: 1 };
+        let compaction = SummaryHistoryCompaction {
+            keep_recent: 1,
+            max_summary_input_tokens: 120_000,
+            summary_output_tokens: 4_000,
+        };
         let mut messages = vec![Message::system("long system prompt text"), Message::user("hi")];
         let changed = compaction.compact(&mut messages, &FakeProvider).await.unwrap();
         assert!(!changed);
+    }
+
+    #[tokio::test]
+    async fn summarizes_old_messages_in_one_pass() {
+        let compaction = SummaryHistoryCompaction {
+            keep_recent: 1,
+            max_summary_input_tokens: 120_000,
+            summary_output_tokens: 4_000,
+        };
+        let mut messages = vec![
+            Message::system("persona"),
+            Message::user("early chat"),
+            Message::user("some history"),
+            Message::user("recent"),
+        ];
+        let provider = MockProvider::new(vec![CompletionResponse {
+            message: Message::assistant("condensed summary"),
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+            model: None,
+        }]);
+
+        let changed = compaction.compact(&mut messages, &provider).await.unwrap();
+
+        assert!(changed);
+        assert!(messages[1].text_content().contains("condensed summary"));
+
+        let requests = provider.requests.lock().await;
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].messages,
+            vec![Message::user("early chat"), Message::user("some history")]
+        );
+    }
+
+    #[tokio::test]
+    async fn drops_oldest_messages_when_exceeding_summary_input_budget() {
+        let prompt_tokens = FakeProvider.estimate_tokens(HISTORY_SUMMARY_PROMPT.trim());
+        let compaction = SummaryHistoryCompaction {
+            keep_recent: 1,
+            max_summary_input_tokens: prompt_tokens + 1 + 4_000,
+            summary_output_tokens: 4_000,
+        };
+        let mut messages = vec![
+            Message::system("persona"),
+            Message::user("very old message that is quite long and will be dropped"),
+            Message::user("more recent old message to keep"),
+            Message::user("recent"),
+        ];
+        let provider = MockProvider::new(vec![CompletionResponse {
+            message: Message::assistant("partial summary"),
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+            model: None,
+        }]);
+
+        let changed = compaction.compact(&mut messages, &provider).await.unwrap();
+        assert!(changed);
+
+        let requests = provider.requests.lock().await;
+        assert_eq!(requests.len(), 1);
+        let summarized: Vec<String> =
+            requests[0].messages.iter().map(|m| m.text_content()).collect();
+        assert!(
+            summarized.iter().any(|s| s.contains("more recent old message")),
+            "should keep the more recent old message"
+        );
+        assert!(
+            !summarized
+                .iter()
+                .any(|s| s == "very old message that is quite long and will be dropped"),
+            "should drop the oldest message that doesn't fit budget"
+        );
     }
 }

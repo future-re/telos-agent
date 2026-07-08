@@ -53,6 +53,11 @@ fn merge_agent(
             max_iterations: u.max_iterations,
             models: u.models.clone(),
             default_shell: u.default_shell,
+            max_context_tokens: u.max_context_tokens,
+            keep_recent: u.keep_recent,
+            max_summary_input_tokens: u.max_summary_input_tokens,
+            token_budget_max: u.token_budget_max,
+            token_budget_compact_at: u.token_budget_compact_at,
         }),
         (None, Some(p)) => Some(AgentSection {
             model: p.model.clone(),
@@ -60,6 +65,11 @@ fn merge_agent(
             max_iterations: p.max_iterations,
             models: p.models.clone(),
             default_shell: p.default_shell,
+            max_context_tokens: p.max_context_tokens,
+            keep_recent: p.keep_recent,
+            max_summary_input_tokens: p.max_summary_input_tokens,
+            token_budget_max: p.token_budget_max,
+            token_budget_compact_at: p.token_budget_compact_at,
         }),
         (Some(u), Some(p)) => Some(AgentSection {
             model: p.model.clone().or_else(|| u.model.clone()),
@@ -67,6 +77,11 @@ fn merge_agent(
             max_iterations: p.max_iterations.or(u.max_iterations),
             models: p.models.clone().or_else(|| u.models.clone()),
             default_shell: p.default_shell.or(u.default_shell),
+            max_context_tokens: p.max_context_tokens.or(u.max_context_tokens),
+            keep_recent: p.keep_recent.or(u.keep_recent),
+            max_summary_input_tokens: p.max_summary_input_tokens.or(u.max_summary_input_tokens),
+            token_budget_max: p.token_budget_max.or(u.token_budget_max),
+            token_budget_compact_at: p.token_budget_compact_at.or(u.token_budget_compact_at),
         }),
     }
 }

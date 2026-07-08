@@ -294,8 +294,9 @@ impl Default for AgentConfig {
             storage: None,
             tool_diagnostics: None,
             compaction: Some(Arc::new(SummaryHistoryCompaction {
-                max_tokens: 800_000,
                 keep_recent: 12,
+                max_summary_input_tokens: 800_000,
+                summary_output_tokens: 4_000,
             })),
             permission_engine: None,
             approval_handler: None,

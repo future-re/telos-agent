@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::sync::Arc;
 
-use crate::{AgentConfig, ApprovalHandler, DeepSeekConfig, DeepSeekProvider, MockProvider};
+use crate::{
+    AgentConfig, ApprovalHandler, DeepSeekConfig, DeepSeekProvider, MockProvider,
+    SummaryHistoryCompaction, TokenBudget,
+};
 use anyhow::{Context, Result};
 
 use super::FileConfig;
@@ -33,6 +36,35 @@ pub fn build_agent_config(
         options.max_iterations.or_else(|| config.agent.as_ref()?.max_iterations);
     agent_config.auto_validate_schema = !options.no_validate_schema;
     agent_config.approval_handler = approval_handler;
+
+    if let Some(agent) = &config.agent {
+        if agent.keep_recent.is_some() || agent.max_summary_input_tokens.is_some() {
+            let default = SummaryHistoryCompaction {
+                keep_recent: 12,
+                max_summary_input_tokens: 800_000,
+                summary_output_tokens: 4_000,
+            };
+            agent_config.compaction = Some(Arc::new(SummaryHistoryCompaction {
+                keep_recent: agent.keep_recent.unwrap_or(default.keep_recent),
+                max_summary_input_tokens: agent
+                    .max_summary_input_tokens
+                    .unwrap_or(default.max_summary_input_tokens),
+                summary_output_tokens: default.summary_output_tokens,
+            }));
+        }
+
+        if agent.max_context_tokens.is_some()
+            || agent.token_budget_max.is_some()
+            || agent.token_budget_compact_at.is_some()
+        {
+            let max = agent.token_budget_max.or(agent.max_context_tokens).unwrap_or(900_000);
+            let compact_at = agent
+                .token_budget_compact_at
+                .unwrap_or_else(|| ((max as f64) * 0.8).ceil() as usize);
+            agent_config.token_budget =
+                Some(TokenBudget { max_tokens: max, compact_at_tokens: compact_at });
+        }
+    }
 
     let mut env = crate::platform_base_env();
     if let Some(config_env) = &config.env {

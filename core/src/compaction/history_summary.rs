@@ -9,11 +9,97 @@ use async_trait::async_trait;
 
 use crate::compaction::estimate_message_tokens;
 use crate::error::AgentError;
-use crate::message::{Message, Role};
+use crate::message::{ContentBlock, Message, Role, ToolCall};
 use crate::prompt::PromptBlock;
 use crate::provider::{CompletionRequest, ModelHint, ModelProvider};
 
 const HISTORY_SUMMARY_PROMPT: &str = include_str!("history_summary_prompt.md");
+
+/// Collapse consecutive assistant tool-call + tool-result message pairs into
+/// compact user messages. This removes redundant "double" input/output noise
+/// so the summarizer receives cleaner, more token-efficient input.
+fn collapse_tool_pairs(messages: Vec<Message>) -> Vec<Message> {
+    let mut result: Vec<Message> = Vec::new();
+    let len = messages.len();
+    let mut i = 0;
+
+    while i < len {
+        let msg = &messages[i];
+
+        match msg.role {
+            Role::Assistant => {
+                let tool_calls: Vec<&ToolCall> = msg.tool_calls().collect();
+                if tool_calls.is_empty() {
+                    result.push(msg.clone());
+                    i += 1;
+                    continue;
+                }
+
+                let assistant_text: String = msg
+                    .blocks
+                    .iter()
+                    .filter_map(|b| match b {
+                        ContentBlock::Text(t) => Some(t.text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                let mut collapsed = Vec::new();
+                if !assistant_text.is_empty() {
+                    collapsed.push(assistant_text.to_string());
+                }
+
+                let mut j = i + 1;
+                while j < len && messages[j].role == Role::Tool {
+                    for tr in messages[j].tool_results_iter() {
+                        let content_len = tr.content.to_string().len();
+                        if tr.is_error {
+                            collapsed.push(format!(
+                                "Used tool `{}` — ERROR ({} chars)",
+                                tr.name, content_len
+                            ));
+                        } else {
+                            collapsed
+                                .push(format!("Used tool `{}` — {} chars", tr.name, content_len));
+                        }
+                    }
+                    j += 1;
+                }
+
+                if collapsed.len() == 1 && assistant_text.is_empty() {
+                    result.push(msg.clone());
+                } else {
+                    result.push(Message::user(collapsed.join("\n")));
+                }
+                i = j;
+            }
+            Role::Tool => {
+                let parts: Vec<String> = msg
+                    .tool_results_iter()
+                    .map(|tr| {
+                        let content_len = tr.content.to_string().len();
+                        if tr.is_error {
+                            format!("Used tool `{}` — ERROR ({} chars)", tr.name, content_len)
+                        } else {
+                            format!("Used tool `{}` — {} chars", tr.name, content_len)
+                        }
+                    })
+                    .collect();
+                if !parts.is_empty() {
+                    result.push(Message::user(parts.join("\n")));
+                }
+                i += 1;
+            }
+            _ => {
+                result.push(msg.clone());
+                i += 1;
+            }
+        }
+    }
+
+    result
+}
 
 /// Strategy for compacting conversation history when tokens exceed a budget.
 #[async_trait]
@@ -68,11 +154,15 @@ impl SummaryHistoryCompaction {
     /// Summarise old messages in a single pass. If the messages exceed the
     /// input budget, only the most recent portion (closest to the split point)
     /// is included; older messages are dropped.
+    ///
+    /// Tool call + result pairs are collapsed before summarisation to remove
+    /// redundant "double" input/output noise.
     async fn summarize_pass(
         &self,
         messages: Vec<Message>,
         provider: &dyn ModelProvider,
     ) -> Result<String, AgentError> {
+        let messages = collapse_tool_pairs(messages);
         let prompt_tokens = provider.estimate_tokens(HISTORY_SUMMARY_PROMPT.trim());
         let budget = self
             .max_summary_input_tokens
@@ -208,7 +298,7 @@ mod tests {
 
         let compaction = SummaryHistoryCompaction {
             keep_recent: 1,
-            max_summary_input_tokens: 120_000,
+            max_summary_input_tokens: 800_000,
             summary_output_tokens: 4_000,
         };
         let recent_message = Message::assistant("Recent turn remains available verbatim.");

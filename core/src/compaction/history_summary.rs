@@ -15,6 +15,10 @@ use crate::provider::{CompletionRequest, ModelHint, ModelProvider};
 
 const HISTORY_SUMMARY_PROMPT: &str = include_str!("history_summary_prompt.md");
 
+fn content_str_len(value: &serde_json::Value) -> usize {
+    value.as_str().map(str::len).unwrap_or_else(|| value.to_string().len())
+}
+
 /// Collapse consecutive assistant tool-call + tool-result message pairs into
 /// compact user messages. This removes redundant "double" input/output noise
 /// so the summarizer receives cleaner, more token-efficient input.
@@ -53,7 +57,7 @@ fn collapse_tool_pairs(messages: Vec<Message>) -> Vec<Message> {
                 let mut j = i + 1;
                 while j < len && messages[j].role == Role::Tool {
                     for tr in messages[j].tool_results_iter() {
-                        let content_len = tr.content.to_string().len();
+                        let content_len = content_str_len(&tr.content);
                         if tr.is_error {
                             collapsed.push(format!(
                                 "Used tool `{}` — ERROR ({} chars)",
@@ -67,7 +71,8 @@ fn collapse_tool_pairs(messages: Vec<Message>) -> Vec<Message> {
                     j += 1;
                 }
 
-                if collapsed.len() == 1 && assistant_text.is_empty() {
+                let has_content = collapsed.iter().any(|s| !s.is_empty());
+                if !has_content {
                     result.push(msg.clone());
                 } else {
                     result.push(Message::user(collapsed.join("\n")));
@@ -78,7 +83,7 @@ fn collapse_tool_pairs(messages: Vec<Message>) -> Vec<Message> {
                 let parts: Vec<String> = msg
                     .tool_results_iter()
                     .map(|tr| {
-                        let content_len = tr.content.to_string().len();
+                        let content_len = content_str_len(&tr.content);
                         if tr.is_error {
                             format!("Used tool `{}` — ERROR ({} chars)", tr.name, content_len)
                         } else {
@@ -214,8 +219,129 @@ impl SummaryHistoryCompaction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::message::{TextBlock, ToolCall, ToolResult};
     use crate::mock::MockProvider;
     use crate::provider::{CompletionResponse, DeepSeekConfig, DeepSeekProvider, StopReason};
+
+    fn make_tool_call(id: &str, name: &str, args: serde_json::Value) -> ContentBlock {
+        ContentBlock::ToolCall(ToolCall { id: id.into(), name: name.into(), arguments: args })
+    }
+
+    fn make_tool_result(id: &str, name: &str, content: &str, is_error: bool) -> ContentBlock {
+        ContentBlock::ToolResult(ToolResult {
+            tool_call_id: id.into(),
+            name: name.into(),
+            content: serde_json::Value::String(content.into()),
+            is_error,
+        })
+    }
+
+    #[test]
+    fn collapse_tool_pairs_merges_assistant_tool_calls_with_results() {
+        let messages = vec![
+            Message {
+                role: Role::Assistant,
+                blocks: vec![
+                    ContentBlock::Text(TextBlock { text: "Let me check the file.".into() }),
+                    make_tool_call("call_1", "read", serde_json::json!({"path": "src/main.rs"})),
+                ],
+            },
+            Message {
+                role: Role::Tool,
+                blocks: vec![make_tool_result("call_1", "read", "file content here", false)],
+            },
+        ];
+
+        let collapsed = collapse_tool_pairs(messages);
+        assert_eq!(collapsed.len(), 1);
+        assert_eq!(collapsed[0].role, Role::User);
+        let text = collapsed[0].text_content();
+        assert!(text.contains("Let me check the file."));
+        assert!(text.contains("Used tool `read`"));
+        assert!(text.contains("17 chars"));
+    }
+
+    #[test]
+    fn collapse_tool_pairs_preserves_non_tool_messages() {
+        let messages = vec![
+            Message::user("Hello"),
+            Message::assistant("Hi there!"),
+            Message::user("Do something"),
+        ];
+
+        let collapsed = collapse_tool_pairs(messages);
+        assert_eq!(collapsed.len(), 3);
+        assert_eq!(collapsed[0].text_content(), "Hello");
+        assert_eq!(collapsed[1].text_content(), "Hi there!");
+        assert_eq!(collapsed[2].text_content(), "Do something");
+    }
+
+    #[test]
+    fn collapse_tool_pairs_handles_multiple_tool_calls_in_one_turn() {
+        let messages = vec![
+            Message {
+                role: Role::Assistant,
+                blocks: vec![
+                    make_tool_call("call_1", "read", serde_json::json!({"path": "a.rs"})),
+                    make_tool_call("call_2", "grep", serde_json::json!({"pattern": "TODO"})),
+                ],
+            },
+            Message {
+                role: Role::Tool,
+                blocks: vec![make_tool_result("call_1", "read", "aaa", false)],
+            },
+            Message {
+                role: Role::Tool,
+                blocks: vec![make_tool_result("call_2", "grep", "line 42: TODO", false)],
+            },
+        ];
+
+        let collapsed = collapse_tool_pairs(messages);
+        assert_eq!(collapsed.len(), 1);
+        let text = collapsed[0].text_content();
+        assert!(text.contains("Used tool `read`"));
+        assert!(text.contains("Used tool `grep`"));
+    }
+
+    #[test]
+    fn collapse_tool_pairs_handles_tool_error() {
+        let messages = vec![
+            Message {
+                role: Role::Assistant,
+                blocks: vec![
+                    ContentBlock::Text(TextBlock { text: "Running test.".into() }),
+                    make_tool_call("call_1", "bash", serde_json::json!({"command": "cargo test"})),
+                ],
+            },
+            Message {
+                role: Role::Tool,
+                blocks: vec![make_tool_result("call_1", "bash", "compilation failed", true)],
+            },
+        ];
+
+        let collapsed = collapse_tool_pairs(messages);
+        assert_eq!(collapsed.len(), 1);
+        let text = collapsed[0].text_content();
+        assert!(text.contains("Running test."));
+        assert!(text.contains("ERROR"));
+        assert!(text.contains("Used tool `bash`"));
+    }
+
+    #[test]
+    fn collapse_tool_pairs_does_not_collapse_lone_assistant_without_tool_results() {
+        let messages = vec![
+            Message {
+                role: Role::Assistant,
+                blocks: vec![make_tool_call("call_1", "read", serde_json::json!({"path": "x"}))],
+            },
+            Message::user("next message"),
+        ];
+
+        let collapsed = collapse_tool_pairs(messages);
+        assert_eq!(collapsed.len(), 2);
+        assert_eq!(collapsed[0].role, Role::Assistant);
+        assert_eq!(collapsed[1].role, Role::User);
+    }
 
     const TEST_SUMMARY_FIXTURE: &str = include_str!("test_summary.txt");
     const TEST_SUMMARY_OUTPUT: &str = "test_summary_output.txt";

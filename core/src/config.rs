@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::approval::ApprovalHandler;
-use crate::compaction::{CompactionStrategy, SummaryCompaction};
+use crate::compaction::{HistoryCompactionStrategy, SummaryHistoryCompaction};
 use crate::diagnostics::ToolDiagnosticsSink;
 use crate::error::AgentError;
 use crate::hooks::HookRegistry;
@@ -182,7 +182,7 @@ pub struct AgentConfig {
     /// Optional sink for sanitized tool failure diagnostics.
     pub tool_diagnostics: Option<Arc<dyn ToolDiagnosticsSink>>,
     /// Optional history-level compaction strategy (summarisation, etc.).
-    pub compaction: Option<Arc<dyn CompactionStrategy>>,
+    pub compaction: Option<Arc<dyn HistoryCompactionStrategy>>,
     /// Optional rule-based permission engine consulted before every tool call.
     pub permission_engine: Option<crate::permissions::PermissionEngine>,
     /// Optional handler invoked when a tool call requires explicit human approval.
@@ -293,7 +293,10 @@ impl Default for AgentConfig {
             hooks: Arc::new(HookRegistry::new()),
             storage: None,
             tool_diagnostics: None,
-            compaction: Some(Arc::new(SummaryCompaction { max_tokens: 800_000, keep_recent: 12 })),
+            compaction: Some(Arc::new(SummaryHistoryCompaction {
+                max_tokens: 800_000,
+                keep_recent: 12,
+            })),
             permission_engine: None,
             approval_handler: None,
             tool_concurrency_limit: 10,

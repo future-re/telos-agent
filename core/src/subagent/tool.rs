@@ -384,7 +384,7 @@ mod tests {
             .unwrap();
 
         let requests = provider.requests.lock().await;
-        let system_prompt = requests[0].system_prompt.as_deref().unwrap_or_default();
+        let system_prompt = requests[0].system_prompt_text().unwrap_or_default();
         assert!(system_prompt.contains("You are an explore agent"), "{system_prompt}");
         drop(requests);
 
@@ -477,7 +477,7 @@ mod tests {
         .unwrap();
 
         let requests = provider.requests.lock().await;
-        let system_prompt = requests[0].system_prompt.as_deref().unwrap_or_default();
+        let system_prompt = requests[0].system_prompt_text().unwrap_or_default();
         assert!(system_prompt.contains("# Subagent Skills"), "{system_prompt}");
         assert!(system_prompt.contains("Skill tool"), "{system_prompt}");
         assert!(system_prompt.contains("debug"), "{system_prompt}");
@@ -506,7 +506,7 @@ mod tests {
         .unwrap();
 
         let requests = provider.requests.lock().await;
-        let system_prompt = requests[0].system_prompt.as_deref().unwrap_or_default();
+        let system_prompt = requests[0].system_prompt_text().unwrap_or_default();
         assert!(system_prompt.contains("# Subagent Learning"), "{system_prompt}");
         assert!(system_prompt.contains("memory"), "{system_prompt}");
         assert!(system_prompt.contains("Reusable learning"), "{system_prompt}");

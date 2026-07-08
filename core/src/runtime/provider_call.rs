@@ -69,7 +69,7 @@ impl AgentSession {
             // every provider call breaks DeepSeek's prefix caching: even a
             // single byte change in the system message invalidates the entire
             // cache for that request.
-            if self.cached_system_prompt.is_none()
+            if self.cached_system_prompt_blocks.is_none()
                 && let Some(assembly) = &self.config.prompt_assembly
             {
                 let blocks = assembly.build_blocks().await;
@@ -86,17 +86,17 @@ impl AgentSession {
                     prompt_section_stats = ?section_stats,
                     "built system prompt"
                 );
-                self.cached_system_prompt =
-                    Some(blocks.into_iter().map(|b| b.text).collect::<Vec<_>>().join("\n\n"));
+                self.cached_system_prompt_blocks = Some(blocks);
             }
-            let (system_prompt, system_prompt_blocks) = if self.cached_system_prompt.is_some() {
-                (self.cached_system_prompt.clone(), None)
+            let system_prompt_blocks = if let Some(blocks) = &self.cached_system_prompt_blocks {
+                blocks.clone()
+            } else if let Some(system_prompt) = &self.config.base_system_prompt {
+                vec![crate::prompt::PromptBlock::dynamic("base_system_prompt", system_prompt)]
             } else {
-                (self.config.base_system_prompt.clone(), None)
+                Vec::new()
             };
 
             let request = CompletionRequest {
-                system_prompt,
                 system_prompt_blocks,
                 messages: self.messages.clone(),
                 tools: tool_definitions.to_vec(),

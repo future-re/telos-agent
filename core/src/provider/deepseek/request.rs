@@ -14,14 +14,7 @@ pub(super) fn build_chat_request(
 ) -> Value {
     let mut messages: Vec<Value> = request.messages.iter().flat_map(message_to_deepseek).collect();
 
-    let system_prompt_text = request.system_prompt.clone().or_else(|| {
-        request
-            .system_prompt_blocks
-            .clone()
-            .map(|blocks| blocks.into_iter().map(|b| b.text).collect::<Vec<_>>().join("\n\n"))
-    });
-
-    if let Some(system_prompt) = system_prompt_text {
+    if let Some(system_prompt) = request.system_prompt_text() {
         let already_has_system = matches!(
             messages.first().and_then(|m| m.get("role")).and_then(Value::as_str),
             Some("system")

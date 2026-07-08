@@ -8,6 +8,16 @@ pub struct PromptBlock {
     pub stability: PromptStability,
 }
 
+impl PromptBlock {
+    pub fn dynamic(name: impl Into<String>, text: impl Into<String>) -> Self {
+        Self { name: name.into(), text: text.into(), stability: PromptStability::Dynamic }
+    }
+
+    pub fn static_block(name: impl Into<String>, text: impl Into<String>) -> Self {
+        Self { name: name.into(), text: text.into(), stability: PromptStability::Static }
+    }
+}
+
 /// Hint to providers about whether a block should be cached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheHint {

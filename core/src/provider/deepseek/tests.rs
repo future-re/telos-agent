@@ -47,8 +47,7 @@ async fn completes_chat_request() {
 
     let provider = DeepSeekProvider::new(test_config(server.uri()));
     let request = CompletionRequest {
-        system_prompt: None,
-        system_prompt_blocks: None,
+        system_prompt_blocks: vec![],
         messages: vec![Message::user("Hi")],
         tools: vec![],
         model_hint: None,
@@ -101,8 +100,7 @@ async fn thinking_hint_enables_deepseek_thinking_request() {
 
     let provider = DeepSeekProvider::new(test_config(server.uri()));
     let request = CompletionRequest {
-        system_prompt: None,
-        system_prompt_blocks: None,
+        system_prompt_blocks: vec![],
         messages: vec![Message::user("Hi")],
         tools: vec![],
         model_hint: Some(ModelHint::Thinking),
@@ -136,8 +134,7 @@ async fn execution_hint_does_not_enable_deepseek_thinking_request() {
 
     let provider = DeepSeekProvider::new(test_config(server.uri()));
     let request = CompletionRequest {
-        system_prompt: None,
-        system_prompt_blocks: None,
+        system_prompt_blocks: vec![],
         messages: vec![Message::user("Hi")],
         tools: vec![],
         model_hint: Some(ModelHint::Execution),
@@ -181,8 +178,7 @@ async fn parses_deepseek_usage_details() {
 
     let provider = DeepSeekProvider::new(test_config(server.uri()));
     let request = CompletionRequest {
-        system_prompt: None,
-        system_prompt_blocks: None,
+        system_prompt_blocks: vec![],
         messages: vec![Message::user("Hi")],
         tools: vec![],
         model_hint: None,
@@ -227,8 +223,7 @@ async fn maps_deepseek_error_codes_to_actionable_messages_and_retryability() {
 
         let provider = DeepSeekProvider::new(test_config(server.uri()));
         let request = CompletionRequest {
-            system_prompt: None,
-            system_prompt_blocks: None,
+            system_prompt_blocks: vec![],
             messages: vec![Message::user("Hi")],
             tools: vec![],
             model_hint: None,
@@ -275,8 +270,7 @@ async fn complete_with_json_output_sets_response_format() {
 
     let provider = DeepSeekProvider::new(test_config(server.uri()));
     let request = CompletionRequest {
-        system_prompt: Some("Return json.".into()),
-        system_prompt_blocks: None,
+        system_prompt_blocks: vec![crate::prompt::PromptBlock::dynamic("test", "Return json.")],
         messages: vec![Message::user("Return {\"ok\": true} as json")],
         tools: vec![],
         model_hint: None,
@@ -325,8 +319,7 @@ async fn complete_with_prefix_uses_beta_chat_and_prefix_message() {
 
     let provider = DeepSeekProvider::new(test_config(server.uri()));
     let request = CompletionRequest {
-        system_prompt: None,
-        system_prompt_blocks: None,
+        system_prompt_blocks: vec![],
         messages: vec![Message::user("Write quick sort")],
         tools: vec![],
         model_hint: None,
@@ -468,8 +461,7 @@ async fn streams_chat_response() {
 
     let provider = DeepSeekProvider::new(test_config(server.uri()));
     let request = CompletionRequest {
-        system_prompt: None,
-        system_prompt_blocks: None,
+        system_prompt_blocks: vec![],
         messages: vec![Message::user("Hi")],
         tools: vec![],
         model_hint: None,
@@ -520,8 +512,7 @@ async fn streams_chat_response_ignores_null_usage_until_final_usage() {
 
     let provider = DeepSeekProvider::new(test_config(server.uri()));
     let request = CompletionRequest {
-        system_prompt: None,
-        system_prompt_blocks: None,
+        system_prompt_blocks: vec![],
         messages: vec![Message::user("Hi")],
         tools: vec![],
         model_hint: None,
@@ -576,8 +567,7 @@ async fn streams_chat_response_allows_null_usage_without_final_usage() {
 
     let provider = DeepSeekProvider::new(test_config(server.uri()));
     let request = CompletionRequest {
-        system_prompt: None,
-        system_prompt_blocks: None,
+        system_prompt_blocks: vec![],
         messages: vec![Message::user("Hi")],
         tools: vec![],
         model_hint: None,

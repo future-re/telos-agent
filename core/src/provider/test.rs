@@ -6,6 +6,7 @@
 //! Run with: `cargo test -- provider::test`
 
 use crate::message::Message;
+use crate::prompt::PromptBlock;
 use crate::provider::StopReason;
 use crate::provider::deepseek::{
     DeepSeekChatOptions, DeepSeekConfig, DeepSeekFimRequest, DeepSeekProvider,
@@ -41,8 +42,7 @@ fn deepseek_test_key() -> Option<String> {
 
 fn simple_request() -> CompletionRequest {
     CompletionRequest {
-        system_prompt: Some("Reply in one short sentence.".into()),
-        system_prompt_blocks: None,
+        system_prompt_blocks: vec![PromptBlock::dynamic("test", "Reply in one short sentence.")],
         messages: vec![Message::user("What is the capital of France?")],
         tools: vec![],
         model_hint: None,
@@ -126,10 +126,10 @@ async fn deepseek_json_output_real_api() {
 
     let provider = DeepSeekProvider::new(config);
     let request = CompletionRequest {
-        system_prompt: Some(
-            "Return only a valid compact JSON object with an ok boolean field.".into(),
-        ),
-        system_prompt_blocks: None,
+        system_prompt_blocks: vec![PromptBlock::dynamic(
+            "test",
+            "Return only a valid compact JSON object with an ok boolean field.",
+        )],
         messages: vec![Message::user("Return ok true.")],
         tools: vec![],
         model_hint: None,
@@ -215,15 +215,14 @@ async fn deepseek_prefix_real_api() {
 
     let provider = DeepSeekProvider::new(config);
     let request = CompletionRequest {
-        system_prompt: Some(
-            "Continue the assistant prefix with exactly the integer literal 42. Do not add punctuation."
-                .into(),
-        ),
-        system_prompt_blocks: None,
+        system_prompt_blocks: vec![PromptBlock::dynamic(
+            "test",
+            "Continue the assistant prefix with exactly the integer literal 42. Do not add punctuation.",
+        )],
         messages: vec![Message::user("Complete this Rust return value.")],
         tools: vec![],
         model_hint: None,
-            max_tokens: None,
+        max_tokens: None,
     };
 
     let response = provider

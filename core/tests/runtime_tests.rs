@@ -472,7 +472,7 @@ fn tool_result_budget_compacts_large_output() {
 }
 
 #[test]
-fn summary_compaction_triggers_when_over_budget() {
+fn summary_history_compaction_triggers_when_over_budget() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime.block_on(async {
         // Provider responses: tool_use, summary, final_end_turn
@@ -507,7 +507,7 @@ fn summary_compaction_triggers_when_over_budget() {
         tools.register(BigTool);
 
         let mut session = AgentSession::new(AgentConfig {
-            compaction: Some(Arc::new(SummaryCompaction { max_tokens: 10, keep_recent: 2 })),
+            compaction: Some(Arc::new(SummaryHistoryCompaction { max_tokens: 10, keep_recent: 2 })),
             max_tool_result_chars: usize::MAX,
             ..AgentConfig::default()
         })
@@ -547,7 +547,7 @@ fn token_budget_triggers_auto_compaction() {
         let tools = ToolRegistry::new();
         let mut session = AgentSession::new(AgentConfig {
             base_system_prompt: Some("sys".into()),
-            compaction: Some(Arc::new(SummaryCompaction { max_tokens: 50, keep_recent: 0 })),
+            compaction: Some(Arc::new(SummaryHistoryCompaction { max_tokens: 50, keep_recent: 0 })),
             token_budget: Some(TokenBudget { max_tokens: 1_000, compact_at_tokens: 10 }),
             ..AgentConfig::default()
         })
@@ -638,7 +638,7 @@ fn compaction_emits_system_reminder() {
         let tools = ToolRegistry::new();
         let mut session = AgentSession::new(AgentConfig {
             token_budget: Some(TokenBudget { max_tokens: 1_000_000, compact_at_tokens: 1 }),
-            compaction: Some(Arc::new(SummaryCompaction { max_tokens: 1, keep_recent: 0 })),
+            compaction: Some(Arc::new(SummaryHistoryCompaction { max_tokens: 1, keep_recent: 0 })),
             ..AgentConfig::default()
         })
         .unwrap();

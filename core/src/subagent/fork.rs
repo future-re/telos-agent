@@ -165,8 +165,7 @@ async fn execute_lens(shared: &ForkShared, lens: &ForkLens) -> Option<ForkResult
     };
 
     let request = CompletionRequest {
-        system_prompt: None, // system message already in fork_messages
-        system_prompt_blocks: None,
+        system_prompt_blocks: vec![], // system message already in fork_messages
         messages: fork_messages,
         tools,
         model_hint: None,

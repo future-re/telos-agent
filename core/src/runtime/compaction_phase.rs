@@ -1,7 +1,7 @@
 use tracing::{info, warn};
 
+use crate::compaction::estimate_message_tokens;
 use crate::error::AgentError;
-use crate::message::ContentBlock;
 use crate::provider::ModelProvider;
 use crate::runtime::{AgentSession, TurnEvent};
 
@@ -10,7 +10,7 @@ use crate::runtime::{AgentSession, TurnEvent};
 /// over the limit (e.g. a single tool result larger than the compaction budget).
 const MAX_CONSECUTIVE_COMPACTION_FAILURES: usize = 3;
 
-pub(super) enum CompactionResult {
+pub(super) enum CompactionPhaseResult {
     /// Compaction completed (or was skipped); caller should continue the turn.
     Continue { events: Vec<TurnEvent>, compactions: usize },
     /// Token budget was already exceeded; caller should finish the turn early.
@@ -26,7 +26,7 @@ impl AgentSession {
         &mut self,
         provider: &P,
         iteration: usize,
-    ) -> Result<CompactionResult, AgentError> {
+    ) -> Result<CompactionPhaseResult, AgentError> {
         let mut events = Vec::new();
         let mut compactions = 0;
 
@@ -39,7 +39,7 @@ impl AgentSession {
                 failures = self.consecutive_compaction_failures,
                 "compaction circuit breaker open — skipping compaction this iteration"
             );
-            return Ok(CompactionResult::Continue { events, compactions });
+            return Ok(CompactionPhaseResult::Continue { events, compactions });
         }
 
         if let Some(budget) = self.config.token_budget {
@@ -54,7 +54,7 @@ impl AgentSession {
                     used_tokens: estimated_tokens,
                     max_tokens: budget.max_tokens,
                 });
-                return Ok(CompactionResult::AbortTurn { events });
+                return Ok(CompactionPhaseResult::AbortTurn { events });
             }
             if estimated_tokens >= budget.compact_at_tokens
                 && let Some(compaction) = self.config.compaction.clone()
@@ -126,31 +126,6 @@ impl AgentSession {
             events.push(TurnEvent::CompactionCompleted { reason: "char_budget".into() });
         }
 
-        Ok(CompactionResult::Continue { events, compactions })
+        Ok(CompactionPhaseResult::Continue { events, compactions })
     }
-}
-
-/// Sum estimated token counts across every block in `messages`.
-///
-/// Used by the turn loop to decide whether to invoke compaction or abort the
-/// turn before issuing a request the model can't accept.
-fn estimate_message_tokens(
-    messages: &[crate::message::Message],
-    provider: &dyn ModelProvider,
-) -> usize {
-    messages
-        .iter()
-        .flat_map(|message| message.blocks.iter())
-        .map(|block| match block {
-            ContentBlock::Text(text) => provider.estimate_tokens(&text.text),
-            ContentBlock::Thinking(thinking) => provider.estimate_tokens(&thinking.text),
-            ContentBlock::ToolCall(call) => {
-                provider.estimate_tokens(&call.name)
-                    + provider.estimate_tokens(&call.arguments.to_string())
-            }
-            ContentBlock::ToolResult(result) => {
-                provider.estimate_tokens(&result.content.to_string())
-            }
-        })
-        .sum()
 }

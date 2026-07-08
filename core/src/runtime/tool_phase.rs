@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use futures_util::StreamExt;
 
-use crate::compaction::{CompactionConfig, compact_message};
+use crate::compaction::{MessageTruncationConfig, truncate_message};
 use crate::error::AgentError;
 use crate::executor::{ToolExecutionEvent, ToolExecutionStreamItem, execute_tool_calls_stream};
 use crate::message::Message;
@@ -87,13 +87,13 @@ impl AgentSession {
         }
 
         let tool_message = Message::tool_results(tool_results);
-        let compaction_config = CompactionConfig {
-            max_block_content_chars: Some(self.config.max_tool_result_chars),
-            max_message_chars: Some(self.config.max_message_tool_results_chars),
+        let truncation_config = MessageTruncationConfig {
+            max_block_content_bytes: Some(self.config.max_tool_result_chars),
+            max_message_bytes: Some(self.config.max_message_tool_results_chars),
             compressor: None,
         };
-        let compaction = compact_message(tool_message, &compaction_config);
-        if compaction.compacted {
+        let truncation = truncate_message(tool_message, &truncation_config);
+        if truncation.compacted {
             events.push(TurnEvent::CompactionStarted { reason: "tool_result_budget".into() });
             events.push(TurnEvent::CompactionCompleted { reason: "tool_result_budget".into() });
         }
@@ -127,7 +127,7 @@ impl AgentSession {
             self.current_turn_memory_mutation_notified = true;
         }
 
-        Ok((compaction.message, events))
+        Ok((truncation.message, events))
     }
 }
 

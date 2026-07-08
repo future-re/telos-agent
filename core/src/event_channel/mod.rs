@@ -126,24 +126,19 @@ impl EventChannel {
 
         let addr = config.listen;
 
-        let std_listener = std::net::TcpListener::bind(addr).map_err(|e| {
-            AgentError::Config(format!("EventChannel: cannot bind to {addr}: {e}"))
-        })?;
+        let std_listener = std::net::TcpListener::bind(addr)
+            .map_err(|e| AgentError::Config(format!("EventChannel: cannot bind to {addr}: {e}")))?;
         std_listener
             .set_nonblocking(true)
             .map_err(|e| AgentError::Config(format!("EventChannel: set_nonblocking: {e}")))?;
-        let listener = tokio::net::TcpListener::from_std(std_listener).map_err(|e| {
-            AgentError::Config(format!("EventChannel: from_std: {e}"))
-        })?;
+        let listener = tokio::net::TcpListener::from_std(std_listener)
+            .map_err(|e| AgentError::Config(format!("EventChannel: from_std: {e}")))?;
 
         let (inject_tx, inject_rx) = mpsc::channel(256);
         let (broadcast_tx, _) = broadcast::channel(256);
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
-        let app_state = Arc::new(AppState {
-            inject_tx,
-            broadcast_tx: broadcast_tx.clone(),
-        });
+        let app_state = Arc::new(AppState { inject_tx, broadcast_tx: broadcast_tx.clone() });
 
         let app = Router::new()
             .route("/health", get(handle_health))
@@ -207,9 +202,7 @@ impl EventChannel {
             if sub.topic == "*" || sub.topic.is_empty() {
                 return true;
             }
-            glob::Pattern::new(&sub.topic)
-                .map(|pat| pat.matches(topic))
-                .unwrap_or(false)
+            glob::Pattern::new(&sub.topic).map(|pat| pat.matches(topic)).unwrap_or(false)
         })
     }
 }

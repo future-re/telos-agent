@@ -166,7 +166,7 @@ pub use approval::{
     ApprovalDecision, ApprovalHandler, ApprovalRequest, AutoDenyHandler, FixedDecisionHandler,
 };
 // Compaction — history- and message-level shrinking strategies.
-pub use compaction::{CompactionStrategy, SummaryCompaction};
+pub use compaction::{HistoryCompactionStrategy, SummaryHistoryCompaction};
 // Configuration — the session config aggregate, task path, and token-budget knob.
 pub use config::{AgentConfig, TaskPath, TokenBudget, platform_base_env};
 // Diagnostics — sanitized local recording of tool execution failures.

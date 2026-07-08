@@ -9,13 +9,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, info_span, warn};
 
-use super::compaction_phase::CompactionResult;
+use super::compaction_phase::CompactionPhaseResult;
 use crate::config::AgentConfig;
 use crate::error::AgentError;
 use crate::event_channel::EventChannel;
 use crate::hooks::{HookContext, HookPhase};
 use crate::message::{Message, ToolResult};
 use crate::metrics::SessionMetrics;
+use crate::prompt::PromptBlock;
 use crate::provider::{ModelHint, ModelProvider, StopReason, TokenUsage};
 use crate::runtime::TurnInputReceiver;
 use crate::runtime::{TurnEvent, TurnResult};
@@ -41,10 +42,10 @@ pub struct AgentSession {
     /// Consecutive compaction failures. Used as a circuit breaker to
     /// stop retrying when the context is irrecoverably over the limit.
     pub(super) consecutive_compaction_failures: usize,
-    /// System prompt rendered once from PromptAssembly and cached.
+    /// System prompt blocks rendered once from PromptAssembly and cached.
     /// Avoids re-rendering on every provider call, which would break
     /// DeepSeek's prefix caching (identical prefix → cache hit).
-    pub(super) cached_system_prompt: Option<String>,
+    pub(super) cached_system_prompt_blocks: Option<Vec<PromptBlock>>,
     /// Fingerprint of the last injected memory reminder, used to skip
     /// identical re-injections that only add prompt churn.
     pub(super) last_memory_injection_fingerprint: Option<u64>,
@@ -90,7 +91,7 @@ impl AgentSession {
             read_file_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             metrics: SessionMetrics::new(),
             consecutive_compaction_failures: 0,
-            cached_system_prompt: None,
+            cached_system_prompt_blocks: None,
             last_memory_injection_fingerprint: None,
             last_skill_injection_fingerprint: None,
             memory_state_dirty: false,
@@ -126,7 +127,7 @@ impl AgentSession {
             .collect();
         self.next_turn_id = 1;
         self.read_file_state = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
-        self.cached_system_prompt = None;
+        self.cached_system_prompt_blocks = None;
         self.last_memory_injection_fingerprint = None;
         self.last_skill_injection_fingerprint = None;
         self.memory_state_dirty = false;
@@ -147,10 +148,7 @@ impl AgentSession {
 
     fn drain_external_events(&mut self) -> Vec<Message> {
         if let Some(ref mut ec) = self.event_channel {
-            ec.try_drain_incoming()
-                .iter()
-                .map(EventChannel::to_system_message)
-                .collect()
+            ec.try_drain_incoming().iter().map(EventChannel::to_system_message).collect()
         } else {
             Vec::new()
         }
@@ -287,7 +285,7 @@ impl AgentSession {
                 yield provider_request;
 
                 match self.run_compaction_phase(provider, iterations).await? {
-                    CompactionResult::Continue { events, compactions } => {
+                    CompactionPhaseResult::Continue { events, compactions } => {
                         for event in events {
                             self.broadcast_turn_event(&event);
                             yield event;
@@ -296,7 +294,7 @@ impl AgentSession {
                             self.metrics.add_compaction();
                         }
                     }
-                    CompactionResult::AbortTurn { events } => {
+                    CompactionPhaseResult::AbortTurn { events } => {
                         for event in events {
                             self.broadcast_turn_event(&event);
                             yield event;
@@ -887,7 +885,8 @@ mod tests {
         session.memory_state_dirty = true;
         session.current_turn_memory_injected = true;
         session.current_turn_memory_mutation_notified = true;
-        session.cached_system_prompt = Some("cached prompt".into());
+        session.cached_system_prompt_blocks =
+            Some(vec![PromptBlock::dynamic("test", "cached prompt")]);
         session.next_turn_id = 7;
 
         session.reset();
@@ -896,7 +895,7 @@ mod tests {
         assert_eq!(session.messages[0].role, Role::System);
         assert_eq!(session.messages[0].text_content(), "base prompt");
         assert_eq!(session.next_turn_id, 1);
-        assert!(session.cached_system_prompt.is_none());
+        assert!(session.cached_system_prompt_blocks.is_none());
         assert!(session.last_memory_injection_fingerprint.is_none());
         assert!(!session.memory_state_dirty);
         assert!(!session.current_turn_memory_injected);

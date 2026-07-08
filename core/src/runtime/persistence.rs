@@ -87,7 +87,7 @@ impl AgentSession {
             read_file_state: Arc::new(tokio::sync::Mutex::new(read_file_state)),
             metrics,
             consecutive_compaction_failures: 0,
-            cached_system_prompt: None,
+            cached_system_prompt_blocks: None,
             last_memory_injection_fingerprint: None,
             last_skill_injection_fingerprint: None,
             memory_state_dirty: false,

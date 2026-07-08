@@ -23,15 +23,11 @@ pub enum ModelHint {
 }
 
 /// All inputs a provider needs to generate a single completion.
-///
-/// `system_prompt` is separate from `messages` because OpenAI-compatible
-/// providers accept the system prompt as a top-level field rather than a message.
 #[derive(Debug, Clone)]
 pub struct CompletionRequest {
-    pub system_prompt: Option<String>,
-    /// Optional structured system prompt blocks for providers that support
-    /// per-block cache control (e.g., Anthropic prompt caching).
-    pub system_prompt_blocks: Option<Vec<PromptBlock>>,
+    /// Structured system prompt blocks. Providers that do not support block-level
+    /// semantics should render these blocks into a single system message.
+    pub system_prompt_blocks: Vec<PromptBlock>,
     pub messages: Vec<Message>,
     pub tools: Vec<ToolDefinition>,
     /// Optional model routing hint. When `None`, the provider uses its default model.
@@ -39,6 +35,22 @@ pub struct CompletionRequest {
     pub model_hint: Option<ModelHint>,
     /// Maximum output tokens. When `None`, the provider uses its default.
     pub max_tokens: Option<u32>,
+}
+
+impl CompletionRequest {
+    pub fn system_prompt_text(&self) -> Option<String> {
+        if self.system_prompt_blocks.is_empty() {
+            return None;
+        }
+
+        Some(
+            self.system_prompt_blocks
+                .iter()
+                .map(|block| block.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        )
+    }
 }
 
 /// Why the model stopped emitting tokens.
@@ -111,8 +123,7 @@ mod tests {
     #[test]
     fn model_hint_is_none_by_default() {
         let req = CompletionRequest {
-            system_prompt: None,
-            system_prompt_blocks: None,
+            system_prompt_blocks: vec![],
             messages: vec![],
             tools: vec![],
             model_hint: None,
@@ -124,8 +135,7 @@ mod tests {
     #[test]
     fn model_hint_can_be_set() {
         let req = CompletionRequest {
-            system_prompt: None,
-            system_prompt_blocks: None,
+            system_prompt_blocks: vec![],
             messages: vec![],
             tools: vec![],
             model_hint: Some(ModelHint::Thinking),

@@ -37,10 +37,6 @@ impl Tool for WebFetchTool {
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["web_fetch"]
-    }
-
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use WebFetch to retrieve a specific public URL. Only fetch public `http`/`https` URLs. \

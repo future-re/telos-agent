@@ -38,10 +38,6 @@ impl Tool for FileEditTool {
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["file_edit"]
-    }
-
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use Edit to make precise, exact-match replacements in a UTF-8 text file. The file must have been Read first. \

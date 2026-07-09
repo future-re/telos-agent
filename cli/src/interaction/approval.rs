@@ -113,9 +113,7 @@ impl ApprovalHandler for TerminalApprovalHandler {
     async fn ask(&self, request: ApprovalRequest) -> ApprovalDecision {
         // Check policy first for a fast-path decision.
         if let Some(ref config) = self.policy {
-            let names = std::iter::once(request.tool_name.as_str())
-                .chain(request.invocation_names.iter().map(String::as_str));
-            let tool_policy = config.policy_for_any(names);
+            let tool_policy = config.policy_for(&request.tool_name);
             if let Some(decision) =
                 tool_policy.decide(&request.tool_name, request.arguments.clone())
             {

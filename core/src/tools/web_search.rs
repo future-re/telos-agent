@@ -47,10 +47,6 @@ impl Tool for WebSearchTool {
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["web_search"]
-    }
-
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use WebSearch for discovery of up-to-date information not in the codebase. \

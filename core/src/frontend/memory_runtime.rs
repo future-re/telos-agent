@@ -88,7 +88,7 @@ pub async fn record_successful_tool(
     let Some(detail) = detail.filter(|d| !d.trim().is_empty()) else {
         return;
     };
-    if !matches!(tool.to_lowercase().as_str(), "bash" | "shell" | "edit" | "write") {
+    if !matches!(tool.to_lowercase().as_str(), "bash" | "edit" | "write") {
         return;
     }
     let store = store.clone();
@@ -97,7 +97,7 @@ pub async fn record_successful_tool(
     let detail = detail.to_string();
     if let Err(e) = tokio::task::spawn_blocking(move || {
         let ts = unix_timestamp();
-        let category = if matches!(tool.to_lowercase().as_str(), "bash" | "shell") {
+        let category = if matches!(tool.to_lowercase().as_str(), "bash") {
             MemoryCategory::Command
         } else {
             MemoryCategory::Workflow

@@ -135,5 +135,5 @@ impl AgentSession {
 /// runtime injects a system reminder so the model knows its memory state
 /// is stale and fresh results are available.
 fn is_memory_mutation_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "MemoryWrite" | "MemoryEdit" | "memory_write" | "memory_edit")
+    matches!(tool_name, "MemoryWrite" | "MemoryEdit")
 }

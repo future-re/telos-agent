@@ -19,8 +19,6 @@ pub struct ApprovalRequest {
     pub tool_call_id: String,
     /// Canonical tool name.
     pub tool_name: String,
-    /// Names the call was invoked under (canonical + aliases).
-    pub invocation_names: Vec<String>,
     /// Arguments the model supplied.
     pub arguments: Value,
     /// Working directory the tool will run in.
@@ -87,7 +85,6 @@ mod tests {
             .ask(ApprovalRequest {
                 tool_call_id: "call-1".into(),
                 tool_name: "Bash".into(),
-                invocation_names: vec!["Bash".into()],
                 arguments: json!({"command": "rm -rf /"}),
                 cwd: PathBuf::from("/tmp"),
                 messages: Arc::new(vec![]),
@@ -104,7 +101,6 @@ mod tests {
             .ask(ApprovalRequest {
                 tool_call_id: "call-1".into(),
                 tool_name: "Read".into(),
-                invocation_names: vec!["Read".into()],
                 arguments: json!({"file_path": "/etc/passwd"}),
                 cwd: PathBuf::from("/tmp"),
                 messages: Arc::new(vec![]),

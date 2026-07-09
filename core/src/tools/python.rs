@@ -48,10 +48,6 @@ impl Tool for PythonScriptTool {
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["python_script", "python"]
-    }
-
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use PythonScript for data processing, office documents, web parsing, and Playwright automation when Python libraries are helpful. \

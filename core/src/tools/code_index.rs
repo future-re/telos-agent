@@ -25,10 +25,6 @@ impl Tool for CodeSearchTool {
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["code_search"]
-    }
-
     fn prompt_text(&self) -> Option<&'static str> {
         Some("Use CodeSearch for indexed repository search before broad filesystem reads.")
     }
@@ -83,10 +79,6 @@ impl Tool for CodeContextTool {
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["code_context"]
-    }
-
     fn is_concurrency_safe(&self, _arguments: &Value) -> bool {
         true
     }
@@ -129,10 +121,6 @@ impl Tool for CodeIndexRefreshTool {
             description: "Refresh the local code index under .telos/index/code_index.json.".into(),
             input_schema: json!({"type":"object","properties":{}}),
         }
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        &["code_index_refresh"]
     }
 
     async fn invoke(

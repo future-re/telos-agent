@@ -31,10 +31,6 @@ impl Tool for GlobTool {
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["glob"]
-    }
-
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use Glob to list files matching a pattern. Patterns are relative to cwd; absolute patterns must stay under cwd.",

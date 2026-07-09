@@ -32,9 +32,6 @@ impl Tool for MemoryReadTool {
             input_schema: json!({"type":"object","properties":{"name":{"type":"string","description":"Name of the memory to read"}},"required":["name"]}),
         }
     }
-    fn aliases(&self) -> &'static [&'static str] {
-        &["memory_read"]
-    }
     async fn check_permission(
         &self,
         _: &Value,
@@ -113,9 +110,6 @@ impl Tool for MemoryWriteTool {
                 "related":{"type":"array","items":{"type":"string"},"default":[]}
             },"required":["name","description","category","body"]}),
         }
-    }
-    fn aliases(&self) -> &'static [&'static str] {
-        &["memory_write"]
     }
     async fn check_permission(
         &self,
@@ -225,9 +219,6 @@ impl Tool for MemoryGrepTool {
             input_schema: json!({"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}),
         }
     }
-    fn aliases(&self) -> &'static [&'static str] {
-        &["memory_grep"]
-    }
     async fn check_permission(
         &self,
         _: &Value,
@@ -283,9 +274,6 @@ impl Tool for MemoryEditTool {
             description: "Edit a memory entry's body content. Replaces the full body.".into(),
             input_schema: json!({"type":"object","properties":{"name":{"type":"string"},"body":{"type":"string","description":"New body content"}},"required":["name","body"]}),
         }
-    }
-    fn aliases(&self) -> &'static [&'static str] {
-        &["memory_edit"]
     }
     async fn check_permission(
         &self,
@@ -349,9 +337,6 @@ impl Tool for MemoryStatusTool {
                 .into(),
             input_schema: json!({"type":"object","properties":{"name":{"type":"string"},"status":{"type":"string","enum":["working","needs_fix","deprecated"]}},"required":["name","status"]}),
         }
-    }
-    fn aliases(&self) -> &'static [&'static str] {
-        &["memory_status"]
     }
     async fn check_permission(
         &self,

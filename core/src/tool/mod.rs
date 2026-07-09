@@ -8,7 +8,7 @@
 use async_trait::async_trait;
 use jsonschema::Validator;
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -164,14 +164,6 @@ pub trait Tool: Send + Sync {
         None
     }
 
-    /// Backwards-compatible alternate names accepted by the runtime.
-    ///
-    /// Aliases are *not* sent to the model; they only let older transcripts or
-    /// callers invoke renamed tools.
-    fn aliases(&self) -> &'static [&'static str] {
-        &[]
-    }
-
     /// Validate raw arguments before the permission check runs.
     ///
     /// Default: accept anything.
@@ -243,7 +235,6 @@ impl ToolRegistry {
     {
         let definition = tool.definition();
         let name = definition.name.clone();
-        let aliases = tool.aliases();
         let tool = Arc::new(tool);
         let is_override = self.tools.insert(name.clone(), tool.clone()).is_some();
         if !is_override {
@@ -258,13 +249,6 @@ impl ToolRegistry {
             }
             Err(err) => {
                 panic!("tool `{}` has an invalid input schema: {err}", name);
-            }
-        }
-        for alias in aliases {
-            // Aliases must not shadow an existing canonical name, otherwise the
-            // model would see one tool's schema but invoke another's implementation.
-            if !self.canonical_names.contains(&(*alias).to_string()) {
-                self.tools.insert((*alias).to_string(), tool.clone());
             }
         }
     }
@@ -282,19 +266,16 @@ impl ToolRegistry {
 
     /// Return a registry containing only tools allowed by `allowed` and not denied by `denied`.
     ///
-    /// Empty `allowed` means all canonical tools. A literal `"*"` also means all tools.
-    /// Names may be canonical names or aliases.
+    /// Empty `allowed` means all tools. A literal `"*"` also means all tools.
     pub fn filtered(&self, allowed: &[String], denied: &[String]) -> Self {
         let allowed_all = allowed.is_empty() || allowed.iter().any(|name| name == "*");
-        let allowed_canonical = self.resolve_name_set(allowed);
-        let denied_canonical = self.resolve_name_set(denied);
 
         let mut next = ToolRegistry::new();
         for canonical in &self.canonical_names {
-            if !allowed_all && !allowed_canonical.contains(canonical) {
+            if !allowed_all && !allowed.contains(canonical) {
                 continue;
             }
-            if denied_canonical.contains(canonical) {
+            if denied.contains(canonical) {
                 continue;
             }
             if let Some(tool) = self.tools.get(canonical) {
@@ -302,11 +283,6 @@ impl ToolRegistry {
                 next.canonical_names.push(canonical.clone());
                 if let Some(validator) = self.validators.get(canonical) {
                     next.validators.insert(canonical.clone(), validator.clone());
-                }
-                for alias in tool.aliases() {
-                    if !self.canonical_names.contains(&alias.to_string()) {
-                        next.tools.insert(alias.to_string(), tool.clone());
-                    }
                 }
             }
         }
@@ -318,45 +294,16 @@ impl ToolRegistry {
         self.tools.get(name).cloned().ok_or_else(|| AgentError::ToolNotFound(name.to_string()))
     }
 
-    fn resolve_name_set(&self, names: &[String]) -> HashSet<String> {
-        names.iter().filter_map(|name| self.canonical_name_for(name)).collect::<HashSet<_>>()
-    }
-
-    fn canonical_name_for(&self, name: &str) -> Option<String> {
-        self.canonical_names
-            .iter()
-            .find(|canonical| {
-                canonical.as_str() == name
-                    || self
-                        .tools
-                        .get(*canonical)
-                        .is_some_and(|tool| tool.aliases().iter().any(|alias| alias == &name))
-            })
-            .cloned()
-    }
-
     /// Validate `arguments` against the cached JSON Schema validator for the
     /// tool named `name`. Returns [`AgentError::ToolNotFound`] if the tool is
     /// not registered, or [`AgentError::Validation`] if the arguments fail.
     pub fn validate_arguments(&self, name: &str, arguments: &Value) -> Result<(), AgentError> {
-        let canonical_name = self
-            .canonical_names
-            .iter()
-            .find(|canonical| {
-                canonical == &name
-                    || self
-                        .tools
-                        .get(*canonical)
-                        .is_some_and(|tool| tool.aliases().iter().any(|alias| alias == &name))
-            })
-            .cloned()
-            .ok_or_else(|| AgentError::ToolNotFound(name.to_string()))?;
+        if !self.tools.contains_key(name) {
+            return Err(AgentError::ToolNotFound(name.to_string()));
+        }
 
-        let validator = self
-            .validators
-            .get(&canonical_name)
-            .cloned()
-            .expect("validator missing for registered tool");
+        let validator =
+            self.validators.get(name).cloned().expect("validator missing for registered tool");
 
         let mut errors = Vec::new();
         for err in validator.iter_errors(arguments) {
@@ -381,18 +328,16 @@ mod tests {
 
     struct FakeTool {
         def: ToolDefinition,
-        aliases: &'static [&'static str],
     }
 
     impl FakeTool {
-        fn new(name: &str, aliases: &'static [&'static str]) -> Self {
+        fn new(name: &str) -> Self {
             Self {
                 def: ToolDefinition {
                     name: name.into(),
                     description: "test".into(),
                     input_schema: json!({"type": "object"}),
                 },
-                aliases,
             }
         }
     }
@@ -401,9 +346,6 @@ mod tests {
     impl Tool for FakeTool {
         fn definition(&self) -> ToolDefinition {
             self.def.clone()
-        }
-        fn aliases(&self) -> &'static [&'static str] {
-            self.aliases
         }
         async fn invoke(
             &self,
@@ -415,27 +357,10 @@ mod tests {
     }
 
     #[test]
-    fn registry_returns_definitions_for_canonical_names_only() {
+    fn registry_lookup_by_name() {
         let mut registry = ToolRegistry::new();
-        registry.register(FakeTool::new("Bash", &["shell"]));
-        let defs = registry.definitions();
-        assert_eq!(defs.len(), 1);
-        assert_eq!(defs[0].name, "Bash");
-    }
-
-    #[test]
-    fn registry_lookup_by_canonical_name() {
-        let mut registry = ToolRegistry::new();
-        registry.register(FakeTool::new("Read", &[]));
+        registry.register(FakeTool::new("Read"));
         assert!(registry.get("Read").is_ok());
-    }
-
-    #[test]
-    fn registry_lookup_by_alias() {
-        let mut registry = ToolRegistry::new();
-        registry.register(FakeTool::new("Bash", &["shell"]));
-        assert!(registry.get("shell").is_ok());
-        assert!(registry.get("Bash").is_ok());
     }
 
     #[test]
@@ -447,8 +372,8 @@ mod tests {
     #[test]
     fn registry_canonical_names_do_not_duplicate() {
         let mut registry = ToolRegistry::new();
-        registry.register(FakeTool::new("A", &[]));
-        registry.register(FakeTool::new("B", &[]));
+        registry.register(FakeTool::new("A"));
+        registry.register(FakeTool::new("B"));
         let defs = registry.definitions();
         assert_eq!(defs.len(), 2);
     }
@@ -456,23 +381,9 @@ mod tests {
     #[test]
     fn registry_re_register_overrides() {
         let mut registry = ToolRegistry::new();
-        registry.register(FakeTool::new("X", &[]));
-        // Register again with same canonical name
-        registry.register(FakeTool::new("X", &[]));
-        // Still returns one definition (canonical name is deduplicated in the filter)
+        registry.register(FakeTool::new("X"));
+        registry.register(FakeTool::new("X"));
         let defs = registry.definitions();
         assert_eq!(defs.len(), 1);
-    }
-
-    #[test]
-    fn registry_alias_does_not_override_canonical_name() {
-        let mut registry = ToolRegistry::new();
-        registry.register(FakeTool::new("A", &[]));
-        // B's alias clashes with A's canonical name; A must remain invocable.
-        registry.register(FakeTool::new("B", &["A"]));
-        let defs = registry.definitions();
-        assert_eq!(defs.len(), 2);
-        assert!(registry.get("A").is_ok());
-        assert!(registry.get("B").is_ok());
     }
 }

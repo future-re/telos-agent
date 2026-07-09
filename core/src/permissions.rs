@@ -316,33 +316,6 @@ mod tests {
         assert_eq!(engine.evaluate("Write"), None);
     }
 
-    // --- evaluate_call_any (aliases) ---
-
-    #[test]
-    fn evaluate_call_any_respects_aliases() {
-        let mut engine = PermissionEngine::new();
-        engine.add_rule(PermissionRule::deny_tool("shell"));
-        // The tool is registered as "Bash" with alias "shell" — both should hit.
-        assert!(
-            engine
-                .evaluate_call_any(&["Bash", "shell"], &json!({}), std::path::Path::new("."))
-                .is_some()
-        );
-    }
-
-    #[test]
-    fn evaluate_call_any_last_alias_wins() {
-        let mut engine = PermissionEngine::new();
-        engine.add_rule(PermissionRule::allow_tool("Bash"));
-        engine.add_rule(PermissionRule::deny_tool("shell"));
-        // "Bash" and "shell" are both accepted names for the same call;
-        // the last matching rule wins.
-        assert_eq!(
-            engine.evaluate_call_any(&["Bash", "shell"], &json!({}), std::path::Path::new(".")),
-            Some(RuleDecision::Deny)
-        );
-    }
-
     // --- command_prefix ---
 
     #[test]

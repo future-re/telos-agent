@@ -35,10 +35,6 @@ impl Tool for GrepTool {
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["grep"]
-    }
-
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use Grep for literal substring search in files (not regex). Results include path, line number, and matched line. \

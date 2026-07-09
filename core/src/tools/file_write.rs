@@ -36,10 +36,6 @@ impl Tool for FileWriteTool {
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["file_write"]
-    }
-
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use Write to create a new file or overwrite an existing UTF-8 text file. \

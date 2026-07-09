@@ -37,10 +37,6 @@ impl Tool for ShellTool {
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["shell"]
-    }
-
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use Bash for shell commands, build/test runners, and git operations. \

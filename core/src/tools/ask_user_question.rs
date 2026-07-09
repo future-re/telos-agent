@@ -73,10 +73,6 @@ impl Tool for AskUserQuestionTool {
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["ask_user"]
-    }
-
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use AskUserQuestion to collect user preferences or disambiguate requirements when multiple valid choices exist. \

@@ -93,10 +93,6 @@ impl Tool for PowerShellTool {
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["shell"]
-    }
-
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use the PowerShell tool for shell commands in this environment. \

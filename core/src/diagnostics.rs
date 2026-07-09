@@ -207,7 +207,7 @@ pub fn sanitized_event_for_failure(
 
 fn argument_summary(tool_name: &str, arguments: &serde_json::Value) -> String {
     let name = tool_name.to_ascii_lowercase();
-    if (name == "bash" || name == "shell" || name == "powershell")
+    if (name == "bash" || name == "powershell")
         && let Some(command) = arguments.get("command").and_then(|value| value.as_str())
     {
         return summarize_command(command);

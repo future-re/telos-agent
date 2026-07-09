@@ -36,10 +36,6 @@ provide the original file text (without line-number prefixes) to `Edit` when edi
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["file_read"]
-    }
-
     fn prompt_text(&self) -> Option<&'static str> {
         Some(
             "Use Read to inspect UTF-8 text files. Always read a file before editing it. \

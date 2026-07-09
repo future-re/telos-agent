@@ -86,10 +86,6 @@ Rules: one item in_progress at a time; update status in real-time; mark in_progr
         Some(TODO_WRITE_PROMPT)
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["todo_write", "todowrite"]
-    }
-
     fn is_concurrency_safe(&self, _: &Value) -> bool {
         true
     }

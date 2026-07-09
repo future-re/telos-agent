@@ -61,10 +61,6 @@ impl Tool for SendUserMessageTool {
         Some(SEND_USER_MESSAGE_PROMPT)
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["Brief", "send_user_message"]
-    }
-
     fn is_concurrency_safe(&self, _: &Value) -> bool {
         true
     }

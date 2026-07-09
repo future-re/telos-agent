@@ -31,10 +31,6 @@ impl Tool for MemoryMaintenanceTool {
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["memory_maintenance"]
-    }
-
     async fn check_permission(
         &self,
         _: &Value,

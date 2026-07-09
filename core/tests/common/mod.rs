@@ -25,10 +25,6 @@ impl Tool for AddTool {
         }
     }
 
-    fn aliases(&self) -> &'static [&'static str] {
-        &["legacy_add"]
-    }
-
     async fn invoke(
         &self,
         arguments: Value,

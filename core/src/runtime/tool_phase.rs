@@ -4,7 +4,7 @@ use futures_util::StreamExt;
 
 use crate::compaction::{MessageTruncationConfig, truncate_message};
 use crate::error::AgentError;
-use crate::executor::{ToolExecutionEvent, ToolExecutionStreamItem, execute_tool_calls_stream};
+use crate::executor::{ToolExecutionEvent, ToolExecutionStreamItem, execute_tool_calls_stream, tool_result_detail};
 use crate::message::Message;
 use crate::runtime::{AgentSession, TurnEvent};
 use crate::tool::ToolRegistry;
@@ -49,12 +49,6 @@ impl AgentSession {
                         ToolExecutionEvent::ToolProgress { tool_call_id, name, message, data } => {
                             TurnEvent::ToolProgress { tool_call_id, name, message, data }
                         }
-                        ToolExecutionEvent::ToolCompleted {
-                            tool_call_id,
-                            name,
-                            is_error,
-                            detail,
-                        } => TurnEvent::ToolCompleted { tool_call_id, name, is_error, detail },
                         ToolExecutionEvent::ApprovalRequested { tool_call_id, name, reason } => {
                             TurnEvent::ApprovalRequested { tool_call_id, name, reason }
                         }
@@ -65,6 +59,12 @@ impl AgentSession {
                     events.push(turn_event);
                 }
                 ToolExecutionStreamItem::Result(result) => {
+                    events.push(TurnEvent::ToolCompleted {
+                        tool_call_id: result.tool_call_id.clone(),
+                        name: result.name.clone(),
+                        is_error: result.is_error,
+                        detail: result.is_error.then(|| tool_result_detail(&result.content)),
+                    });
                     tool_results.push(result);
                 }
             }

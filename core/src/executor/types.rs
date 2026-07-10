@@ -16,8 +16,6 @@ pub enum ToolExecutionEvent {
         message: String,
         data: Option<Value>,
     },
-    /// Emitted once when the tool finishes (success or error).
-    ToolCompleted { tool_call_id: String, name: String, is_error: bool, detail: Option<String> },
     /// A tool call has been suspended pending human approval.
     ApprovalRequested { tool_call_id: String, name: String, reason: String },
     /// Human approval has been resolved for a suspended tool call.

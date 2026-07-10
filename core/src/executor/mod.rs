@@ -5,13 +5,12 @@
 //! call order in their results so the model always sees deterministic output.
 
 pub use stream::execute_tool_calls_stream;
-pub use sync::execute_tool_calls;
 pub use types::{ToolExecutionEvent, ToolExecutionOutput, ToolExecutionStreamItem};
+pub(crate) use invoke::tool_result_detail;
 
 mod batch;
 mod invoke;
 mod stream;
-mod sync;
 #[cfg(test)]
 mod tests;
 mod types;

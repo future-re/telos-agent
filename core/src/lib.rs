@@ -179,7 +179,7 @@ pub use error::{AgentError, ProviderError};
 // Event channel — bidirectional HTTP event channel for external pub/sub.
 pub use event_channel::{EventChannel, EventChannelConfig, ExternalEvent, Subscription};
 // Tool executor — direct entry points for callers that bypass the turn loop.
-pub use executor::{ToolExecutionEvent, ToolExecutionOutput, execute_tool_calls};
+pub use executor::{ToolExecutionEvent, ToolExecutionOutput, ToolExecutionStreamItem, execute_tool_calls_stream};
 // Hooks — registry + per-phase hook trait + metadata types.
 pub use hooks::{Hook, HookCondition, HookContext, HookEntry, HookPhase, HookRegistry};
 // Message model — the lingua franca between session, provider, and tools.

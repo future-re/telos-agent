@@ -13,7 +13,7 @@ use tracing::warn;
 
 use super::batch::build_batches;
 use super::invoke::{
-    invoke_tool, json_error_payload, record_tool_failure, tool_detail, tool_result_detail,
+    invoke_tool, json_error_payload, record_tool_failure, tool_detail,
 };
 use super::types::{PreparedCall, ToolExecutionEvent, ToolExecutionStreamItem};
 
@@ -75,6 +75,7 @@ async fn execute_concurrent_batch(
             worker_tx.clone(),
         );
     }
+    // Done sending, so drop the sender to close the channel when all workers are done.
     drop(send);
 
     loop {
@@ -105,6 +106,7 @@ async fn execute_concurrent_batch(
         }
     }
 
+    // task done, so drop the join set to avoid holding onto any tasks.
     drop(join_set);
 
     completed.sort_by_key(|(index, _)| *index);
@@ -173,12 +175,6 @@ fn spawn_tool_event_worker(
                 &message,
             )
             .await;
-            let _ = tx.send(WorkerMessage::Event(ToolExecutionEvent::ToolCompleted {
-                tool_call_id: tool_call_id.clone(),
-                name: name.clone(),
-                is_error: true,
-                detail: Some(message.clone()),
-            }));
             let _ = tx.send(WorkerMessage::Done {
                 index,
                 result: ToolResult {
@@ -199,7 +195,7 @@ async fn run_tool_with_event_forwarding(
     tx: tokio::sync::mpsc::UnboundedSender<WorkerMessage>,
 ) {
     let index = prepared.index;
-    let detail = tool_detail(&prepared.call.name, &prepared.call.arguments);
+    let detail = tool_detail(&tools, &prepared.call.name, &prepared.call.arguments);
     let _ = tx.send(WorkerMessage::Event(ToolExecutionEvent::ToolStarted {
         tool_call_id: prepared.call.id.clone(),
         name: prepared.call.name.clone(),
@@ -269,11 +265,5 @@ async fn run_tool_with_event_forwarding(
         let _ = tx.send(WorkerMessage::Event(event));
     }
 
-    let _ = tx.send(WorkerMessage::Event(ToolExecutionEvent::ToolCompleted {
-        tool_call_id: result.tool_call_id.clone(),
-        name: result.name.clone(),
-        is_error: result.is_error,
-        detail: result.is_error.then(|| tool_result_detail(&result.content)),
-    }));
     let _ = tx.send(WorkerMessage::Done { index, result });
 }

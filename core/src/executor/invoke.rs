@@ -293,49 +293,36 @@ pub(crate) fn json_error_payload(kind: &str, message: String) -> Value {
     })
 }
 
-/// Extract a human-readable detail from a tool's arguments.
-pub(crate) fn tool_detail(name: &str, args: &serde_json::Value) -> String {
-    let name_lower = name.to_lowercase();
-    match name_lower.as_str() {
-        "bash" => {
-            args.get("command").and_then(|v| v.as_str()).map(truncate_cmd).unwrap_or_default()
-        }
-        "read" | "write" | "edit" => args
-            .get("file_path")
-            .or_else(|| args.get("path"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_default(),
-        "grep" | "glob" => {
-            args.get("pattern").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default()
-        }
-        "websearch" => {
-            args.get("query").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default()
-        }
-        "webfetch" => args
-            .get("url")
-            .or_else(|| args.get("urls"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_default(),
-        "task" | "agent" => args
-            .get("description")
-            .or_else(|| args.get("prompt"))
-            .and_then(|v| v.as_str())
-            .map(truncate_cmd)
-            .unwrap_or_default(),
-        _ => args
-            .get("command")
-            .or_else(|| args.get("file_path"))
-            .or_else(|| args.get("path"))
-            .or_else(|| args.get("pattern"))
-            .or_else(|| args.get("query"))
-            .or_else(|| args.get("url"))
-            .or_else(|| args.get("description"))
-            .and_then(|v| v.as_str())
-            .map(truncate_cmd)
-            .unwrap_or_default(),
+/// Extract a human-readable detail from a tool's arguments by delegating to
+/// the tool's [`invocation_detail`](crate::tool::Tool::invocation_detail) method.
+pub(crate) fn tool_detail(
+    tools: &ToolRegistry,
+    name: &str,
+    args: &serde_json::Value,
+) -> String {
+    if let Ok(tool) = tools.get(name) {
+        return tool.invocation_detail(args);
     }
+    // Fallback for unknown tools — try common argument field names.
+    for key in &[
+        "command",
+        "file_path",
+        "path",
+        "pattern",
+        "query",
+        "url",
+        "description",
+        "prompt",
+        "skill",
+        "name",
+        "subject",
+        "task_id",
+    ] {
+        if let Some(value) = args.get(*key).and_then(|v| v.as_str()) {
+            return crate::tool::truncate_cmd(value);
+        }
+    }
+    String::new()
 }
 
 pub(crate) fn tool_result_detail(content: &serde_json::Value) -> String {
@@ -351,13 +338,4 @@ pub(crate) fn tool_result_detail(content: &serde_json::Value) -> String {
     content.to_string()
 }
 
-fn truncate_cmd(cmd: &str) -> String {
-    let first_line = cmd.lines().next().unwrap_or(cmd);
-    let mut chars = first_line.chars();
-    let truncated: String = chars.by_ref().take(117).collect();
-    if chars.next().is_some() {
-        format!("{truncated}\u{2026}")
-    } else {
-        first_line.to_string()
-    }
-}
+

@@ -19,6 +19,19 @@ use crate::message::Message;
 
 pub mod validate;
 
+/// Truncate a multi-line value to its first line, capped at a reasonable
+/// length for display in tool execution events.
+pub(crate) fn truncate_cmd(cmd: &str) -> String {
+    let first_line = cmd.lines().next().unwrap_or(cmd);
+    let mut chars = first_line.chars();
+    let truncated: String = chars.by_ref().take(117).collect();
+    if chars.next().is_some() {
+        format!("{truncated}\u{2026}")
+    } else {
+        first_line.to_string()
+    }
+}
+
 /// Public-facing description of a tool sent to the model.
 ///
 /// `input_schema` is JSON Schema; providers translate it into their native
@@ -204,6 +217,33 @@ pub trait Tool: Send + Sync {
         arguments: Value,
         context: ToolContext,
     ) -> Result<ToolOutput, AgentError>;
+
+    /// Return a human-readable summary of the invocation from its arguments.
+    ///
+    /// Used in tool execution events (e.g. `ToolStarted { detail }`).
+    /// The default implementation tries well-known argument field names;
+    /// override for tools with unusual parameter names.
+    fn invocation_detail(&self, arguments: &Value) -> String {
+        for key in &[
+            "command",
+            "file_path",
+            "path",
+            "pattern",
+            "query",
+            "url",
+            "description",
+            "prompt",
+            "skill",
+            "name",
+            "subject",
+            "task_id",
+        ] {
+            if let Some(value) = arguments.get(*key).and_then(|v| v.as_str()) {
+                return truncate_cmd(value);
+            }
+        }
+        String::new()
+    }
 }
 
 /// Name-indexed collection of [`Tool`]s available to the agent.

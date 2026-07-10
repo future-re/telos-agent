@@ -1,28 +1,24 @@
-//! Tests for the tool execution engine.
-
 use crate::config::AgentConfig;
 use crate::diagnostics::{ToolDiagnosticsSink, ToolFailureEvent, ToolFailureKind};
 use crate::error::AgentError;
-use crate::executor::execute_tool_calls;
+use crate::executor::{ToolExecutionStreamItem, execute_tool_calls_stream};
 use crate::message::ToolCall;
-use crate::tool::{Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry};
+use crate::tool::{FileReadState, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry};
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Mutex;
 
-/// Probe tool that tracks how many invocations run at the same time.
-#[derive(Debug)]
-struct ConcurrencyProbe {
+struct ProbeTool {
     current: Arc<AtomicUsize>,
     max: Arc<AtomicUsize>,
     delay: std::time::Duration,
 }
 
 #[async_trait]
-impl Tool for ConcurrencyProbe {
+impl Tool for ProbeTool {
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
             name: "probe".into(),
@@ -48,8 +44,6 @@ impl Tool for ConcurrencyProbe {
     }
 }
 
-/// Tool that always panics inside `invoke`.
-#[derive(Debug)]
 struct PanickingTool;
 
 #[async_trait]
@@ -118,6 +112,23 @@ fn make_call(id: &str, name: &str) -> ToolCall {
     ToolCall { id: id.into(), name: name.into(), arguments: serde_json::json!({}) }
 }
 
+fn empty_read_file_state() -> FileReadState {
+    Arc::new(Mutex::new(std::collections::HashMap::new()))
+}
+
+async fn collect_results(
+    stream: impl futures_core::stream::Stream<Item = ToolExecutionStreamItem>,
+) -> Vec<crate::message::ToolResult> {
+    let mut stream = Box::pin(stream);
+    let mut results = Vec::new();
+    while let Some(item) = stream.next().await {
+        if let ToolExecutionStreamItem::Result(result) = item {
+            results.push(result);
+        }
+    }
+    results
+}
+
 #[tokio::test]
 async fn executor_records_tool_execution_failure() {
     let sink = Arc::new(MemoryDiagnosticsSink::default());
@@ -126,19 +137,19 @@ async fn executor_records_tool_execution_failure() {
 
     let config = AgentConfig { tool_diagnostics: Some(sink.clone()), ..test_config(1) };
 
-    let output = execute_tool_calls(
+    let stream = execute_tool_calls_stream(
         vec![make_call("call-1", "Fail")],
         &registry,
         &config,
         "session-1",
         1,
         Arc::new(vec![]),
-        Arc::new(Mutex::new(HashMap::new())),
-    )
-    .await;
+        empty_read_file_state(),
+    );
+    let results = collect_results(stream).await;
 
-    assert_eq!(output.results.len(), 1);
-    assert!(output.results[0].is_error);
+    assert_eq!(results.len(), 1);
+    assert!(results[0].is_error);
     let events = sink.events.lock().await;
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].tool_name, "Fail");
@@ -152,7 +163,7 @@ async fn concurrency_safe_tools_run_in_parallel() {
     let current = Arc::new(AtomicUsize::new(0));
     let max = Arc::new(AtomicUsize::new(0));
     let mut registry = ToolRegistry::new();
-    registry.register(ConcurrencyProbe {
+    registry.register(ProbeTool {
         current: Arc::clone(&current),
         max: Arc::clone(&max),
         delay: std::time::Duration::from_millis(50),
@@ -161,23 +172,21 @@ async fn concurrency_safe_tools_run_in_parallel() {
     let config = test_config(3);
     let calls = (0..5).map(|i| make_call(&format!("call-{i}"), "probe")).collect();
 
-    let output = execute_tool_calls(
+    let stream = execute_tool_calls_stream(
         calls,
         &registry,
         &config,
         "s",
         1,
         Arc::new(vec![]),
-        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-    )
-    .await;
+        empty_read_file_state(),
+    );
+    let results = collect_results(stream).await;
 
-    assert_eq!(output.results.len(), 5);
-    for result in &output.results {
+    assert_eq!(results.len(), 5);
+    for result in &results {
         assert!(!result.is_error, "probe should succeed: {result:?}");
     }
-    // With a concurrency limit of 3 and five 50ms sleeps, we should observe
-    // at least 2 running concurrently; a purely serial run would be 1.
     assert!(
         max.load(Ordering::SeqCst) >= 2,
         "expected concurrent execution, got max={}",
@@ -189,7 +198,7 @@ async fn concurrency_safe_tools_run_in_parallel() {
 async fn panicking_tool_is_isolated_and_other_tools_complete() {
     let mut registry = ToolRegistry::new();
     registry.register(PanickingTool);
-    registry.register(ConcurrencyProbe {
+    registry.register(ProbeTool {
         current: Arc::new(AtomicUsize::new(0)),
         max: Arc::new(AtomicUsize::new(0)),
         delay: std::time::Duration::from_millis(5),
@@ -198,20 +207,20 @@ async fn panicking_tool_is_isolated_and_other_tools_complete() {
     let config = test_config(3);
     let calls = vec![make_call("c1", "panic"), make_call("c2", "probe"), make_call("c3", "probe")];
 
-    let output = execute_tool_calls(
+    let stream = execute_tool_calls_stream(
         calls,
         &registry,
         &config,
         "s",
         1,
         Arc::new(vec![]),
-        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-    )
-    .await;
+        empty_read_file_state(),
+    );
+    let results = collect_results(stream).await;
 
-    assert_eq!(output.results.len(), 3);
-    assert!(output.results[0].is_error);
-    assert!(output.results[0].content.to_string().contains("panicked"));
-    assert!(!output.results[1].is_error);
-    assert!(!output.results[2].is_error);
+    assert_eq!(results.len(), 3);
+    assert!(results[0].is_error);
+    assert!(results[0].content.to_string().contains("panic"));
+    assert!(!results[1].is_error);
+    assert!(!results[2].is_error);
 }

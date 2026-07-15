@@ -48,6 +48,10 @@ tree-sitter-pwsh = "0.38.1"
 rpassword = "7"
 url = "2"
 
+[features]
+default = ["turn-stream"]
+turn-stream = []
+
 [dev-dependencies]
 dotenvy = "0.15"
 tempfile = "3"

@@ -34,7 +34,7 @@
 //!
 //! Build an [`AgentConfig`], create a [`ToolRegistry`], pick a
 //! [`ModelProvider`], then drive a turn via [`AgentSession::run_turn`] for a
-//! blocking call or [`AgentSession::run_turn_stream`] for a UI-friendly event
+//! blocking call or [`AgentSession::run_turn_events`] for a UI-friendly event
 //! stream.
 //!
 //! ```rust
@@ -66,7 +66,7 @@
 //!
 //! # Streaming Turns
 //!
-//! Hosts that render live UI should use [`AgentSession::run_turn_stream`]. It
+//! Hosts that render live UI should use [`AgentSession::run_turn_events`]. It
 //! yields [`TurnEvent`] values in order, so the host can update assistant text,
 //! thinking text, tool activity, approval prompts, token usage, and completion
 //! state without parsing model messages directly.
@@ -98,6 +98,9 @@
 //! | [`storage`] / [`compaction`] | Session persistence and context-window management. |
 //! | [`diagnostics`] / [`metrics`] | Sanitized tool failure records and session counters. |
 
+/// Agent turn loop orchestration.
+#[path = "core/agent_loop/mod.rs"]
+pub mod agent_loop;
 /// Human-in-the-loop approval decisions for tool calls.
 pub mod approval;
 /// Bash command safety analysis used by shell permissions.
@@ -108,6 +111,9 @@ pub mod code_index;
 pub mod compaction;
 /// Runtime configuration and cancellation state.
 pub mod config;
+/// Conversation context and injection support.
+#[path = "core/context/mod.rs"]
+pub mod context;
 /// Sanitized tool failure diagnostics.
 pub mod diagnostics;
 /// Error types shared across runtime, tools, and providers.
@@ -115,6 +121,7 @@ pub mod error;
 /// Bidirectional HTTP event channel for external pub/sub with agent sessions.
 pub mod event_channel;
 /// Tool-call executor for direct and turn-loop use.
+#[path = "core/executor/mod.rs"]
 pub mod executor;
 /// Runtime hook registry and hook phases.
 pub mod hooks;
@@ -139,17 +146,25 @@ pub mod prompt;
 /// Model provider trait and built-in providers.
 pub mod provider;
 /// Agent session and turn-event runtime.
-pub mod runtime;
+#[path = "core/session/mod.rs"]
+pub mod session;
 /// Markdown skill loading and registry.
 pub mod skills;
+/// Runtime metrics and mutable state.
+#[path = "core/state/mod.rs"]
+pub mod state;
 /// Session persistence backends.
 pub mod storage;
 /// Subagent definitions, registry, and fork execution.
 pub mod subagent;
 /// Persistent task tracking.
+#[path = "core/tasks/mod.rs"]
 pub mod tasks;
 /// Multi-agent team collaboration.
 pub mod team;
+/// Turn events and result types.
+#[path = "core/turn/mod.rs"]
+pub mod turn;
 
 /// Frontend helpers — config loading, project context, runtime setup.
 /// Used by CLI and desktop frontends.
@@ -179,7 +194,9 @@ pub use error::{AgentError, ProviderError};
 // Event channel — bidirectional HTTP event channel for external pub/sub.
 pub use event_channel::{EventChannel, EventChannelConfig, ExternalEvent, Subscription};
 // Tool executor — direct entry points for callers that bypass the turn loop.
-pub use executor::{ToolExecutionEvent, ToolExecutionOutput, ToolExecutionStreamItem, execute_tool_calls_stream};
+pub use executor::{
+    ToolExecutionEvent, ToolExecutionOutput, ToolExecutionStreamItem, execute_tool_calls_stream,
+};
 // Hooks — registry + per-phase hook trait + metadata types.
 pub use hooks::{Hook, HookCondition, HookContext, HookEntry, HookPhase, HookRegistry};
 // Message model — the lingua franca between session, provider, and tools.
@@ -211,11 +228,16 @@ pub use provider::{
     DeepSeekResponseFormat, ErasedProvider, ModelHint, ModelProvider, ProviderEvent,
     RoutedModelConfig, RoutedProvider, StopReason, TokenUsage,
 };
-// Runtime — the agent session and the streaming turn loop.
-pub use runtime::{
-    AgentSession, MemoryInjector, SkillInjector, TurnEvent, TurnInputReceiver, TurnInputSender,
-    TurnResult, turn_input_channel,
-};
+// Session — lifecycle, identity, and config.
+pub use session::{SessionInfo, SessionOps};
+// Context — conversation messages, system prompt cache, injections.
+pub use context::{ContextOps, Conversation, MemoryInjector, SkillInjector};
+// State — metrics, read-file state, compaction circuit breaker.
+pub use state::{RuntimeState, StateOps};
+// Turn — streaming event types and input channel.
+pub use turn::{TurnEvent, TurnInputReceiver, TurnInputSender, TurnResult, turn_input_channel};
+// Agent loop — orchestrated turn execution.
+pub use agent_loop::agent_run;
 // Skills — user-defined slash-commands loaded from markdown files.
 pub use skills::{Skill, SkillArg, SkillLoader, SkillRegistry, SkillSource};
 // Storage — persistence backends for saving and resuming sessions.

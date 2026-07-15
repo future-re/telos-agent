@@ -220,11 +220,11 @@ pub struct AgentConfig {
     /// When set, memories are scored against the user's current input
     /// and injected as system reminders before the first provider call
     /// of each turn.
-    pub memory_injector: Option<Arc<crate::runtime::MemoryInjector>>,
+    pub memory_injector: Option<Arc<crate::context::MemoryInjector>>,
     /// Optional skill injector for dynamic per-turn skill discovery.
     /// When set, top matching skills are injected as system reminders
     /// before the first provider call of each turn.
-    pub skill_injector: Option<Arc<crate::runtime::SkillInjector>>,
+    pub skill_injector: Option<Arc<crate::context::SkillInjector>>,
     /// Optional MCP manager. When set, MCP server tools are bridged into the
     /// tool registry and an MCP tools section is added to the prompt assembly.
     pub mcp_manager: Option<Arc<crate::mcp::McpManager>>,
@@ -493,7 +493,7 @@ impl AgentConfig {
         registry.load_bundled_skills();
         let registry = Arc::new(registry);
         self.skill_injector =
-            Some(Arc::new(crate::runtime::SkillInjector::new(Arc::clone(&registry))));
+            Some(Arc::new(crate::context::SkillInjector::new(Arc::clone(&registry))));
         self.skill_registry = Some(registry);
         self
     }

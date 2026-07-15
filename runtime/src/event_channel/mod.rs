@@ -24,7 +24,7 @@ use tracing;
 
 use crate::error::AgentError;
 use crate::message::Message;
-use crate::runtime::TurnEvent;
+use crate::turn::TurnEvent;
 
 // ── configuration ───────────────────────────────────────────────────────────
 

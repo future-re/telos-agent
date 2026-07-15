@@ -1,3 +1,4 @@
 [workspace]
-members = ["runtime", "cli", "desktop/src-tauri", "wsl2_api"]
+# members = ["runtime", "cli", "desktop/src-tauri", "wsl2_api"]
+members = ["runtime"]
 resolver = "3"

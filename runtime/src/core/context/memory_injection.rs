@@ -7,12 +7,6 @@ use std::{
 use crate::memory::MemoryStore;
 use crate::message::SystemReminder;
 
-/// Scores and injects relevant memories into the turn as system reminders.
-///
-/// At the start of each turn, the injector scores all cached memories
-/// against the user's current input using keyword-overlap relevance
-/// (see [`MemoryStore::search_relevant`]). The top results are formatted
-/// as markdown and wrapped in a [`SystemReminder::MemoryInjection`].
 pub struct MemoryInjector {
     store: Arc<Mutex<MemoryStore>>,
     max_memories: usize,
@@ -29,24 +23,16 @@ impl MemoryInjector {
         Self { store, max_memories: 5, min_relevance: 0.10 }
     }
 
-    /// Override the default maximum number of injected memories (5).
     pub fn with_max_memories(mut self, max: usize) -> Self {
         self.max_memories = max;
         self
     }
 
-    /// Set a minimum relevance score (0.0–1.0) for inclusion.
-    /// Entries below this threshold are silently dropped.
     pub fn with_min_relevance(mut self, threshold: f64) -> Self {
         self.min_relevance = threshold.clamp(0.0, 1.0);
         self
     }
 
-    /// Score cached memories against `query` and return a
-    /// [`SystemReminder::MemoryInjection`] containing the top-K results.
-    ///
-    /// Returns `None` when the store has no relevant memories (empty store,
-    /// no matches, or all deprecated).
     pub fn inject_for_query(&self, query: &str) -> Option<MemoryInjection> {
         let store = self.store.lock().ok()?;
         let memories = store.search_relevant(query, self.max_memories, self.min_relevance);

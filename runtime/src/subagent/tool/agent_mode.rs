@@ -1,13 +1,17 @@
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 
+use crate::agent_loop;
 use crate::config::CancellationState;
+use crate::context::{ContextOps, Conversation};
 use crate::error::AgentError;
-use crate::runtime::{AgentSession, TurnEvent};
+use crate::session::SessionInfo;
+use crate::state::RuntimeState;
 use crate::subagent::tool::SubagentTool;
 use crate::subagent::{AgentDefinition, create_subagent_worktree};
 use crate::tasks::{Task, TaskStatus};
 use crate::tool::{ToolContext, ToolOutput, ToolProgress, ToolRegistry};
+use crate::turn::TurnEvent;
 
 struct SubagentRunResult {
     session_id: String,
@@ -16,9 +20,6 @@ struct SubagentRunResult {
     tool_call_count: usize,
 }
 
-/// Max characters of subagent output returned to the parent agent.
-/// Longer output is truncated to prevent subagent results from
-/// flooding the parent's context window.
 const MAX_SUBAGENT_RESULT_CHARS: usize = 2_000;
 
 impl SubagentTool {
@@ -190,22 +191,28 @@ async fn run_child_agent(
     config.storage = None;
     config.base_system_prompt = Some(system_prompt);
     config.prompt_assembly = None;
-    // Subagent internal tool calls should NOT inherit the parent's approval
-    // handler or permission engine. The parent already approved the subagent
-    // call itself, and gating every child tool call (Bash, Read, Write, etc.)
-    // with interactive prompts would make the subagent unusable.
     config.approval_handler = None;
     config.permission_engine = None;
     if let Some(max_iterations) = max_iterations {
         config.max_iterations = Some(max_iterations);
     }
 
-    let mut session = AgentSession::new(config)?;
+    let mut session_info = SessionInfo::new(config)?;
+    let mut conversation = Conversation::new();
+    let mut runtime_state = RuntimeState::new();
+    let erased_provider = crate::provider::ErasedProvider(provider.as_ref());
     let child_tools = filter_tools_for_agent(&tools, agent);
     let mut events = Vec::new();
+
     {
-        let erased_provider = crate::provider::ErasedProvider(provider.as_ref());
-        let mut stream = Box::pin(session.run_turn_stream(&erased_provider, &child_tools, prompt));
+        let mut stream = Box::pin(agent_loop::agent_run(
+            &mut session_info,
+            &mut conversation,
+            &mut runtime_state,
+            &erased_provider,
+            &child_tools,
+            prompt,
+        ));
         while let Some(event) = stream.next().await {
             let event = event?;
             if let Some((progress, data)) = progress_summary(&event, agent_id, &agent.name)
@@ -221,7 +228,7 @@ async fn run_child_agent(
         }
     }
 
-    let final_text = session
+    let final_text = conversation
         .messages()
         .iter()
         .rev()
@@ -229,11 +236,8 @@ async fn run_child_agent(
         .map(|message| message.text_content())
         .unwrap_or_default();
 
-    let tool_call_count = session.messages().iter().flat_map(|m| m.tool_calls()).count();
+    let tool_call_count = conversation.messages().iter().flat_map(|m| m.tool_calls()).count();
 
-    // Truncate subagent output to protect the parent's context window.
-    // The parent receives a preview + metadata; full output is available
-    // in the subagent's session transcript (if storage is configured).
     let final_text = if final_text.len() > MAX_SUBAGENT_RESULT_CHARS {
         final_text.chars().take(MAX_SUBAGENT_RESULT_CHARS).collect()
     } else {
@@ -241,7 +245,7 @@ async fn run_child_agent(
     };
 
     Ok(SubagentRunResult {
-        session_id: session.session_id().to_string(),
+        session_id: session_info.session_id().to_string(),
         final_text,
         event_count: events.len(),
         tool_call_count,

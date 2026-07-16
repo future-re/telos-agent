@@ -2,11 +2,10 @@ use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::io::{self, Write};
-use std::pin::pin;
 use std::sync::{Arc, Mutex};
 use telos_agent::{
-    AgentSession, ApprovalHandler, CompletionResponse, MemoryStore, Message, MockProvider,
-    StopReason, TokenUsage, ToolRegistry,
+    AgentRuntime, AgentSession, ApprovalHandler, CompletionResponse, MemoryStore, Message,
+    MockProvider, StopReason, TokenUsage,
 };
 
 use crate::billing::CostCalculator;
@@ -38,12 +37,16 @@ pub async fn run_single(
                 provider.clone(),
             )?;
             crate::runtime::rebuild_prompt_assembly(&mut runtime);
-            let mut session = AgentSession::new(runtime.shared.agent_config)
-                .context("failed to create agent session")?;
+            let agent_runtime = AgentRuntime::new(
+                runtime.shared.agent_config.clone(),
+                provider,
+                runtime.shared.tools.clone(),
+            )?;
+            let session =
+                agent_runtime.create_session().context("failed to create agent session")?;
             run_with_provider(
-                &mut session,
-                provider.as_ref(),
-                &runtime.shared.tools,
+                &agent_runtime,
+                &session,
                 prompt,
                 runtime.shared.memory_store.clone(),
                 config.billing.as_ref(),
@@ -64,12 +67,16 @@ pub async fn run_single(
                 provider.clone(),
             )?;
             crate::runtime::rebuild_prompt_assembly(&mut runtime);
-            let mut session = AgentSession::new(runtime.shared.agent_config)
-                .context("failed to create agent session")?;
+            let agent_runtime = AgentRuntime::new(
+                runtime.shared.agent_config.clone(),
+                provider,
+                runtime.shared.tools.clone(),
+            )?;
+            let session =
+                agent_runtime.create_session().context("failed to create agent session")?;
             run_with_provider(
-                &mut session,
-                provider.as_ref(),
-                &runtime.shared.tools,
+                &agent_runtime,
+                &session,
                 prompt,
                 runtime.shared.memory_store.clone(),
                 config.billing.as_ref(),
@@ -110,8 +117,12 @@ pub async fn run_chat(
     eprintln!("{status}");
     eprintln!("Type prompts (Ctrl+D or /quit to exit).\n");
 
-    let mut session = AgentSession::new(runtime.shared.agent_config.clone())?;
-    let tools = runtime.shared.tools;
+    let agent_runtime = AgentRuntime::new(
+        runtime.shared.agent_config.clone(),
+        provider,
+        runtime.shared.tools.clone(),
+    )?;
+    let session = agent_runtime.create_session()?;
     let memory = runtime.shared.memory_store;
     let billing = config.billing.clone();
 
@@ -131,9 +142,8 @@ pub async fn run_chat(
                 }
                 tokio::select! {
                     result = run_interactive_turn(
-                        &mut session,
-                        provider.as_ref(),
-                        &tools,
+                        &agent_runtime,
+                        &session,
                         &memory,
                         billing.as_ref(),
                         prompt,
@@ -160,35 +170,33 @@ pub async fn run_chat(
 }
 
 async fn run_interactive_turn(
-    session: &mut AgentSession,
-    provider: &dyn telos_agent::ModelProvider,
-    tools: &ToolRegistry,
+    runtime: &AgentRuntime,
+    session: &AgentSession,
     memory_store: &Arc<Mutex<MemoryStore>>,
     billing: Option<&crate::config::BillingSection>,
     prompt: String,
 ) -> Result<()> {
     crate::memory_runtime::record_user_preference(memory_store, &prompt).await;
-    let erased = telos_agent::ErasedProvider(provider);
-    let mut stream = pin!(session.run_turn_stream(&erased, tools, prompt));
+    let mut stream = runtime.start_turn(session, prompt)?;
     let mut printed = String::new();
     let mut tool_details: HashMap<String, String> = HashMap::new();
     let cost_calculator = CostCalculator::from_section(billing);
     let mut total_cost = 0.0;
     while let Some(event) = stream.next().await {
         match event {
-            Ok(telos_agent::TurnEvent::AssistantDelta { text }) => {
+            telos_agent::TurnEvent::AssistantDelta { text } => {
                 print!("{text}");
                 let _ = io::stdout().flush();
                 printed.push_str(&text);
             }
-            Ok(telos_agent::TurnEvent::ThinkingDelta { text }) => {
+            telos_agent::TurnEvent::ThinkingDelta { text } => {
                 eprintln!("\n[thinking] {text}");
             }
-            Ok(telos_agent::TurnEvent::ToolCall { tool_call_id, name, detail }) => {
+            telos_agent::TurnEvent::ToolCall { tool_call_id, name, detail } => {
                 tool_details.insert(tool_call_id, detail);
                 eprintln!("\n[tool: {name}]");
             }
-            Ok(telos_agent::TurnEvent::ToolCompleted { tool_call_id, name, is_error, .. }) => {
+            telos_agent::TurnEvent::ToolCompleted { tool_call_id, name, is_error, .. } => {
                 if is_error {
                     eprintln!("[tool {name} failed]");
                 } else {
@@ -202,7 +210,7 @@ async fn run_interactive_turn(
                     .await;
                 }
             }
-            Ok(telos_agent::TurnEvent::ToolResult(message)) => {
+            telos_agent::TurnEvent::ToolResult(message) => {
                 for result in message.tool_results_iter() {
                     crate::memory_runtime::record_subagent_learning(memory_store, result).await;
                     if result.is_error {
@@ -215,7 +223,7 @@ async fn run_interactive_turn(
                     }
                 }
             }
-            Ok(telos_agent::TurnEvent::ProviderUsage {
+            telos_agent::TurnEvent::ProviderUsage {
                 input_tokens,
                 output_tokens,
                 total_tokens,
@@ -223,7 +231,7 @@ async fn run_interactive_turn(
                 prompt_cache_miss_tokens,
                 reasoning_tokens,
                 model,
-            }) => {
+            } => {
                 let usage = TokenUsage {
                     input_tokens,
                     output_tokens,
@@ -236,16 +244,16 @@ async fn run_interactive_turn(
                     total_cost += estimate.total;
                 }
             }
-            Ok(telos_agent::TurnEvent::TurnFinished { final_text, .. }) => {
+            telos_agent::TurnEvent::TurnFinished { final_text, .. } => {
                 if !final_text.is_empty() && !printed.ends_with(&final_text) {
                     print!("{final_text}");
                 }
                 println!();
             }
-            Err(e) => return Err(e.into()),
             _ => {}
         }
     }
+    stream.finish().await?;
 
     if total_cost > 0.0 {
         eprintln!("Estimated cost: {}", CostCalculator::format_cost(total_cost));
@@ -254,31 +262,29 @@ async fn run_interactive_turn(
 }
 
 async fn run_with_provider(
-    session: &mut AgentSession,
-    provider: &dyn telos_agent::ModelProvider,
-    tools: &ToolRegistry,
+    runtime: &AgentRuntime,
+    session: &AgentSession,
     prompt: String,
     memory_store: Arc<Mutex<MemoryStore>>,
     billing: Option<&crate::config::BillingSection>,
 ) -> Result<()> {
     crate::memory_runtime::record_user_preference(&memory_store, &prompt).await;
-    let erased = telos_agent::ErasedProvider(provider);
-    let mut stream = pin!(session.run_turn_stream(&erased, tools, prompt));
+    let mut stream = runtime.start_turn(session, prompt)?;
     let mut printed = String::new();
     let mut tool_details: HashMap<String, String> = HashMap::new();
     let cost_calculator = CostCalculator::from_section(billing);
     let mut total_cost = 0.0;
     while let Some(event) = stream.next().await {
         match event {
-            Ok(telos_agent::TurnEvent::AssistantDelta { text }) => {
+            telos_agent::TurnEvent::AssistantDelta { text } => {
                 print!("{text}");
                 printed.push_str(&text);
             }
-            Ok(telos_agent::TurnEvent::ToolCall { tool_call_id, name, detail }) => {
+            telos_agent::TurnEvent::ToolCall { tool_call_id, name, detail } => {
                 tool_details.insert(tool_call_id, detail);
                 eprintln!("\n[tool: {name}]");
             }
-            Ok(telos_agent::TurnEvent::ToolCompleted { tool_call_id, name, is_error, .. }) => {
+            telos_agent::TurnEvent::ToolCompleted { tool_call_id, name, is_error, .. } => {
                 if is_error {
                     eprintln!("[tool {name} failed]");
                 } else {
@@ -292,7 +298,7 @@ async fn run_with_provider(
                     .await;
                 }
             }
-            Ok(telos_agent::TurnEvent::ToolResult(message)) => {
+            telos_agent::TurnEvent::ToolResult(message) => {
                 for result in message.tool_results_iter() {
                     crate::memory_runtime::record_subagent_learning(&memory_store, result).await;
                     if result.is_error {
@@ -305,7 +311,7 @@ async fn run_with_provider(
                     }
                 }
             }
-            Ok(telos_agent::TurnEvent::ProviderUsage {
+            telos_agent::TurnEvent::ProviderUsage {
                 input_tokens,
                 output_tokens,
                 total_tokens,
@@ -313,7 +319,7 @@ async fn run_with_provider(
                 prompt_cache_miss_tokens,
                 reasoning_tokens,
                 model,
-            }) => {
+            } => {
                 let usage = TokenUsage {
                     input_tokens,
                     output_tokens,
@@ -326,16 +332,16 @@ async fn run_with_provider(
                     total_cost += estimate.total;
                 }
             }
-            Ok(telos_agent::TurnEvent::TurnFinished { final_text, .. }) => {
+            telos_agent::TurnEvent::TurnFinished { final_text, .. } => {
                 if !final_text.is_empty() && !printed.ends_with(&final_text) {
                     print!("{final_text}");
                 }
                 println!();
             }
-            Err(e) => return Err(e.into()),
             _ => {}
         }
     }
+    stream.finish().await?;
 
     if total_cost > 0.0 {
         eprintln!("Estimated cost: {}", CostCalculator::format_cost(total_cost));

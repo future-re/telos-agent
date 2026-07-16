@@ -34,6 +34,7 @@ semver = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "signal"] }
 toml = "0.8"
 telos_agent = { path = "../runtime" }
+telos_agent_host = { path = "../host" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }

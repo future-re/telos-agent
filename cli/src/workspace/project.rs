@@ -1,1 +1,1 @@
-pub use telos_agent::frontend::project::*;
+pub use telos_agent_host::project::*;

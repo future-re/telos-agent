@@ -1,7 +1,9 @@
 /target
+**/target/
 /desktop/node_modules/
 /desktop/dist/
 /desktop/.vite/
+/desktop/src-tauri/target
 /site/node_modules/
 /site/dist/
 /site/.astro/

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use telos_agent::frontend::runtime as shared_runtime;
+use telos_agent_host::runtime as shared_runtime;
 
 use crate::config::FileConfig;
 use crate::diagnostics::{self, DiagnosticsRuntime};

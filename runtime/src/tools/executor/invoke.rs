@@ -1,0 +1,323 @@
+//! Tool invocation pipeline: validate → permission → invoke.
+
+use crate::config::AgentConfig;
+use crate::diagnostics::{ToolFailureKind, sanitized_event_for_failure};
+use crate::error::AgentError;
+use crate::model::message::{ToolCall, ToolResult};
+use crate::tools::api::{PermissionDecision, ToolContext, ToolRegistry};
+use crate::tools::permissions::{RuleDecision, ShellKind};
+use serde_json::{Value, json};
+use std::sync::Arc;
+use tracing::{Instrument, error, info_span, warn};
+
+use super::types::ToolExecutionEvent;
+
+/// Tool invocation pipeline:
+///   1. Validate arguments
+///   2. Resolve permission (Ask → approval handler if configured)
+///   3. Invoke or return error
+pub(crate) async fn invoke_tool(
+    mut call: ToolCall,
+    tool: Arc<dyn crate::tools::api::Tool>,
+    context: ToolContext,
+    config: &AgentConfig,
+    tools: &ToolRegistry,
+) -> (Vec<ToolExecutionEvent>, ToolResult) {
+    // 1. Validate
+    if let Err(err) = validate_call(&call, &tool, &context, config, tools).await {
+        record_tool_failure(
+            config,
+            &context,
+            &call,
+            ToolFailureKind::ValidationError,
+            &err.to_string(),
+        )
+        .await;
+        return (Vec::new(), error_result(&call, "validation_error", err.to_string()));
+    }
+
+    // 2. Permission + approval loop
+    let tool_name = tool.definition().name.clone();
+    let mut events = Vec::new();
+    let permission = loop {
+        let decision = evaluate_permission(&call, &tool, &context, config, &tool_name).await;
+
+        let Ok(PermissionDecision::Ask { ref reason }) = decision else {
+            break decision;
+        };
+        let Some(handler) = &config.approval_handler else {
+            break decision;
+        };
+
+        events.push(ToolExecutionEvent::ApprovalRequested {
+            tool_call_id: call.id.clone(),
+            name: call.name.clone(),
+            reason: reason.clone(),
+        });
+        let request = crate::tools::approval::ApprovalRequest {
+            tool_call_id: call.id.clone(),
+            tool_name: tool_name.to_string(),
+            arguments: call.arguments.clone(),
+            cwd: context.cwd.clone(),
+            messages: context.messages.clone(),
+            reason: reason.clone(),
+        };
+        let approval = handler.ask(request).await;
+        events.push(ToolExecutionEvent::ApprovalResolved {
+            tool_call_id: call.id.clone(),
+            name: call.name.clone(),
+            decision: format!("{approval:?}"),
+        });
+
+        match approval {
+            crate::tools::approval::ApprovalDecision::Allow => break Ok(PermissionDecision::Allow),
+            crate::tools::approval::ApprovalDecision::Deny { reason } => {
+                break Ok(PermissionDecision::Deny { reason });
+            }
+            crate::tools::approval::ApprovalDecision::Modify { arguments } => {
+                call.arguments = arguments;
+                if let Err(err) = validate_call(&call, &tool, &context, config, tools).await {
+                    break Err(err);
+                }
+                if requires_fresh_approval(&tool_name) {
+                    continue;
+                }
+                break Ok(PermissionDecision::Allow);
+            }
+        }
+    };
+
+    // 3. Invoke or return error
+    match permission {
+        Ok(PermissionDecision::Allow) => {
+            match run_tool(&call, &tool, context.clone(), config).await {
+                Ok(output) => (
+                    events,
+                    ToolResult {
+                        tool_call_id: call.id.clone(),
+                        name: call.name.clone(),
+                        content: output.content,
+                        is_error: false,
+                    },
+                ),
+                Err(err) => {
+                    error!(error = %err, "tool failed");
+                    record_tool_failure(
+                        config,
+                        &context,
+                        &call,
+                        ToolFailureKind::ExecutionError,
+                        &err.to_string(),
+                    )
+                    .await;
+                    (events, error_result(&call, "execution_error", err.to_string()))
+                }
+            }
+        }
+        Ok(PermissionDecision::Deny { reason }) => {
+            record_tool_failure(
+                config,
+                &context,
+                &call,
+                ToolFailureKind::PermissionDenied,
+                &reason,
+            )
+            .await;
+            (events, error_result(&call, "permission_denied", reason))
+        }
+        Ok(PermissionDecision::Ask { reason }) => {
+            record_tool_failure(
+                config,
+                &context,
+                &call,
+                ToolFailureKind::PermissionRequired,
+                &reason,
+            )
+            .await;
+            (events, error_result(&call, "permission_required", reason))
+        }
+        Err(err) => {
+            let msg = err.to_string();
+            record_tool_failure(config, &context, &call, ToolFailureKind::PermissionError, &msg)
+                .await;
+            (events, error_result(&call, "permission_error", msg))
+        }
+    }
+}
+
+// ── Pipeline helpers ────────────────────────────────────────────────────────
+
+fn error_result(call: &ToolCall, kind: &str, message: String) -> ToolResult {
+    ToolResult {
+        tool_call_id: call.id.clone(),
+        name: call.name.clone(),
+        content: json_error_payload(kind, message),
+        is_error: true,
+    }
+}
+
+fn requires_fresh_approval(tool_name: &str) -> bool {
+    matches!(tool_name, "Bash" | "PowerShell")
+}
+
+async fn validate_call(
+    call: &ToolCall,
+    tool: &Arc<dyn crate::tools::api::Tool>,
+    context: &ToolContext,
+    config: &AgentConfig,
+    tools: &ToolRegistry,
+) -> Result<(), AgentError> {
+    tool.validate(&call.arguments, context).await?;
+    if config.auto_validate_schema {
+        tools.validate_arguments(&call.name, &call.arguments)?;
+    }
+    Ok(())
+}
+
+async fn run_tool(
+    call: &ToolCall,
+    tool: &Arc<dyn crate::tools::api::Tool>,
+    context: ToolContext,
+    config: &AgentConfig,
+) -> Result<crate::tools::api::ToolOutput, AgentError> {
+    let invoke_span = info_span!("tool_execution", tool = %call.name, tool_call_id = %call.id);
+    let tool_name = call.name.clone();
+    let invoke_fut = tool.invoke(call.arguments.clone(), context);
+    let timeout = config.tool_timeout_ms.filter(|&ms| ms > 0);
+    async move {
+        if let Some(ms) = timeout {
+            match tokio::time::timeout(std::time::Duration::from_millis(ms), invoke_fut).await {
+                Ok(result) => result,
+                Err(_elapsed) => {
+                    warn!("tool timed out after {}ms", ms);
+                    Err(AgentError::ToolExecution {
+                        tool: tool_name,
+                        message: format!("timed out after {}ms", ms),
+                    })
+                }
+            }
+        } else {
+            invoke_fut.await
+        }
+    }
+    .instrument(invoke_span)
+    .await
+}
+
+// ── Public helpers — used by sync.rs / stream.rs ────────────────────────────
+
+pub(crate) async fn record_tool_failure(
+    config: &AgentConfig,
+    context: &ToolContext,
+    call: &ToolCall,
+    failure_kind: ToolFailureKind,
+    error: &str,
+) {
+    let Some(sink) = &config.tool_diagnostics else {
+        return;
+    };
+    let event = sanitized_event_for_failure(
+        &context.session_id,
+        context.turn_id,
+        &call.id,
+        &call.name,
+        failure_kind,
+        &call.arguments,
+        error,
+        &context.cwd,
+        &context.env,
+    );
+    if let Err(err) = sink.record(event).await {
+        warn!(error = %err, "failed to record tool diagnostics");
+    }
+}
+
+async fn evaluate_permission(
+    call: &ToolCall,
+    tool: &Arc<dyn crate::tools::api::Tool>,
+    context: &ToolContext,
+    config: &AgentConfig,
+    tool_name: &str,
+) -> Result<PermissionDecision, AgentError> {
+    let permission_names = [tool_name];
+    let shell_kind = match tool_name {
+        "Bash" => Some(ShellKind::Bash),
+        "PowerShell" => Some(ShellKind::PowerShell),
+        _ => None,
+    };
+    let engine_decision = config.permission_engine.as_ref().and_then(|engine| {
+        if let Some(shell_kind) = shell_kind {
+            let command = call.arguments.get("command").and_then(|v| v.as_str()).unwrap_or("");
+            engine.evaluate_shell_call(
+                shell_kind,
+                &permission_names,
+                command,
+                &call.arguments,
+                &context.cwd,
+            )
+        } else {
+            engine.evaluate_call_any(&permission_names, &call.arguments, &context.cwd)
+        }
+    });
+
+    match engine_decision {
+        Some(RuleDecision::Allow) => Ok(PermissionDecision::Allow),
+        Some(RuleDecision::Deny) => {
+            Ok(PermissionDecision::Deny { reason: "denied by permission rule".into() })
+        }
+        Some(RuleDecision::Ask) => {
+            Ok(PermissionDecision::Ask { reason: "approval required by permission rule".into() })
+        }
+        None => tool.check_permission(&call.arguments, context).await,
+    }
+}
+
+pub(crate) fn json_error_payload(kind: &str, message: String) -> Value {
+    json!({
+        "error": {
+            "kind": kind,
+            "message": message,
+        }
+    })
+}
+
+/// Extract a human-readable detail from a tool's arguments by delegating to
+/// the tool's [`invocation_detail`](crate::tools::api::Tool::invocation_detail) method.
+pub(crate) fn tool_detail(tools: &ToolRegistry, name: &str, args: &serde_json::Value) -> String {
+    if let Ok(tool) = tools.get(name) {
+        return tool.invocation_detail(args);
+    }
+    // Fallback for unknown tools — try common argument field names.
+    for key in &[
+        "command",
+        "file_path",
+        "path",
+        "pattern",
+        "query",
+        "url",
+        "description",
+        "prompt",
+        "skill",
+        "name",
+        "subject",
+        "task_id",
+    ] {
+        if let Some(value) = args.get(*key).and_then(|v| v.as_str()) {
+            return crate::tools::api::truncate_cmd(value);
+        }
+    }
+    String::new()
+}
+
+pub(crate) fn tool_result_detail(content: &serde_json::Value) -> String {
+    if let Some(message) = content.get("message").and_then(|value| value.as_str()) {
+        return message.to_string();
+    }
+    if let Some(error) = content.get("error").and_then(|value| value.as_str()) {
+        return error.to_string();
+    }
+    if let Some(output) = content.get("output").and_then(|value| value.as_str()) {
+        return output.to_string();
+    }
+    content.to_string()
+}

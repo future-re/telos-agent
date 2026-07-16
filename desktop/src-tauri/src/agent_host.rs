@@ -1,19 +1,19 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::pin::pin;
 use std::sync::Arc;
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use telos_agent::frontend::config::{self, FileConfig, ResolvedProvider};
-use telos_agent::frontend::context::ProjectContext;
-use telos_agent::frontend::runtime as shared_runtime;
-use telos_agent::frontend::{ProviderKind as RuntimeProviderKind, SharedOptions};
 use telos_agent::{
-    AgentSession, ApprovalDecision, ApprovalHandler, AutoDenyHandler, CompletionResponse,
-    FixedDecisionHandler, JsonlStorage, MemoryCategory, MemoryEntry, MemoryQuery, MemorySort,
-    MemoryStatus, Message, MockProvider, ModelProvider, Role, StopReason, Storage, ToolRegistry,
+    AgentRuntime, AgentSession, ApprovalDecision, ApprovalHandler, AutoDenyHandler,
+    CompletionResponse, FixedDecisionHandler, JsonlStorage, MemoryCategory, MemoryEntry,
+    MemoryQuery, MemorySort, MemoryStatus, Message, MockProvider, ModelProvider, Role, StopReason,
+    Storage,
 };
+use telos_agent_host::config::{self, FileConfig, ResolvedProvider};
+use telos_agent_host::context::ProjectContext;
+use telos_agent_host::runtime as shared_runtime;
+use telos_agent_host::{ProviderKind as RuntimeProviderKind, SharedOptions};
 
 use crate::desktop_event::{DesktopEvent, map_turn_event};
 
@@ -196,9 +196,8 @@ pub async fn delete_session_files(session_id: &str, cwd: Option<PathBuf>) -> Res
 }
 
 pub struct AgentHost {
+    runtime: AgentRuntime,
     session: AgentSession,
-    provider: Arc<dyn ModelProvider + Send + Sync>,
-    tools: ToolRegistry,
     memory_store: Arc<std::sync::Mutex<telos_agent::MemoryStore>>,
     tool_details: HashMap<String, String>,
 }
@@ -243,12 +242,13 @@ impl AgentHost {
         )
         .map_err(|e| e.to_string())?;
         shared_runtime::rebuild_prompt_assembly(&mut runtime);
-        let session = AgentSession::new(runtime.agent_config).map_err(|e| e.to_string())?;
+        let agent_runtime = AgentRuntime::new(runtime.agent_config, provider, runtime.tools)
+            .map_err(|e| e.to_string())?;
+        let session = agent_runtime.create_session().map_err(|e| e.to_string())?;
 
         Ok(Self {
+            runtime: agent_runtime,
             session,
-            provider,
-            tools: runtime.tools,
             memory_store: runtime.memory_store,
             tool_details: HashMap::new(),
         })
@@ -263,17 +263,15 @@ impl AgentHost {
     where
         F: FnMut(DesktopEvent),
     {
-        telos_agent::frontend::memory_runtime::record_user_preference(&self.memory_store, &prompt)
-            .await;
+        telos_agent_host::memory_runtime::record_user_preference(&self.memory_store, &prompt).await;
 
-        let erased = telos_agent::ErasedProvider(self.provider.as_ref());
         let mut final_text = String::new();
         let memory_store = self.memory_store.clone();
         let mut tool_details = std::mem::take(&mut self.tool_details);
         {
-            let mut stream = pin!(self.session.run_turn_stream(&erased, &self.tools, prompt));
+            let mut stream =
+                self.runtime.start_turn(&self.session, prompt).map_err(|e| e.to_string())?;
             while let Some(event) = stream.next().await {
-                let event = event.map_err(|err| err.to_string())?;
                 record_memory_from_event(&memory_store, &mut tool_details, &event).await;
                 if let telos_agent::TurnEvent::TurnFinished { final_text: text, .. } = &event {
                     final_text = text.clone();
@@ -306,9 +304,9 @@ impl AgentHost {
                     on_event(desktop_event);
                 }
             }
+            stream.finish().await.map_err(|err| err.to_string())?;
         }
         self.tool_details = tool_details;
-        self.session.save().await.map_err(|err| err.to_string())?;
         Ok(final_text)
     }
 }
@@ -323,7 +321,7 @@ async fn record_memory_from_event(
             tool_details.insert(tool_call_id.clone(), detail.clone());
         }
         telos_agent::TurnEvent::ToolCompleted { tool_call_id, name, is_error: false, .. } => {
-            telos_agent::frontend::memory_runtime::record_successful_tool(
+            telos_agent_host::memory_runtime::record_successful_tool(
                 memory_store,
                 name,
                 tool_call_id,
@@ -333,13 +331,10 @@ async fn record_memory_from_event(
         }
         telos_agent::TurnEvent::ToolResult(message) => {
             for result in message.tool_results_iter() {
-                telos_agent::frontend::memory_runtime::record_subagent_learning(
-                    memory_store,
-                    result,
-                )
-                .await;
+                telos_agent_host::memory_runtime::record_subagent_learning(memory_store, result)
+                    .await;
                 if result.is_error {
-                    telos_agent::frontend::memory_runtime::record_tool_error(
+                    telos_agent_host::memory_runtime::record_tool_error(
                         memory_store,
                         result,
                         tool_details.get(&result.tool_call_id).map(String::as_str),
@@ -358,16 +353,16 @@ pub fn resolve_desktop_settings(
     let cwd = clean_path(overrides.cwd.clone().unwrap_or_else(config::default_cwd));
     let merged = load_merged_config(&cwd, overrides.runtime_dir.as_deref())?;
     let shared = shared_options(overrides, &settings_from_config(&merged, cwd.clone())?);
-    let project_root = telos_agent::frontend::find_project_root(&cwd).ok().map(clean_path);
+    let project_root = telos_agent_host::find_project_root(&cwd).ok().map(clean_path);
     let project_root_or_cwd = project_root.clone().unwrap_or_else(|| cwd.clone());
     let memory_root = clean_path(
-        telos_agent::frontend::memory_runtime::memory_root(project_root.as_deref())
+        telos_agent_host::memory_runtime::memory_root(project_root.as_deref())
             .map_err(|e| e.to_string())?,
     );
     let memory_count = telos_agent::MemoryStore::new(memory_root.clone()).list().len();
     let context = project_root
         .as_deref()
-        .map(telos_agent::frontend::context::load_project_context)
+        .map(telos_agent_host::context::load_project_context)
         .unwrap_or_else(ProjectContext::empty);
 
     let provider = overrides
@@ -531,7 +526,7 @@ fn is_auto_tool_error_memory(entry: &MemoryEntry) -> bool {
 
 fn load_merged_config(cwd: &Path, runtime_dir: Option<&Path>) -> Result<FileConfig, String> {
     let user = config::load_user_config(None).map_err(|e| e.to_string())?;
-    let project = telos_agent::frontend::find_project_root(cwd)
+    let project = telos_agent_host::find_project_root(cwd)
         .ok()
         .map(|root| config::load_project_config(&root).map_err(|e| e.to_string()))
         .transpose()?
@@ -549,10 +544,10 @@ fn settings_from_config(
     cwd: PathBuf,
 ) -> Result<ResolvedDesktopSettings, String> {
     let cwd = clean_path(cwd);
-    let project_root = telos_agent::frontend::find_project_root(&cwd).ok().map(clean_path);
+    let project_root = telos_agent_host::find_project_root(&cwd).ok().map(clean_path);
     let project_root_or_cwd = project_root.clone().unwrap_or_else(|| cwd.clone());
     let memory_root = clean_path(
-        telos_agent::frontend::memory_runtime::memory_root(project_root.as_deref())
+        telos_agent_host::memory_runtime::memory_root(project_root.as_deref())
             .map_err(|e| e.to_string())?,
     );
     Ok(ResolvedDesktopSettings {
@@ -718,7 +713,7 @@ max_iterations = 9
         let provider = Arc::new(MockProvider::new(vec![]));
         shared_runtime::register_subagent_tool(&mut runtime.tools, &runtime.agent_config, provider)
             .unwrap();
-        runtime.agent_config.prompt_profile = telos_agent::prompt::PromptProfile::Full;
+        runtime.agent_config.prompt_profile = telos_agent::agent::prompt::PromptProfile::Full;
         shared_runtime::rebuild_prompt_assembly(&mut runtime);
         let prompt = runtime.agent_config.prompt_assembly.unwrap().build().await;
 

@@ -87,11 +87,11 @@ pub struct SharedOptions {
 }
 
 impl SharedOptions {
-    pub fn to_runtime(&self) -> telos_agent::frontend::SharedOptions {
-        telos_agent::frontend::SharedOptions {
+    pub fn to_runtime(&self) -> telos_agent_host::SharedOptions {
+        telos_agent_host::SharedOptions {
             provider: self.provider.map(|provider| match provider {
-                ProviderArg::Deepseek => telos_agent::frontend::ProviderKind::Deepseek,
-                ProviderArg::Mock => telos_agent::frontend::ProviderKind::Mock,
+                ProviderArg::Deepseek => telos_agent_host::ProviderKind::Deepseek,
+                ProviderArg::Mock => telos_agent_host::ProviderKind::Mock,
             }),
             model: self.model.clone(),
             thinking_model: self.thinking_model.clone(),

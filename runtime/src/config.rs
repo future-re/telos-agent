@@ -9,13 +9,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::approval::ApprovalHandler;
-use crate::compaction::{HistoryCompactionStrategy, SummaryHistoryCompaction};
+use crate::agent::compaction::{HistoryCompactionStrategy, SummaryHistoryCompaction};
+use crate::agent::hooks::HookRegistry;
+use crate::agent::prompt::PromptProfile;
 use crate::diagnostics::ToolDiagnosticsSink;
 use crate::error::AgentError;
-use crate::hooks::HookRegistry;
-use crate::prompt::PromptProfile;
 use crate::storage::Storage;
+use crate::tools::approval::ApprovalHandler;
 
 /// Return the small set of host environment variables needed for tools to
 /// launch platform-native child processes without inheriting the full process
@@ -152,7 +152,7 @@ pub struct AgentConfig {
     pub base_system_prompt: Option<String>,
     /// Optional pre-built prompt assembly. When set, the runtime uses this
     /// instead of constructing the prompt from `base_system_prompt` alone.
-    pub prompt_assembly: Option<std::sync::Arc<crate::prompt::PromptAssembly>>,
+    pub prompt_assembly: Option<std::sync::Arc<crate::agent::prompt::PromptAssembly>>,
     /// Controls how much built-in prompt guidance is injected when the runtime
     /// constructs the default prompt assembly.
     pub prompt_profile: PromptProfile,
@@ -184,7 +184,7 @@ pub struct AgentConfig {
     /// Optional history-level compaction strategy (summarisation, etc.).
     pub compaction: Option<Arc<dyn HistoryCompactionStrategy>>,
     /// Optional rule-based permission engine consulted before every tool call.
-    pub permission_engine: Option<crate::permissions::PermissionEngine>,
+    pub permission_engine: Option<crate::tools::permissions::PermissionEngine>,
     /// Optional handler invoked when a tool call requires explicit human approval.
     pub approval_handler: Option<Arc<dyn ApprovalHandler>>,
     /// Maximum number of concurrency-safe tools to run in parallel within a single batch.
@@ -209,30 +209,30 @@ pub struct AgentConfig {
     pub max_file_read_bytes: usize,
     /// Optional skill registry. When set, the Skill tool and the default prompt
     /// assembly can use registered skills (including bundled Superpowers skills).
-    pub skill_registry: Option<Arc<crate::skills::SkillRegistry>>,
+    pub skill_registry: Option<Arc<crate::knowledge::skills::SkillRegistry>>,
     /// Optional plugin registry. When set, enabled plugins' components are
     /// applied to tool/hook/skill registries at session startup.
-    pub plugin_registry: Option<Arc<crate::plugin::PluginRegistry>>,
+    pub plugin_registry: Option<Arc<crate::integrations::plugin::PluginRegistry>>,
     /// Optional task manager used by long-running tools such as background
     /// subagents to publish lifecycle state and output.
-    pub task_manager: Option<Arc<crate::tasks::TaskManager>>,
+    pub task_manager: Option<Arc<crate::knowledge::tasks::TaskManager>>,
     /// Optional memory injector for dynamic per-turn memory scoring.
     /// When set, memories are scored against the user's current input
     /// and injected as system reminders before the first provider call
     /// of each turn.
-    pub memory_injector: Option<Arc<crate::context::MemoryInjector>>,
+    pub memory_injector: Option<Arc<crate::agent::context::MemoryInjector>>,
     /// Optional skill injector for dynamic per-turn skill discovery.
     /// When set, top matching skills are injected as system reminders
     /// before the first provider call of each turn.
-    pub skill_injector: Option<Arc<crate::context::SkillInjector>>,
+    pub skill_injector: Option<Arc<crate::agent::context::SkillInjector>>,
     /// Optional MCP manager. When set, MCP server tools are bridged into the
     /// tool registry and an MCP tools section is added to the prompt assembly.
-    pub mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    pub mcp_manager: Option<Arc<crate::integrations::mcp::McpManager>>,
     /// Optional configuration for the bidirectional HTTP event channel.
     /// When set and `enabled` is `true`, the session starts an embedded HTTP
     /// server on the configured address, accepting external event injection
     /// (`POST /inject`) and streaming TurnEvents via SSE (`GET /events`).
-    pub event_channel: Option<crate::event_channel::EventChannelConfig>,
+    pub event_channel: Option<crate::integrations::event_channel::EventChannelConfig>,
 }
 
 impl std::fmt::Debug for AgentConfig {
@@ -366,15 +366,6 @@ impl RetryConfig {
     /// No retries at all — a convenient sentinel that can replace `Option<RetryConfig>`.
     pub const NONE: Self = Self { max_retries: 0, base_delay_ms: 0, max_delay_ms: 0 };
 
-    /// Whether the error is retryable and we still have attempts left.
-    ///
-    /// `attempts` is the number of provider calls already made (1-indexed).
-    /// Retrying is allowed while `attempts <= max_retries`, so `max_retries: 3`
-    /// yields up to three retry attempts after the initial call.
-    pub fn should_retry(&self, error: &crate::error::AgentError, attempts: usize) -> bool {
-        attempts <= self.max_retries && error.is_retryable()
-    }
-
     /// Exponential backoff delay for the given attempt (1-indexed).
     pub fn delay_for(&self, attempt: usize) -> std::time::Duration {
         // Cap the shift to avoid undefined behaviour / overflow when attempt is
@@ -438,9 +429,9 @@ impl AgentConfig {
     /// prompt sections without manually wiring each section.
     pub fn with_default_prompt_assembly(
         mut self,
-        tools: Arc<crate::tool::ToolRegistry>,
+        tools: Arc<crate::tools::api::ToolRegistry>,
     ) -> Result<Self, AgentError> {
-        let assembly = crate::prompt::default_coding_assembly_for_profile(
+        let assembly = crate::agent::prompt::default_coding_assembly_for_profile(
             tools,
             self.cwd.clone(),
             self.skill_registry.clone(),
@@ -489,11 +480,11 @@ impl AgentConfig {
 
     /// Load bundled skills into a fresh skill registry attached to this config.
     pub fn with_bundled_skills(mut self) -> Self {
-        let mut registry = crate::skills::SkillRegistry::new();
+        let mut registry = crate::knowledge::skills::SkillRegistry::new();
         registry.load_bundled_skills();
         let registry = Arc::new(registry);
         self.skill_injector =
-            Some(Arc::new(crate::context::SkillInjector::new(Arc::clone(&registry))));
+            Some(Arc::new(crate::agent::context::SkillInjector::new(Arc::clone(&registry))));
         self.skill_registry = Some(registry);
         self
     }
@@ -506,18 +497,18 @@ impl AgentConfig {
     /// continue with degraded state.
     pub fn apply_plugins(
         &self,
-        mut tools: crate::tool::ToolRegistry,
-        mut hooks: crate::hooks::HookRegistry,
-        mut skills: crate::skills::SkillRegistry,
-        mut mcp: crate::mcp::McpManager,
-        mut prompt: crate::prompt::PromptAssembly,
+        mut tools: crate::tools::api::ToolRegistry,
+        mut hooks: crate::agent::hooks::HookRegistry,
+        mut skills: crate::knowledge::skills::SkillRegistry,
+        mut mcp: crate::integrations::mcp::McpManager,
+        mut prompt: crate::agent::prompt::PromptAssembly,
     ) -> (
-        crate::tool::ToolRegistry,
-        crate::hooks::HookRegistry,
-        crate::skills::SkillRegistry,
-        crate::mcp::McpManager,
-        crate::prompt::PromptAssembly,
-        Result<(), Vec<crate::plugin::PluginError>>,
+        crate::tools::api::ToolRegistry,
+        crate::agent::hooks::HookRegistry,
+        crate::knowledge::skills::SkillRegistry,
+        crate::integrations::mcp::McpManager,
+        crate::agent::prompt::PromptAssembly,
+        Result<(), Vec<crate::integrations::plugin::PluginError>>,
     ) {
         let result = if let Some(registry) = &self.plugin_registry {
             registry.apply(&mut tools, &mut hooks, &mut skills, &mut mcp, &mut prompt)

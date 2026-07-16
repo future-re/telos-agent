@@ -1,0 +1,23 @@
+[package]
+name = "telos_agent_host"
+version = "0.1.2"
+edition = "2024"
+license = "MIT"
+description = "Shared host configuration and runtime assembly for telos-agent applications"
+repository = "https://github.com/future-re/telos-agent"
+readme = "README.md"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+dirs = "5"
+rpassword = "7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+telos_agent = { path = "../runtime" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+toml = "0.8"
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

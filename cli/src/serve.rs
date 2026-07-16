@@ -24,7 +24,6 @@
 //! blocks the turn until it receives `{"cmd":"_approve","decision":"allow"}`.
 
 use std::io::Write;
-use std::pin::pin;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -96,9 +95,12 @@ pub async fn run_serve(options: &SharedOptions, file_config: &FileConfig) -> Res
     runtime.shared.agent_config.approval_handler =
         Some(Arc::new(ServeApprovalHandler { pending: pending.clone() }));
 
-    let base_config = runtime.shared.agent_config.clone();
-    let tools = runtime.shared.tools;
-    let mut session = AgentSession::new(base_config.clone())?;
+    let agent_runtime = telos_agent::AgentRuntime::new(
+        runtime.shared.agent_config.clone(),
+        provider,
+        runtime.shared.tools.clone(),
+    )?;
+    let mut session = agent_runtime.create_session()?;
 
     let stdin = tokio::io::stdin();
     let reader = tokio::io::BufReader::new(stdin);
@@ -127,11 +129,10 @@ pub async fn run_serve(options: &SharedOptions, file_config: &FileConfig) -> Res
                         continue;
                     }
                 };
-                run_turn(&mut session, provider.clone(), &tools, prompt).await;
+                run_turn(&agent_runtime, &session, prompt).await;
             }
             "new_session" => {
-                session = AgentSession::new(base_config.clone())?;
-                let _ = session.save().await;
+                session = agent_runtime.create_session()?;
                 emit_event("_session_new");
             }
             "quit" | "exit" => break,
@@ -154,30 +155,26 @@ pub async fn run_serve(options: &SharedOptions, file_config: &FileConfig) -> Res
     Ok(())
 }
 
-async fn run_turn(
-    session: &mut AgentSession,
-    provider: Arc<dyn telos_agent::ModelProvider>,
-    tools: &telos_agent::ToolRegistry,
-    prompt: String,
-) {
-    let erased = telos_agent::ErasedProvider(provider.as_ref());
-    let mut stream = pin!(session.run_turn_stream(&erased, tools, prompt));
-    while let Some(result) = stream.next().await {
-        match result {
-            Ok(event) => {
-                let mut value = serde_json::to_value(&event).unwrap_or_default();
-                let type_name = event_variant_name(&event);
-                if let Some(obj) = value.as_object_mut() {
-                    obj.insert("type".into(), serde_json::Value::String(type_name.to_string()));
-                }
-                let line = serde_json::to_string(&value).unwrap_or_default();
-                println!("{line}");
-            }
-            Err(e) => {
-                emit_error(&e.to_string());
-                break;
-            }
+async fn run_turn(runtime: &telos_agent::AgentRuntime, session: &AgentSession, prompt: String) {
+    let mut stream = match runtime.start_turn(session, prompt) {
+        Ok(stream) => stream,
+        Err(error) => {
+            emit_error(&error.to_string());
+            emit_done();
+            return;
         }
+    };
+    while let Some(event) = stream.next().await {
+        let mut value = serde_json::to_value(&event).unwrap_or_default();
+        let type_name = event_variant_name(&event);
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("type".into(), serde_json::Value::String(type_name.to_string()));
+        }
+        let line = serde_json::to_string(&value).unwrap_or_default();
+        println!("{line}");
+    }
+    if let Err(error) = stream.finish().await {
+        emit_error(&error.to_string());
     }
     emit_done();
 }
@@ -204,6 +201,8 @@ fn event_variant_name(event: &telos_agent::TurnEvent) -> &'static str {
         telos_agent::TurnEvent::ApprovalRequested { .. } => "ApprovalRequested",
         telos_agent::TurnEvent::ApprovalResolved { .. } => "ApprovalResolved",
         telos_agent::TurnEvent::ProviderRetry { .. } => "ProviderRetry",
+        telos_agent::TurnEvent::PersistenceFailed { .. } => "PersistenceFailed",
+        telos_agent::TurnEvent::TurnFailed { .. } => "TurnFailed",
         telos_agent::TurnEvent::TurnFinished { .. } => "TurnFinished",
     }
 }

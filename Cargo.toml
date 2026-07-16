@@ -1,4 +1,5 @@
 [workspace]
 # members = ["runtime", "cli", "desktop/src-tauri", "wsl2_api"]
-members = ["runtime"]
+members = ["runtime", "host", "cli"]
+exclude = ["desktop/src-tauri", "wsl2_api"]
 resolver = "3"

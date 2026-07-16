@@ -1,170 +1,18 @@
-//! Built-in tools: shell, file read/write/edit, glob, grep.
-//!
-//! Each tool gates write access through [`PermissionDecision::Ask`](crate::PermissionDecision::Ask) so the
-//! host (typically a human approval prompt) keeps the final say. Read-only
-//! tools are marked concurrency-safe so they can run in parallel batches.
+//! Tool APIs, execution, built-ins, approvals, permissions, and command safety.
 
-use std::sync::{Arc, Mutex};
+pub mod api;
+pub mod approval;
+pub mod builtin;
+pub mod command_security;
+pub mod executor;
+pub mod permissions;
 
-use serde::{Deserialize, Serialize};
-
-use crate::skills::SkillRegistry;
-use crate::tasks::TaskManager;
-use crate::tool::ToolRegistry;
-
-mod ask_user_question;
-mod browser;
-mod code_index;
-mod domain_filter;
-mod enter_plan_mode;
-mod exit_plan_mode;
-mod file_edit;
-mod file_read;
-mod file_write;
-mod glob;
-mod grep;
-mod memory;
-mod powershell;
-mod python;
-mod send_user_message;
-mod shared;
-mod shell;
-mod skill;
-mod tasks;
-mod team_create;
-mod team_delete;
-mod todo_write;
-mod web_fetch;
-mod web_search;
-
-pub use ask_user_question::AskUserQuestionTool;
-pub use browser::{
-    BrowserBackTool, BrowserClickTool, BrowserCloseTool, BrowserFindUrlTool, BrowserManager,
-    BrowserNavigateTool, BrowserScreenshotTool, BrowserScrollTool, BrowserSelectTool,
-    BrowserStartTool, BrowserStateTool, BrowserTypeTool,
+pub use api::*;
+pub use approval::*;
+pub use builtin::*;
+pub use executor::{
+    ToolExecutionEvent, ToolExecutionOutput, ToolExecutionStreamItem, execute_tool_calls_stream,
 };
-pub use code_index::{CodeContextTool, CodeIndexRefreshTool, CodeSearchTool};
-pub use enter_plan_mode::EnterPlanModeTool;
-pub use exit_plan_mode::ExitPlanModeTool;
-pub use file_edit::FileEditTool;
-pub use file_read::FileReadTool;
-pub use file_write::FileWriteTool;
-pub use glob::GlobTool;
-pub use grep::GrepTool;
-pub use memory::{
-    MemoryEditTool, MemoryGrepTool, MemoryMaintenanceTool, MemoryReadTool, MemoryStatusTool,
-    MemoryWriteTool,
-};
-pub use powershell::PowerShellTool;
-pub use python::PythonScriptTool;
-pub use send_user_message::SendUserMessageTool;
-pub use shell::ShellTool;
-pub use skill::SkillTool;
-pub use tasks::{
-    TaskCreateTool, TaskGetTool, TaskListTool, TaskOutputTool, TaskStopTool, TaskUpdateTool,
-};
-pub use team_create::TeamCreateTool;
-pub use team_delete::TeamDeleteTool;
-pub use todo_write::TodoWriteTool;
-pub use web_fetch::WebFetchTool;
-pub use web_search::WebSearchTool;
+pub use permissions::*;
 
-/// Default shell exposed to the model for shell-style commands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DefaultShell {
-    Bash,
-    #[serde(rename = "powershell")]
-    PowerShell,
-}
-
-impl DefaultShell {
-    /// Choose the platform default for the current Rust target.
-    pub fn current_platform() -> Self {
-        Self::for_target_os(std::env::consts::OS)
-    }
-
-    /// Choose the platform default for a Rust `target_os` value.
-    pub fn for_target_os(target_os: &str) -> Self {
-        if target_os == "windows" { Self::PowerShell } else { Self::Bash }
-    }
-
-    /// Canonical tool name for this shell.
-    pub fn tool_name(self) -> &'static str {
-        match self {
-            Self::Bash => "Bash",
-            Self::PowerShell => "PowerShell",
-        }
-    }
-}
-
-/// Register every built-in tool with the current platform's default shell.
-pub fn register_core_tools(registry: &mut ToolRegistry) {
-    register_core_tools_with_shell(registry, DefaultShell::current_platform());
-}
-
-/// Register every built-in tool with an explicit default shell.
-pub fn register_core_tools_with_shell(registry: &mut ToolRegistry, default_shell: DefaultShell) {
-    let browser_manager = BrowserManager::new();
-    match default_shell {
-        DefaultShell::Bash => registry.register(ShellTool),
-        DefaultShell::PowerShell => registry.register(PowerShellTool),
-    }
-    registry.register(FileReadTool);
-    registry.register(FileWriteTool);
-    registry.register(FileEditTool);
-    registry.register(GlobTool);
-    registry.register(GrepTool);
-    registry.register(CodeSearchTool);
-    registry.register(CodeContextTool);
-    registry.register(CodeIndexRefreshTool);
-    registry.register(WebFetchTool::new());
-    registry.register(WebSearchTool);
-    registry.register(PythonScriptTool);
-    registry.register(BrowserStartTool::new(browser_manager.clone()));
-    registry.register(BrowserNavigateTool::new(browser_manager.clone()));
-    registry.register(BrowserStateTool::new(browser_manager.clone()));
-    registry.register(BrowserClickTool::new(browser_manager.clone()));
-    registry.register(BrowserTypeTool::new(browser_manager.clone()));
-    registry.register(BrowserSelectTool::new(browser_manager.clone()));
-    registry.register(BrowserScrollTool::new(browser_manager.clone()));
-    registry.register(BrowserBackTool::new(browser_manager.clone()));
-    registry.register(BrowserScreenshotTool::new(browser_manager.clone()));
-    registry.register(BrowserCloseTool::new(browser_manager));
-    registry.register(BrowserFindUrlTool);
-}
-
-/// Register task tracking tools with the supplied registry.
-pub fn register_task_tools(registry: &mut ToolRegistry, task_manager: Arc<TaskManager>) {
-    registry.register(TaskCreateTool::new(task_manager.clone()));
-    registry.register(TaskGetTool::new(task_manager.clone()));
-    registry.register(TaskListTool::new(task_manager.clone()));
-    registry.register(TaskUpdateTool::new(task_manager.clone()));
-    registry.register(TaskOutputTool::new(task_manager.clone()));
-    registry.register(TaskStopTool::new(task_manager));
-}
-
-/// Register memory tools with the supplied registry.
-pub fn register_memory_tools(
-    registry: &mut ToolRegistry,
-    store: Arc<Mutex<crate::memory::MemoryStore>>,
-) {
-    registry.register(MemoryReadTool::new(store.clone()));
-    registry.register(MemoryWriteTool::new(store.clone()));
-    registry.register(MemoryGrepTool::new(store.clone()));
-    registry.register(MemoryEditTool::new(store.clone()));
-    registry.register(MemoryStatusTool::new(store.clone()));
-    registry.register(MemoryMaintenanceTool::new(store));
-}
-
-/// Register the Skill tool if a skill registry is available.
-pub fn register_skill_tool(registry: &mut ToolRegistry, skill_registry: Arc<SkillRegistry>) {
-    registry.register(SkillTool::new(skill_registry));
-}
-
-// Re-export shared helpers that other crate modules use directly.
-pub(crate) use shared::{
-    canonicalize_within_cwd, display_relative, ensure_file_was_read_and_unchanged,
-    modified_timestamp_ms, optional_bool, optional_usize_any, required_string, required_string_any,
-    resolve_workspace_path,
-};
+pub(crate) use builtin::{browser, domain_filter, web_search};

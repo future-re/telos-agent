@@ -63,6 +63,9 @@ pub enum AgentError {
     /// Provider retries exhausted — every attempt failed.
     #[error("provider retries exhausted after {attempts} attempts: {last_error}")]
     ProviderRetriesExhausted { attempts: usize, last_error: String },
+    /// Another turn is already running for this session.
+    #[error("session is already running a turn")]
+    SessionBusy,
     /// The turn was cancelled via [`CancellationState`](crate::CancellationState).
     #[error("cancelled")]
     Cancelled,

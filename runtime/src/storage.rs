@@ -12,8 +12,8 @@ use tokio::fs::OpenOptions;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 
 use crate::error::AgentError;
-use crate::message::Message;
-use crate::tool::FileReadRecord;
+use crate::model::message::Message;
+use crate::tools::api::FileReadRecord;
 
 /// Session metadata persisted alongside messages so a resumed session can
 /// restore turn IDs, metrics, and file-read state.

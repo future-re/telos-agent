@@ -22,8 +22,9 @@ cargo install telos-cli
 
 ```rust
 use serde_json::{json, Value};
+use std::sync::Arc;
 use telos_agent::{
-    AgentConfig, AgentError, AgentSession, CompletionResponse, Message, MockProvider,
+    AgentConfig, AgentError, AgentRuntime, CompletionResponse, Message, MockProvider,
     StopReason, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
 };
 
@@ -50,21 +51,22 @@ impl Tool for EchoTool {
 
 #[tokio::main]
 async fn main() -> Result<(), AgentError> {
-    let provider = MockProvider::new(vec![CompletionResponse {
+    let provider = Arc::new(MockProvider::new(vec![CompletionResponse {
         message: Message::assistant("done"),
         stop_reason: StopReason::EndTurn,
         usage: None,
-    }]);
+    }]));
 
     let mut tools = ToolRegistry::new();
     tools.register(EchoTool);
 
-    let mut session = AgentSession::new(AgentConfig {
+    let runtime = AgentRuntime::new(AgentConfig {
         base_system_prompt: Some("You are a concise assistant.".into()),
         ..Default::default()
-    })?;
+    }, provider, tools)?;
+    let session = runtime.create_session()?;
 
-    let result = session.run_turn(&provider, &tools, "hello").await?;
+    let result = runtime.run_turn(&session, "hello").await?;
     println!("{}", result.final_message.text_content());
     Ok(())
 }
@@ -72,7 +74,7 @@ async fn main() -> Result<(), AgentError> {
 
 ## Runtime Surface
 
-- `AgentSession` drives the model/tool turn loop.
+- `AgentRuntime` owns providers and tools; `AgentSession` owns conversation state.
 - `TurnEvent` exposes streaming assistant text, thinking text, tool calls,
   progress, usage, retries, and turn completion.
 - `ModelProvider` abstracts LLM backends. The crate includes DeepSeek, routed
@@ -87,6 +89,7 @@ async fn main() -> Result<(), AgentError> {
 ## Package Layout
 
 - `telos_agent`: core runtime library.
+- `telos_agent_host`: shared configuration and assembly for application hosts.
 - `telos-cli`: terminal UI and command-line client built on `telos_agent`.
 - Desktop builds are distributed separately as native app packages.
 

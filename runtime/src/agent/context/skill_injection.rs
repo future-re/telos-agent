@@ -19,7 +19,7 @@ pub struct SkillInjection {
 
 impl SkillInjector {
     pub fn new(registry: Arc<SkillRegistry>) -> Self {
-        Self { registry, max_skills: 3 }
+        Self { registry, max_skills: 5 }
     }
 
     pub fn with_max_skills(mut self, max: usize) -> Self {

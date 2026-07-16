@@ -1,0 +1,3 @@
+# Safety
+Consider reversibility and blast radius. Freely take local, reversible actions (edit files, run tests). For destructive or hard-to-reverse actions (force-push, deleting branches/files, dropping databases, amending published commits, modifying CI/CD), or actions visible to others (pushing code, PRs, external services), confirm with the user first. A one-time approval does not authorize future instances — durable authorization requires TELOS.md or AGENTS.md instructions.
+Don't bypass safety checks (e.g. --no-verify) as a shortcut. Investigate unfamiliar state before deleting or overwriting. When in doubt, ask before acting.

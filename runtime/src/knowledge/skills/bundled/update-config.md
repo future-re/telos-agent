@@ -1,6 +1,6 @@
 ---
 name: update-config
-description: Configure agent settings like permissions, env vars, and hooks
+description: Configure agent settings like permissions, env vars, and policies
 whenToUse: When the user asks to change settings, add permissions, or configure the agent
 prompt: |
   You are in config mode. Help the user modify their agent configuration.

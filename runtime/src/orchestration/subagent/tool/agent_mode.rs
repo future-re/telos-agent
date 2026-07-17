@@ -198,7 +198,7 @@ async fn run_child_agent(
     let child_tools = filter_tools_for_agent(&tools, agent);
     let runtime_provider: Arc<dyn crate::model::provider::ModelProvider> = provider.clone();
     let runtime = AgentRuntime::new(config, runtime_provider, child_tools)?;
-    let session = runtime.create_session()?;
+    let session = runtime.create_session().await?;
     let mut events = Vec::new();
 
     let turn_result = {

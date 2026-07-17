@@ -36,7 +36,7 @@ static TOOL_USAGE_TEMPLATE: &str = prompt_template!("tool_usage.md");
 ///   - security testing policy
 ///   - URL generation rule
 ///   - output display rules
-///   - permission mode / interceptor / compaction notes
+///   - permission mode / policy / compaction notes
 pub struct IdentitySection {
     base: Option<String>,
 }

@@ -100,7 +100,7 @@ pub async fn run_serve(options: &SharedOptions, file_config: &FileConfig) -> Res
         provider,
         runtime.shared.tools.clone(),
     )?;
-    let mut session = agent_runtime.create_session()?;
+    let mut session = agent_runtime.create_session().await?;
 
     let stdin = tokio::io::stdin();
     let reader = tokio::io::BufReader::new(stdin);
@@ -132,7 +132,7 @@ pub async fn run_serve(options: &SharedOptions, file_config: &FileConfig) -> Res
                 run_turn(&agent_runtime, &session, prompt).await;
             }
             "new_session" => {
-                session = agent_runtime.create_session()?;
+                session = agent_runtime.create_session().await?;
                 emit_event("_session_new");
             }
             "quit" | "exit" => break,
@@ -196,12 +196,11 @@ fn event_variant_name(event: &telos_agent::TurnEvent) -> &'static str {
         telos_agent::TurnEvent::CompactionStarted { .. } => "CompactionStarted",
         telos_agent::TurnEvent::CompactionCompleted { .. } => "CompactionCompleted",
         telos_agent::TurnEvent::TokenBudgetExceeded { .. } => "TokenBudgetExceeded",
-        telos_agent::TurnEvent::HookStarted { .. } => "HookStarted",
-        telos_agent::TurnEvent::HookCompleted { .. } => "HookCompleted",
+        telos_agent::TurnEvent::PolicyStarted { .. } => "PolicyStarted",
+        telos_agent::TurnEvent::PolicyCompleted { .. } => "PolicyCompleted",
         telos_agent::TurnEvent::ApprovalRequested { .. } => "ApprovalRequested",
         telos_agent::TurnEvent::ApprovalResolved { .. } => "ApprovalResolved",
         telos_agent::TurnEvent::ProviderRetry { .. } => "ProviderRetry",
-        telos_agent::TurnEvent::PersistenceFailed { .. } => "PersistenceFailed",
         telos_agent::TurnEvent::TurnFailed { .. } => "TurnFailed",
         telos_agent::TurnEvent::TurnFinished { .. } => "TurnFinished",
     }

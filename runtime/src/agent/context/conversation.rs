@@ -1,4 +1,5 @@
 use crate::agent::prompt::PromptBlock;
+use crate::error::AgentError;
 use crate::model::message::{Message, SystemReminder, ToolResult};
 
 pub(crate) struct Conversation {
@@ -12,6 +13,9 @@ pub(crate) struct Conversation {
 }
 
 impl Conversation {
+    pub(crate) fn journal(&mut self) -> ConversationJournal<'_> {
+        ConversationJournal { conversation: self }
+    }
     pub fn new() -> Self {
         Self {
             messages: Vec::new(),
@@ -49,6 +53,89 @@ impl Conversation {
         {
             self.messages.push(Message::system(sp.clone()));
         }
+    }
+}
+
+/// Protocol-aware mutation boundary used by the turn transaction.
+pub(crate) struct ConversationJournal<'a> {
+    conversation: &'a mut Conversation,
+}
+
+impl ConversationJournal<'_> {
+    pub(crate) fn append_user(&mut self, message: Message) -> Result<(), AgentError> {
+        self.ensure_no_unresolved_tools()?;
+        self.conversation.messages.push(message);
+        Ok(())
+    }
+
+    pub(crate) fn append_assistant(&mut self, message: Message) -> Result<(), AgentError> {
+        self.ensure_no_unresolved_tools()?;
+        self.conversation.messages.push(message);
+        Ok(())
+    }
+
+    pub(crate) fn resolve_tool_calls(&mut self, message: Message) -> Result<(), AgentError> {
+        let expected: Vec<_> = self
+            .conversation
+            .messages
+            .last()
+            .filter(|message| message.role == crate::model::message::Role::Assistant)
+            .map(|message| message.tool_calls().map(|call| call.id.as_str()).collect())
+            .unwrap_or_default();
+        let actual: Vec<_> =
+            message.tool_results_iter().map(|result| result.tool_call_id.as_str()).collect();
+        if expected.is_empty() || expected != actual {
+            return Err(AgentError::Config(format!(
+                "tool result protocol mismatch: expected {expected:?}, got {actual:?}"
+            )));
+        }
+        self.conversation.messages.push(message);
+        Ok(())
+    }
+
+    fn ensure_no_unresolved_tools(&self) -> Result<(), AgentError> {
+        if self.conversation.messages.last().is_some_and(|message| {
+            message.role == crate::model::message::Role::Assistant
+                && message.tool_calls().next().is_some()
+        }) {
+            return Err(AgentError::Config(
+                "cannot append a conversational message before resolving pending tool calls".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod journal_tests {
+    use super::*;
+    use crate::model::message::{ContentBlock, Role, ToolCall};
+
+    #[test]
+    fn feedback_cannot_split_tool_call_and_result() {
+        let mut conversation = Conversation::new();
+        conversation
+            .journal()
+            .append_assistant(Message {
+                role: Role::Assistant,
+                blocks: vec![ContentBlock::ToolCall(ToolCall {
+                    id: "call-1".into(),
+                    name: "Read".into(),
+                    arguments: serde_json::json!({}),
+                })],
+            })
+            .unwrap();
+        assert!(conversation.journal().append_user(Message::user("feedback")).is_err());
+        conversation
+            .journal()
+            .resolve_tool_calls(Message::tool_results(vec![ToolResult {
+                tool_call_id: "call-1".into(),
+                name: "Read".into(),
+                content: serde_json::json!({"ok": true}),
+                is_error: false,
+            }]))
+            .unwrap();
+        conversation.journal().append_user(Message::user("feedback")).unwrap();
     }
 }
 

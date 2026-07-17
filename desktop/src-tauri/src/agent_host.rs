@@ -244,7 +244,7 @@ impl AgentHost {
         shared_runtime::rebuild_prompt_assembly(&mut runtime);
         let agent_runtime = AgentRuntime::new(runtime.agent_config, provider, runtime.tools)
             .map_err(|e| e.to_string())?;
-        let session = agent_runtime.create_session().map_err(|e| e.to_string())?;
+        let session = agent_runtime.create_session().await.map_err(|e| e.to_string())?;
 
         Ok(Self {
             runtime: agent_runtime,

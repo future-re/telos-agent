@@ -122,6 +122,19 @@ fn discover_skips_non_plugin_dirs() {
 }
 
 #[test]
+fn discovery_rejects_removed_hooks_field() {
+    let tmp = TempDir::new().unwrap();
+    let plugin_dir = tmp.path().join("installed").join("legacy@mkt");
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    std::fs::write(plugin_dir.join("plugin.json"), r#"{"name":"legacy","hooks":{"Stop":[]}}"#)
+        .unwrap();
+
+    let mut registry = PluginRegistry::new(tmp.path());
+    assert!(registry.discover_installed().unwrap().is_empty());
+    assert!(registry.is_empty());
+}
+
+#[test]
 fn save_and_load_state() {
     let tmp = TempDir::new().unwrap();
     make_plugin_dir(tmp.path(), "p1", "mkt");
@@ -215,13 +228,20 @@ fn apply_registers_plugin_tools_with_namespace() {
     registry.enable(&id).unwrap();
 
     let mut tools = crate::tools::api::ToolRegistry::new();
-    let mut hooks = crate::agent::hooks::HookRegistry::new();
+    let mut policies = crate::agent::policies::PolicyRegistry::new();
     let mut skills = crate::knowledge::skills::SkillRegistry::new();
     let mut mcp_config =
         crate::integrations::mcp::McpManager::new(std::collections::HashMap::new());
     let mut prompt = crate::agent::prompt::PromptAssembly::new();
 
-    let result = registry.apply(&mut tools, &mut hooks, &mut skills, &mut mcp_config, &mut prompt);
+    let result = registry.apply(
+        &mut tools,
+        &mut policies,
+        &std::collections::HashMap::new(),
+        &mut skills,
+        &mut mcp_config,
+        &mut prompt,
+    );
     assert!(result.is_ok());
 
     // Tool should be registered with namespace

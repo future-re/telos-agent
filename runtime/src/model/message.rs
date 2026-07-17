@@ -166,7 +166,7 @@ pub enum SystemReminder {
     PlanMode,
     Compaction { reason: String },
     ProviderContext,
-    HookInterception { phase: String, name: String },
+    PolicyFeedback { point: String, name: String },
     ToolResult { tool_name: String, note: String },
     MemoryInjection { content: String },
     SkillDiscovery { content: String },
@@ -180,8 +180,8 @@ impl SystemReminder {
                 "Prior messages were compacted (reason: {reason}). Some context may have been summarized."
             ),
             Self::ProviderContext => "The provider/model context has changed. Adjust to any new instructions or constraints.".to_string(),
-            Self::HookInterception { phase, name } => format!(
-                "A hook intercepted this turn during the {phase} phase ({name}). Treat hook output as user feedback."
+            Self::PolicyFeedback { point, name } => format!(
+                "A policy added feedback at {point} ({name}). Treat it as user feedback."
             ),
             Self::ToolResult { tool_name, note } => format!("Tool `{tool_name}` reported: {note}"),
             Self::MemoryInjection { content } | Self::SkillDiscovery { content } => content.clone(),

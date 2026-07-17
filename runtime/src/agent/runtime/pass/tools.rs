@@ -32,7 +32,7 @@ pub(super) async fn execute_tool_calls_phase(
     tools: &ToolRegistry,
     tool_calls: Vec<crate::model::message::ToolCall>,
     turn_id: u64,
-) -> Result<(Message, Vec<TurnEvent>), AgentError> {
+) -> Result<(Message, Vec<String>, Vec<TurnEvent>), AgentError> {
     let mut events = Vec::new();
     // Snapshot messages and config so the execution stream can reference them
     // without borrowing `context` or `session` for its entire lifetime.
@@ -50,6 +50,7 @@ pub(super) async fn execute_tool_calls_phase(
     ));
 
     let mut tool_results = Vec::new();
+    let mut feedback = Vec::new();
     let cancellation = session.config().cancellation.clone();
     // Drive the stream, cancelling on token signal.
     while let Some(item) = tokio::select! {
@@ -72,12 +73,18 @@ pub(super) async fn execute_tool_calls_phase(
                     ToolExecutionEvent::ApprovalResolved { tool_call_id, name, decision } => {
                         TurnEvent::ApprovalResolved { tool_call_id, name, decision }
                     }
+                    ToolExecutionEvent::PolicyStarted { point, name } => {
+                        TurnEvent::PolicyStarted { point, name }
+                    }
+                    ToolExecutionEvent::PolicyCompleted { point, name, feedback_count } => {
+                        TurnEvent::PolicyCompleted { point, name, feedback_count }
+                    }
                 };
                 session.emit_turn_event(&turn_event);
                 events.push(turn_event);
             }
             // Terminal result → record as ToolCompleted and retain for the result message.
-            ToolExecutionStreamItem::Result(result) => {
+            ToolExecutionStreamItem::Result { result, feedback: item_feedback } => {
                 let event = TurnEvent::ToolCompleted {
                     tool_call_id: result.tool_call_id.clone(),
                     name: result.name.clone(),
@@ -87,6 +94,7 @@ pub(super) async fn execute_tool_calls_phase(
                 session.emit_turn_event(&event);
                 events.push(event);
                 tool_results.push(result);
+                feedback.extend(item_feedback);
             }
         }
     }
@@ -149,5 +157,5 @@ pub(super) async fn execute_tool_calls_phase(
         }
     }
 
-    Ok((truncation.message, events))
+    Ok((truncation.message, feedback, events))
 }

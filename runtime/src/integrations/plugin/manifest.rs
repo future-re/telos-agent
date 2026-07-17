@@ -87,42 +87,54 @@ impl DependencyRef {
     }
 }
 
-// --- Hook configuration ---
+// --- Policy configuration ---
 
-/// Hook event matcher — same shape as the modular hook matcher.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HookMatcher {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub matcher: Option<String>,
-    pub hooks: Vec<HookDef>,
-}
-
-/// Individual hook definition within a matcher.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum HookDef {
-    Command {
-        command: String,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        args: Vec<String>,
-        #[serde(default = "default_hook_timeout_ms")]
-        timeout: u64,
-    },
-    // Prompt hooks are future work; declared now for forward-compat
-    #[serde(other)]
-    Unknown,
-}
-
-fn default_hook_timeout_ms() -> u64 {
+fn default_policy_timeout_ms() -> u64 {
     30_000
 }
 
-/// Full hooks configuration as it appears in plugin.json or hooks.json.
-///
-/// Keys are hook event names: "PreToolUse", "PostToolUse", "SessionStart", etc.
-/// Values are arrays of HookMatcher entries.
-pub type HooksConfig = HashMap<String, Vec<HookMatcher>>;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandPolicyDef {
+    pub command: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    #[serde(default = "default_policy_timeout_ms")]
+    pub timeout: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionPolicyDef {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<crate::SessionMode>,
+    #[serde(flatten)]
+    pub command: CommandPolicyDef,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolPolicyDef {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matcher: Option<String>,
+    #[serde(flatten)]
+    pub command: CommandPolicyDef,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PoliciesConfig {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub session_start: Vec<SessionPolicyDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_response: Vec<CommandPolicyDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_before_invoke: Vec<ToolPolicyDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_after_invoke: Vec<ToolPolicyDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turn_before_finish: Vec<CommandPolicyDef>,
+}
 
 // --- MCP configuration ---
 
@@ -216,7 +228,7 @@ pub struct PluginManifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub hooks: Option<HooksConfig>,
+    pub policies: Option<PoliciesConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skills: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -332,7 +344,7 @@ mod tests {
         assert_eq!(manifest.name, "my-plugin");
         assert_eq!(manifest.version.as_deref(), Some("1.0.0"));
         assert!(manifest.tools.is_none());
-        assert!(manifest.hooks.is_none());
+        assert!(manifest.policies.is_none());
         assert!(manifest.dependencies.is_empty());
     }
 
@@ -356,19 +368,12 @@ mod tests {
                 {"name": "other", "marketplace": "community"}
             ],
             "tools": ["./tools/my_tool.json"],
-            "hooks": {
-                "PreToolUse": [
-                    {
-                        "matcher": "Bash(git *)",
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": "python3",
-                                "args": ["validate.py"]
-                            }
-                        ]
-                    }
-                ]
+            "policies": {
+                "toolBeforeInvoke": [{
+                    "matcher": "Bash*",
+                    "command": "python3",
+                    "args": ["validate.py"]
+                }]
             },
             "skills": ["./skills/my-skill.md"],
             "agents": ["./agents/auditor.md"],
@@ -413,7 +418,7 @@ mod tests {
         assert_eq!(resolved2.to_string(), "other@community");
 
         assert!(manifest.tools.is_some());
-        assert!(manifest.hooks.is_some());
+        assert!(manifest.policies.is_some());
         assert!(manifest.skills.is_some());
         assert!(manifest.agents.is_some());
         assert!(manifest.mcp_servers.is_some());

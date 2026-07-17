@@ -21,7 +21,7 @@
 //! - [`AgentRuntime`] — owns the provider, tools, and runtime configuration.
 //! - [`AgentSession`] — concurrency-safe conversation state created by the runtime.
 //! - [`AgentConfig`] — configures cwd, env, storage, approvals, compaction,
-//!   token budgets, hooks, and cancellation.
+//!   token budgets, policies, and cancellation.
 //! - [`ModelProvider`] — trait implemented by LLM backends.
 //! - [`DeepSeekProvider`], [`RoutedProvider`], and [`MockProvider`] — built-in
 //!   provider implementations.
@@ -58,7 +58,7 @@
 //!         base_system_prompt: Some("You are concise.".into()),
 //!         ..Default::default()
 //!     }, provider, tools)?;
-//!     let session = runtime.create_session()?;
+//!     let session = runtime.create_session().await?;
 //!
 //!     let result = runtime.run_turn(&session, "hello").await?;
 //!     assert_eq!(result.final_message.text_content(), "done");
@@ -78,7 +78,7 @@
 //! - Implement [`ModelProvider`] to add a new model backend.
 //! - Implement [`Tool`] to expose a new capability.
 //! - Implement [`ApprovalHandler`] for host-specific approval UI.
-//! - Implement [`Hook`] to react at runtime phases.
+//! - Implement [`Policy`] to enforce semantic session, model, turn, or tool rules.
 //! - Implement [`Storage`] for a custom persistence backend.
 //! - Use [`McpManager`] and [`McpToolBridge`] to bridge MCP servers into the
 //!   tool registry.
@@ -90,7 +90,7 @@
 //!
 //! | Module | Purpose |
 //! |---|---|
-//! | [`agent`] | Runtime, sessions, turns, context, prompts, hooks, and compaction. |
+//! | [`agent`] | Runtime, sessions, turns, context, prompts, policies, and compaction. |
 //! | [`model`] | Provider APIs, model messages, token counting, and test doubles. |
 //! | [`tools`] | Tool APIs, execution, built-ins, approvals, permissions, and command safety. |
 //! | [`knowledge`] | Memory, skills, tasks, and repository indexing. |
@@ -98,7 +98,7 @@
 //! | [`orchestration`] | Subagents and multi-agent teams. |
 //! | [`diagnostics`] / [`metrics`] | Sanitized tool failure records and session counters. |
 
-/// Agent lifecycle, context, prompting, hooks, and turn execution.
+/// Agent lifecycle, context, prompting, policies, and turn execution.
 pub mod agent;
 /// Runtime configuration and cancellation state.
 pub mod config;
@@ -145,8 +145,11 @@ pub use integrations::event_channel::{
 pub use tools::executor::{
     ToolExecutionEvent, ToolExecutionOutput, ToolExecutionStreamItem, execute_tool_calls_stream,
 };
-// Hooks — registry + per-phase hook trait + metadata types.
-pub use agent::hooks::{Hook, HookCondition, HookContext, HookEntry, HookPhase, HookRegistry};
+// Semantic session, model, turn, and tool policies.
+pub use agent::policies::{
+    Policy, PolicyContext, PolicyDecision, PolicyEntry, PolicyOutcome, PolicyPoint, PolicyRegistry,
+    SessionMode,
+};
 // Message model — the lingua franca between session, provider, and tools.
 pub use model::message::{
     ContentBlock, Message, Role, TextBlock, ThinkingBlock, ToolCall, ToolResult,

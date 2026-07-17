@@ -2,7 +2,7 @@
 //!
 //! [`AgentConfig`] aggregates everything a session needs: model behaviour
 //! (system prompt, optional iteration cap), execution environment (cwd, env), and the
-//! pluggable extension points (hooks, storage, compaction, permissions).
+//! pluggable extension points (policies, storage, compaction, permissions).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::agent::compaction::{HistoryCompactionStrategy, SummaryHistoryCompaction};
-use crate::agent::hooks::HookRegistry;
+use crate::agent::policies::PolicyRegistry;
 use crate::agent::prompt::PromptProfile;
 use crate::diagnostics::ToolDiagnosticsSink;
 use crate::error::AgentError;
@@ -175,8 +175,8 @@ pub struct AgentConfig {
     /// calls from flooding the context window even when each result individually
     /// stays under `max_tool_result_chars`.
     pub max_message_tool_results_chars: usize,
-    /// Registry of [`Hook`](crate::Hook)s invoked at well-known turn phases.
-    pub hooks: Arc<HookRegistry>,
+    /// Registry of semantic runtime policies.
+    pub policies: Arc<PolicyRegistry>,
     /// Optional persistent backing store for session messages.
     pub storage: Option<Arc<dyn Storage>>,
     /// Optional sink for sanitized tool failure diagnostics.
@@ -211,7 +211,7 @@ pub struct AgentConfig {
     /// assembly can use registered skills (including bundled Superpowers skills).
     pub skill_registry: Option<Arc<crate::knowledge::skills::SkillRegistry>>,
     /// Optional plugin registry. When set, enabled plugins' components are
-    /// applied to tool/hook/skill registries at session startup.
+    /// applied to tool/policy/skill registries at session startup.
     pub plugin_registry: Option<Arc<crate::integrations::plugin::PluginRegistry>>,
     /// Optional task manager used by long-running tools such as background
     /// subagents to publish lifecycle state and output.
@@ -250,7 +250,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("env", &format!("{} keys: [REDACTED]", env_keys.len()))
             .field("max_tool_result_chars", &self.max_tool_result_chars)
             .field("max_message_tool_results_chars", &self.max_message_tool_results_chars)
-            .field("hooks", &self.hooks)
+            .field("policies", &self.policies)
             .field("storage", &self.storage)
             .field("tool_diagnostics", &self.tool_diagnostics.as_ref().map(|_| "<set>"))
             .field("compaction", &self.compaction)
@@ -290,7 +290,7 @@ impl Default for AgentConfig {
             env: platform_base_env(),
             max_tool_result_chars: 50_000,
             max_message_tool_results_chars: 300_000,
-            hooks: Arc::new(HookRegistry::new()),
+            policies: Arc::new(PolicyRegistry::new()),
             storage: None,
             tool_diagnostics: None,
             compaction: Some(Arc::new(SummaryHistoryCompaction {
@@ -492,30 +492,30 @@ impl AgentConfig {
     /// Apply plugin components into the agent registries.
     ///
     /// Call this before creating an [`AgentSession`](crate::AgentSession) to
-    /// populate tools/hooks/skills/mcp/prompt with the content of any enabled
-    /// plugins. Always returns the registries (even on error) so callers can
+    /// populate tools/policies/skills/mcp/prompt with enabled plugin content.
+    /// Always returns the registries (even on error) so callers can
     /// continue with degraded state.
     pub fn apply_plugins(
         &self,
         mut tools: crate::tools::api::ToolRegistry,
-        mut hooks: crate::agent::hooks::HookRegistry,
+        mut policies: crate::agent::policies::PolicyRegistry,
         mut skills: crate::knowledge::skills::SkillRegistry,
         mut mcp: crate::integrations::mcp::McpManager,
         mut prompt: crate::agent::prompt::PromptAssembly,
     ) -> (
         crate::tools::api::ToolRegistry,
-        crate::agent::hooks::HookRegistry,
+        crate::agent::policies::PolicyRegistry,
         crate::knowledge::skills::SkillRegistry,
         crate::integrations::mcp::McpManager,
         crate::agent::prompt::PromptAssembly,
         Result<(), Vec<crate::integrations::plugin::PluginError>>,
     ) {
         let result = if let Some(registry) = &self.plugin_registry {
-            registry.apply(&mut tools, &mut hooks, &mut skills, &mut mcp, &mut prompt)
+            registry.apply(&mut tools, &mut policies, &self.env, &mut skills, &mut mcp, &mut prompt)
         } else {
             Ok(())
         };
-        (tools, hooks, skills, mcp, prompt, result)
+        (tools, policies, skills, mcp, prompt, result)
     }
 }
 

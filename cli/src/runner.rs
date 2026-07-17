@@ -43,7 +43,7 @@ pub async fn run_single(
                 runtime.shared.tools.clone(),
             )?;
             let session =
-                agent_runtime.create_session().context("failed to create agent session")?;
+                agent_runtime.create_session().await.context("failed to create agent session")?;
             run_with_provider(
                 &agent_runtime,
                 &session,
@@ -73,7 +73,7 @@ pub async fn run_single(
                 runtime.shared.tools.clone(),
             )?;
             let session =
-                agent_runtime.create_session().context("failed to create agent session")?;
+                agent_runtime.create_session().await.context("failed to create agent session")?;
             run_with_provider(
                 &agent_runtime,
                 &session,
@@ -122,7 +122,7 @@ pub async fn run_chat(
         provider,
         runtime.shared.tools.clone(),
     )?;
-    let session = agent_runtime.create_session()?;
+    let session = agent_runtime.create_session().await?;
     let memory = runtime.shared.memory_store;
     let billing = config.billing.clone();
 

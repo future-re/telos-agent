@@ -1,4 +1,3 @@
-use crate::error::AgentError;
 use crate::model::message::{ContentBlock, Message};
 use crate::model::provider::StopReason;
 use serde::Serialize;
@@ -64,14 +63,14 @@ pub enum TurnEvent {
         used_tokens: usize,
         max_tokens: usize,
     },
-    HookStarted {
-        phase: String,
+    PolicyStarted {
+        point: String,
         name: String,
     },
-    HookCompleted {
-        phase: String,
+    PolicyCompleted {
+        point: String,
         name: String,
-        emitted_message: bool,
+        feedback_count: usize,
     },
     ApprovalRequested {
         tool_call_id: String,
@@ -88,9 +87,6 @@ pub enum TurnEvent {
         max_retries: usize,
         delay_ms: u64,
     },
-    PersistenceFailed {
-        error: String,
-    },
     TurnFailed {
         error: String,
     },
@@ -105,7 +101,6 @@ pub struct TurnResult {
     pub events: Vec<TurnEvent>,
     pub final_message: Message,
     pub stop_reason: StopReason,
-    pub save_error: Option<AgentError>,
 }
 
 impl TurnEvent {
@@ -188,9 +183,11 @@ impl TurnEvent {
             TurnEvent::TokenBudgetExceeded { used_tokens, max_tokens } => {
                 format!("token_budget_exceeded:{used_tokens}/{max_tokens}")
             }
-            TurnEvent::HookStarted { phase, name } => format!("hook_started:{phase}:{name}"),
-            TurnEvent::HookCompleted { phase, name, emitted_message } => {
-                format!("hook_completed:{phase}:{name}:{emitted_message}")
+            TurnEvent::PolicyStarted { point, name } => {
+                format!("policy_started:{point}:{name}")
+            }
+            TurnEvent::PolicyCompleted { point, name, feedback_count } => {
+                format!("policy_completed:{point}:{name}:{feedback_count}")
             }
             TurnEvent::ApprovalRequested { tool_call_id, name, reason } => {
                 format!("approval_requested:{name}#{tool_call_id}:{reason}")
@@ -201,7 +198,6 @@ impl TurnEvent {
             TurnEvent::ProviderRetry { attempt, max_retries, delay_ms } => {
                 format!("provider_retry:{attempt}/{max_retries} delay={delay_ms}ms")
             }
-            TurnEvent::PersistenceFailed { error } => format!("persistence_failed:{error}"),
             TurnEvent::TurnFailed { error } => format!("turn_failed:{error}"),
             TurnEvent::TurnFinished { stop_reason, final_text } => {
                 format!("turn_finished:{stop_reason:?}:{final_text}")

@@ -64,7 +64,7 @@ async fn main() -> Result<(), AgentError> {
         base_system_prompt: Some("You are a concise assistant.".into()),
         ..Default::default()
     }, provider, tools)?;
-    let session = runtime.create_session()?;
+    let session = runtime.create_session().await?;
 
     let result = runtime.run_turn(&session, "hello").await?;
     println!("{}", result.final_message.text_content());

@@ -1,8 +1,8 @@
-//! Agent lifecycle, context management, prompting, hooks, and turn execution.
+//! Agent lifecycle, context management, prompting, policies, and turn execution.
 
 pub mod compaction;
 pub mod context;
-pub mod hooks;
+pub mod policies;
 pub mod prompt;
 pub mod runtime;
 pub mod turn;

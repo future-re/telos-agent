@@ -8,7 +8,11 @@ use serde_json::Value;
 #[derive(Debug, Clone)]
 pub enum ToolExecutionEvent {
     /// Emitted once when the tool starts (after permission, before `invoke`).
-    ToolStarted { tool_call_id: String, name: String, detail: String },
+    ToolStarted {
+        tool_call_id: String,
+        name: String,
+        detail: String,
+    },
     /// Streaming progress update from inside the tool.
     ToolProgress {
         tool_call_id: Option<String>,
@@ -17,9 +21,26 @@ pub enum ToolExecutionEvent {
         data: Option<Value>,
     },
     /// A tool call has been suspended pending human approval.
-    ApprovalRequested { tool_call_id: String, name: String, reason: String },
+    ApprovalRequested {
+        tool_call_id: String,
+        name: String,
+        reason: String,
+    },
     /// Human approval has been resolved for a suspended tool call.
-    ApprovalResolved { tool_call_id: String, name: String, decision: String },
+    ApprovalResolved {
+        tool_call_id: String,
+        name: String,
+        decision: String,
+    },
+    PolicyStarted {
+        point: String,
+        name: String,
+    },
+    PolicyCompleted {
+        point: String,
+        name: String,
+        feedback_count: usize,
+    },
 }
 
 /// Buffered output of tool execution — events in chronological order,
@@ -56,5 +77,5 @@ pub enum ToolExecutionStreamItem {
     /// An [`ToolExecutionEvent`] — informational; may be emitted out of call order.
     Event(ToolExecutionEvent),
     /// A finished tool's [`ToolResult`] — emitted in the original call order at end of batch.
-    Result(ToolResult),
+    Result { result: ToolResult, feedback: Vec<String> },
 }

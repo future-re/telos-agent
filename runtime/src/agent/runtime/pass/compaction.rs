@@ -17,24 +17,6 @@ pub(super) enum CompactionPhaseResult {
     AbortTurn { events: Vec<TurnEvent> },
 }
 
-/// Checks token budget and triggers compaction if needed.
-///
-/// Two guard conditions prevent compaction from running:
-/// - **Circuit breaker** — if consecutive compaction failures exceed
-///   `MAX_CONSECUTIVE_COMPACTION_FAILURES`, compaction is skipped entirely.
-/// - **Token budget exceeded** — if estimated tokens already surpass the
-///   hard `max_tokens` cap, the turn is aborted immediately.
-///
-/// When neither guard fires and the estimated token count is at or above
-/// `compact_at_tokens`, a pre-compact snapshot is persisted, then
-/// compaction runs. On success a system reminder is injected so the model
-/// is aware of the summarisation; on failure the error is propagated and
-/// the failure counter is bumped.
-///
-/// # Errors
-/// Returns `AgentError` if the compaction strategy itself fails. A token
-/// budget overrun is **not** an error — the turn is aborted via
-/// `CompactionPhaseResult::AbortTurn`.
 pub(super) async fn run_compaction_phase<P>(
     session: &mut SessionInfo,
     context: &mut Conversation,

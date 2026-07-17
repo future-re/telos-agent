@@ -63,14 +63,14 @@ pub fn prepare_runtime(
     agent_config.plugin_registry = plugin_registry.clone();
 
     // Prepare registries for plugin apply
-    let hooks = hook_registry_for_config(&agent_config);
+    let policies = policy_registry_for_config(&agent_config);
     let skills = agent_config.skill_registry.clone().map(|r| (*r).clone()).unwrap_or_default();
     let prompt = build_prompt_assembly(&agent_config, &tools, &context, memory_store.clone());
 
     // Apply enabled plugins — always get the registries back
-    let (mut tools, hooks, skills, mcp_manager, mut prompt, plugin_result) =
-        agent_config.apply_plugins(tools, hooks, skills, mcp_manager, prompt);
-    agent_config.hooks = Arc::new(hooks);
+    let (mut tools, policies, skills, mcp_manager, mut prompt, plugin_result) =
+        agent_config.apply_plugins(tools, policies, skills, mcp_manager, prompt);
+    agent_config.policies = Arc::new(policies);
     agent_config.skill_registry = Some(Arc::new(skills));
     if let Err(errors) = plugin_result {
         for error in &errors {
@@ -144,8 +144,8 @@ fn build_prompt_assembly(
     assembly
 }
 
-fn hook_registry_for_config(agent_config: &AgentConfig) -> crate::HookRegistry {
-    agent_config.hooks.as_ref().clone()
+fn policy_registry_for_config(agent_config: &AgentConfig) -> crate::PolicyRegistry {
+    agent_config.policies.as_ref().clone()
 }
 
 fn create_plugin_registry(project_root_or_cwd: &Path) -> Option<Arc<crate::PluginRegistry>> {

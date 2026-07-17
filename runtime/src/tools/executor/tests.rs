@@ -1,3 +1,6 @@
+use crate::agent::policies::{
+    Policy, PolicyContext, PolicyDecision, PolicyEntry, PolicyOutcome, PolicyPoint, PolicyRegistry,
+};
 use crate::config::AgentConfig;
 use crate::diagnostics::{ToolDiagnosticsSink, ToolFailureEvent, ToolFailureKind};
 use crate::error::AgentError;
@@ -47,6 +50,34 @@ impl Tool for ProbeTool {
 }
 
 struct PanickingTool;
+
+struct RejectTool;
+struct CountPolicy(Arc<AtomicUsize>);
+
+#[async_trait]
+impl Policy for RejectTool {
+    fn name(&self) -> &str {
+        "reject-tool"
+    }
+
+    async fn evaluate(&self, _: &PolicyContext) -> Result<PolicyOutcome, AgentError> {
+        Ok(PolicyOutcome {
+            decision: PolicyDecision::Reject { reason: "blocked by test".into() },
+            feedback: Vec::new(),
+        })
+    }
+}
+
+#[async_trait]
+impl Policy for CountPolicy {
+    fn name(&self) -> &str {
+        "count"
+    }
+    async fn evaluate(&self, _: &PolicyContext) -> Result<PolicyOutcome, AgentError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(PolicyOutcome::continue_())
+    }
+}
 
 #[async_trait]
 impl Tool for PanickingTool {
@@ -124,7 +155,7 @@ async fn collect_results(
     let mut stream = Box::pin(stream);
     let mut results = Vec::new();
     while let Some(item) = stream.next().await {
-        if let ToolExecutionStreamItem::Result(result) = item {
+        if let ToolExecutionStreamItem::Result { result, .. } = item {
             results.push(result);
         }
     }
@@ -158,6 +189,39 @@ async fn executor_records_tool_execution_failure() {
     assert_eq!(events[0].failure_kind, ToolFailureKind::ExecutionError);
     assert_eq!(events[0].session_id, "session-1");
     assert_eq!(events[0].turn_id, 1);
+}
+
+#[tokio::test]
+async fn before_tool_policy_rejects_without_invoking_tool() {
+    let current = Arc::new(AtomicUsize::new(0));
+    let max = Arc::new(AtomicUsize::new(0));
+    let mut tools = ToolRegistry::new();
+    tools.register(ProbeTool {
+        current: current.clone(),
+        max: max.clone(),
+        delay: std::time::Duration::from_millis(1),
+    });
+    let mut policies = PolicyRegistry::new();
+    policies.register(PolicyEntry {
+        point: PolicyPoint::ToolBeforeInvoke { matcher: Some("probe".into()) },
+        policy: Arc::new(RejectTool),
+    });
+    let config = AgentConfig { policies: Arc::new(policies), ..test_config(1) };
+    let results = collect_results(execute_tool_calls_stream(
+        vec![make_call("call-1", "probe")],
+        &tools,
+        &config,
+        "session-1",
+        1,
+        Arc::new(vec![]),
+        empty_read_file_state(),
+    ))
+    .await;
+
+    assert_eq!(results.len(), 1);
+    assert!(results[0].is_error);
+    assert!(results[0].content.to_string().contains("blocked by test"));
+    assert_eq!(max.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
@@ -206,7 +270,13 @@ async fn panicking_tool_is_isolated_and_other_tools_complete() {
         delay: std::time::Duration::from_millis(5),
     });
 
-    let config = test_config(3);
+    let after_count = Arc::new(AtomicUsize::new(0));
+    let mut policies = PolicyRegistry::new();
+    policies.register(PolicyEntry {
+        point: PolicyPoint::ToolAfterInvoke { matcher: Some("panic".into()) },
+        policy: Arc::new(CountPolicy(after_count.clone())),
+    });
+    let config = AgentConfig { policies: Arc::new(policies), ..test_config(3) };
     let calls = vec![make_call("c1", "panic"), make_call("c2", "probe"), make_call("c3", "probe")];
 
     let stream = execute_tool_calls_stream(
@@ -225,4 +295,5 @@ async fn panicking_tool_is_isolated_and_other_tools_complete() {
     assert!(results[0].content.to_string().contains("panic"));
     assert!(!results[1].is_error);
     assert!(!results[2].is_error);
+    assert_eq!(after_count.load(Ordering::SeqCst), 1);
 }

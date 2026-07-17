@@ -59,10 +59,23 @@ impl PluginRegistry {
                 reason: format!("failed to read: {e}"),
             })?;
 
-        let manifest: PluginManifest =
+        let raw: serde_json::Value =
             serde_json::from_str(&content).map_err(|e| PluginError::ManifestParse {
                 path: manifest_path.clone(),
                 reason: format!("invalid JSON: {e}"),
+            })?;
+        if raw.get("hooks").is_some() || raw.get("interceptors").is_some() {
+            return Err(PluginError::ManifestValidation {
+                errors: vec![
+                    "the `hooks` and `interceptors` plugin fields were removed; use `policies`"
+                        .into(),
+                ],
+            });
+        }
+        let manifest: PluginManifest =
+            serde_json::from_value(raw).map_err(|e| PluginError::ManifestParse {
+                path: manifest_path.clone(),
+                reason: format!("invalid manifest: {e}"),
             })?;
 
         if manifest.name.is_empty() {

@@ -17,7 +17,7 @@ use super::types::{PreparedCall, ToolExecutionEvent, ToolExecutionStreamItem};
 
 enum WorkerMessage {
     Event(ToolExecutionEvent),
-    Done { index: usize, result: ToolResult },
+    Done { index: usize, result: ToolResult, feedback: Vec<String> },
 }
 
 pub fn execute_tool_calls_stream<'a>(
@@ -81,9 +81,9 @@ async fn execute_concurrent_batch(
             Some(WorkerMessage::Event(event)) => {
                 items.push(ToolExecutionStreamItem::Event(event));
             }
-            Some(WorkerMessage::Done { index, result }) => {
+            Some(WorkerMessage::Done { index, result, feedback }) => {
                 active -= 1;
-                completed.push((index, result));
+                completed.push((index, result, feedback));
 
                 if let Some(prepared) = queued.next() {
                     active += 1;
@@ -107,9 +107,9 @@ async fn execute_concurrent_batch(
     // task done, so drop the join set to avoid holding onto any tasks.
     drop(join_set);
 
-    completed.sort_by_key(|(index, _)| *index);
-    for (_, result) in completed {
-        items.push(ToolExecutionStreamItem::Result(result));
+    completed.sort_by_key(|(index, _, _)| *index);
+    for (_, result, feedback) in completed {
+        items.push(ToolExecutionStreamItem::Result { result, feedback });
     }
 
     items
@@ -128,8 +128,8 @@ async fn execute_sequential_batch(
         while let Some(msg) = rx.recv().await {
             match msg {
                 WorkerMessage::Event(event) => items.push(ToolExecutionStreamItem::Event(event)),
-                WorkerMessage::Done { index: _, result } => {
-                    items.push(ToolExecutionStreamItem::Result(result))
+                WorkerMessage::Done { index: _, result, feedback } => {
+                    items.push(ToolExecutionStreamItem::Result { result, feedback })
                 }
             }
         }
@@ -173,15 +173,11 @@ fn spawn_tool_event_worker(
                 &message,
             )
             .await;
-            let _ = tx.send(WorkerMessage::Done {
-                index,
-                result: ToolResult {
-                    tool_call_id,
-                    name,
-                    content: json_error_payload("execution_panic", message),
-                    is_error: true,
-                },
-            });
+            let result = ToolResult {
+                tool_call_id, name, content: json_error_payload("execution_panic", message),
+                is_error: true,
+            };
+            let _ = tx.send(WorkerMessage::Done { index, result, feedback: Vec::new() });
         }
     });
 }
@@ -227,13 +223,14 @@ async fn run_tool_with_event_forwarding(
                         content: json_error_payload("tool_not_found", err.to_string()),
                         is_error: true,
                     },
+                    Vec::new(),
                 )
             }
         }
     };
     tokio::pin!(result_task);
 
-    let (approval_events, result) = loop {
+    let (approval_events, result, feedback) = loop {
         tokio::select! {
             maybe_progress = progress_rx.recv() => {
                 if let Some(progress) = maybe_progress {
@@ -263,5 +260,5 @@ async fn run_tool_with_event_forwarding(
         let _ = tx.send(WorkerMessage::Event(event));
     }
 
-    let _ = tx.send(WorkerMessage::Done { index, result });
+    let _ = tx.send(WorkerMessage::Done { index, result, feedback });
 }

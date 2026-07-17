@@ -1,16 +1,16 @@
 //! Plugin system — marketplace-based extensibility for the agent runtime.
 //!
 //! A plugin is a directory containing a `plugin.json` manifest that declares
-//! which components it provides: tools, hooks, skills, MCP servers, agents,
+//! which components it provides: tools, policies, skills, MCP servers, agents,
 //! prompt sections, and output styles.
 //!
 //! Plugins are installed from marketplaces — curated collections fetched from
 //! GitHub, git URLs, npm, pip, or local directories.
 
 pub mod errors;
-pub mod hook_loader;
 pub mod manifest;
 pub mod marketplace;
+pub mod policy_loader;
 pub mod registry;
 pub mod sources;
 pub mod tool_loader;
@@ -20,9 +20,10 @@ use std::fmt;
 
 pub use errors::{DependencyReason, PluginError};
 pub use manifest::{
-    ConfigOptionType, DependencyRef, HookDef, HookMatcher, HooksConfig, LspServerEntry,
-    LspServersConfig, MarketplaceEntry, McpServerEntry, McpServersConfig, PartialPluginManifest,
-    PluginAuthor, PluginManifest, PluginSource, UserConfigOption,
+    CommandPolicyDef, ConfigOptionType, DependencyRef, LspServerEntry, LspServersConfig,
+    MarketplaceEntry, McpServerEntry, McpServersConfig, PartialPluginManifest, PluginAuthor,
+    PluginManifest, PluginSource, PoliciesConfig, SessionPolicyDef, ToolPolicyDef,
+    UserConfigOption,
 };
 pub use marketplace::{Marketplace, MarketplaceRegistry};
 pub use registry::{LoadedPlugin, PluginEntry, PluginRegistry, PluginStatus};

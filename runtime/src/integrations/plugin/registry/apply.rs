@@ -2,11 +2,11 @@
 
 use std::collections::HashMap;
 
-use crate::agent::hooks::{HookCondition, HookEntry, HookPhase};
+use crate::agent::policies::{PolicyEntry, PolicyPoint};
 use crate::integrations::mcp::McpServerConfig;
 use crate::integrations::plugin::PluginError;
-use crate::integrations::plugin::hook_loader::CommandHook;
 use crate::integrations::plugin::manifest::{McpServerEntry, McpServersConfig};
+use crate::integrations::plugin::policy_loader::CommandPolicy;
 use crate::integrations::plugin::registry::lifecycle::PluginRegistry;
 use crate::orchestration::subagent::{AgentDefinition, AgentSource, SubagentRegistry};
 use std::path::Path;
@@ -24,7 +24,8 @@ impl PluginRegistry {
     pub fn apply(
         &self,
         tools: &mut crate::tools::api::ToolRegistry,
-        hooks: &mut crate::agent::hooks::HookRegistry,
+        policies: &mut crate::agent::policies::PolicyRegistry,
+        command_env: &HashMap<String, String>,
         skills: &mut crate::knowledge::skills::SkillRegistry,
         mcp: &mut crate::integrations::mcp::McpManager,
         prompt: &mut crate::agent::prompt::PromptAssembly,
@@ -63,11 +64,17 @@ impl PluginRegistry {
                 }
             }
 
-            // --- Hooks ---
-            if let Some(ref hooks_config) = plugin.manifest.hooks {
+            // --- Policies ---
+            if let Some(ref config) = plugin.manifest.policies {
                 component_count += 1;
-                let hook_count = register_plugin_hooks(hooks, hooks_config, plugin_id_str.clone());
-                if hook_count > 0 {
+                let policy_count = register_plugin_policies(
+                    policies,
+                    config,
+                    &plugin_id_str,
+                    &plugin.path,
+                    command_env,
+                );
+                if policy_count > 0 {
                     loaded_count += 1;
                 }
             }
@@ -201,7 +208,7 @@ impl PluginRegistry {
     /// Re-apply only prompt sections from enabled plugins into a prompt assembly.
     ///
     /// This is a lighter variant of [`apply`](Self::apply) — it does not
-    /// re-register tools, hooks, skills, or MCP servers. Useful when the
+    /// re-register tools, policies, skills, or MCP servers. Useful when the
     /// prompt assembly is rebuilt (e.g. after tools change).
     pub fn apply_prompt_sections(&self, prompt: &mut crate::agent::prompt::PromptAssembly) {
         for entry in self.list_enabled() {
@@ -297,78 +304,43 @@ impl PluginRegistry {
     }
 }
 
-/// Map a plugin phase-name string to a [`HookPhase`] variant.
-fn phase_from_str(phase: &str, plugin_name: &str) -> Option<HookPhase> {
-    match phase {
-        "PreToolUse" => Some(HookPhase::PreToolUse { tool_name: String::new() }),
-        "PostToolUse" => Some(HookPhase::PostToolUse { tool_name: String::new() }),
-        "PostToolUseFailure" => Some(HookPhase::PostToolUseFailure { tool_name: String::new() }),
-        "SessionStart" => Some(HookPhase::SessionStart),
-        "UserPromptSubmit" => Some(HookPhase::UserPromptSubmit),
-        "PostSampling" => Some(HookPhase::PostSampling),
-        "Stop" => Some(HookPhase::Stop),
-        _ => {
-            tracing::warn!(
-                plugin = %plugin_name,
-                phase = %phase,
-                "unknown hook phase in plugin manifest"
-            );
-            None
-        }
-    }
-}
-
-/// Register plugin hook definitions into the hook registry.
-///
-/// Returns the number of hooks successfully registered.
-fn register_plugin_hooks(
-    hooks_registry: &mut crate::agent::hooks::HookRegistry,
-    hooks_config: &crate::integrations::plugin::manifest::HooksConfig,
-    plugin_id_str: String,
+fn register_plugin_policies(
+    registry: &mut crate::agent::policies::PolicyRegistry,
+    config: &crate::integrations::plugin::manifest::PoliciesConfig,
+    plugin: &str,
+    plugin_root: &Path,
+    command_env: &HashMap<String, String>,
 ) -> usize {
     let mut count = 0;
-    for (phase_name, matchers) in hooks_config {
-        let Some(hook_phase) = phase_from_str(phase_name, &plugin_id_str) else {
-            continue;
-        };
-        for matcher in matchers {
-            let condition = matcher
-                .matcher
-                .as_ref()
-                .map(|pattern| HookCondition { tool_name: Some(pattern.clone()) });
-            for hook_def in &matcher.hooks {
-                match hook_def {
-                    crate::integrations::plugin::manifest::HookDef::Command {
-                        command,
-                        args,
-                        timeout,
-                    } => {
-                        let name = format!("plugin_{plugin_id_str}_hook_{phase_name}_{count}");
-                        let cmd_hook = CommandHook::new(
-                            name.clone(),
-                            command.clone(),
-                            args.clone(),
-                            hook_phase.clone(),
-                            *timeout,
-                        );
-                        hooks_registry.register_entry(HookEntry {
-                            hook: std::sync::Arc::new(cmd_hook),
-                            phase: hook_phase.clone(),
-                            condition: condition.clone(),
-                            once: false,
-                            async_exec: false,
-                        });
-                        count += 1;
-                    }
-                    crate::integrations::plugin::manifest::HookDef::Unknown => {
-                        tracing::warn!(
-                            plugin = %plugin_id_str,
-                            "unknown hook type in plugin manifest"
-                        );
-                    }
-                }
-            }
-        }
+    let mut add = |point, command: &crate::integrations::plugin::manifest::CommandPolicyDef| {
+        let name = format!("plugin_{plugin}_policy_{count}");
+        registry.register(PolicyEntry {
+            point,
+            policy: std::sync::Arc::new(CommandPolicy::new(
+                name,
+                command.command.clone(),
+                command.args.clone(),
+                command.timeout,
+                plugin_root.to_path_buf(),
+                command_env.clone(),
+            )),
+        });
+        count += 1;
+    };
+    for item in &config.session_start {
+        add(PolicyPoint::SessionStart { mode: item.mode }, &item.command);
+    }
+    for item in &config.model_response {
+        add(PolicyPoint::ModelResponse, item);
+    }
+    for item in &config.tool_before_invoke {
+        add(PolicyPoint::ToolBeforeInvoke { matcher: item.matcher.clone() }, &item.command);
+    }
+    for item in &config.tool_after_invoke {
+        add(PolicyPoint::ToolAfterInvoke { matcher: item.matcher.clone() }, &item.command);
+    }
+    for item in &config.turn_before_finish {
+        add(PolicyPoint::TurnBeforeFinish, item);
     }
     count
 }

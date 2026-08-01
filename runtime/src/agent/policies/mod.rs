@@ -18,6 +18,9 @@ pub enum SessionMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PolicyPoint {
     SessionStart { mode: Option<SessionMode> },
+    SessionEnd,
+    TurnStart,
+    ModelBeforeRequest,
     ModelResponse,
     ToolBeforeInvoke { matcher: Option<String> },
     ToolAfterInvoke { matcher: Option<String> },
@@ -27,11 +30,52 @@ pub enum PolicyPoint {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "point", rename_all = "snake_case")]
 pub enum PolicyContext {
-    SessionStart { session_id: String, mode: SessionMode, message_count: usize },
-    ModelResponse { session_id: String, turn_id: u64, iteration: usize, message: Message },
-    ToolBeforeInvoke { session_id: String, turn_id: u64, call: ToolCall },
-    ToolAfterInvoke { session_id: String, turn_id: u64, call: ToolCall, result: ToolResult },
-    TurnBeforeFinish { session_id: String, turn_id: u64, message: Message },
+    SessionStart {
+        session_id: String,
+        mode: SessionMode,
+        message_count: usize,
+    },
+    SessionEnd {
+        session_id: String,
+        message_count: usize,
+        turn_count: u64,
+    },
+    TurnStart {
+        session_id: String,
+        turn_id: u64,
+        input: String,
+    },
+    ModelBeforeRequest {
+        session_id: String,
+        turn_id: u64,
+        iteration: usize,
+        message_count: usize,
+        system_prompt_block_count: usize,
+        tool_names: Vec<String>,
+        model_hint: String,
+    },
+    ModelResponse {
+        session_id: String,
+        turn_id: u64,
+        iteration: usize,
+        message: Message,
+    },
+    ToolBeforeInvoke {
+        session_id: String,
+        turn_id: u64,
+        call: ToolCall,
+    },
+    ToolAfterInvoke {
+        session_id: String,
+        turn_id: u64,
+        call: ToolCall,
+        result: ToolResult,
+    },
+    TurnBeforeFinish {
+        session_id: String,
+        turn_id: u64,
+        message: Message,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,6 +157,18 @@ impl PolicyRegistry {
         self.by_point(|point| matches!(point, PolicyPoint::ModelResponse))
     }
 
+    pub fn session_end(&self) -> Vec<Arc<dyn Policy>> {
+        self.by_point(|point| matches!(point, PolicyPoint::SessionEnd))
+    }
+
+    pub fn turn_start(&self) -> Vec<Arc<dyn Policy>> {
+        self.by_point(|point| matches!(point, PolicyPoint::TurnStart))
+    }
+
+    pub fn model_before_request(&self) -> Vec<Arc<dyn Policy>> {
+        self.by_point(|point| matches!(point, PolicyPoint::ModelBeforeRequest))
+    }
+
     pub fn turn_before_finish(&self) -> Vec<Arc<dyn Policy>> {
         self.by_point(|point| matches!(point, PolicyPoint::TurnBeforeFinish))
     }
@@ -187,6 +243,27 @@ mod tests {
         assert_eq!(names, ["specific", "all"]);
         assert_eq!(registry.tool_before("Grep").len(), 1);
         assert!(registry.tool_after("Bash").is_empty());
+    }
+
+    #[test]
+    fn session_turn_and_model_boundaries_have_dedicated_accessors() {
+        let mut registry = PolicyRegistry::new();
+        registry.register(PolicyEntry {
+            point: PolicyPoint::SessionEnd,
+            policy: Arc::new(Named("session-end")),
+        });
+        registry.register(PolicyEntry {
+            point: PolicyPoint::TurnStart,
+            policy: Arc::new(Named("turn-start")),
+        });
+        registry.register(PolicyEntry {
+            point: PolicyPoint::ModelBeforeRequest,
+            policy: Arc::new(Named("model-before-request")),
+        });
+
+        assert_eq!(registry.session_end()[0].name(), "session-end");
+        assert_eq!(registry.turn_start()[0].name(), "turn-start");
+        assert_eq!(registry.model_before_request()[0].name(), "model-before-request");
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::agent::context::Conversation;
+use crate::agent::turn::TurnEvent;
 use crate::config::AgentConfig;
 use crate::error::AgentError;
 use crate::integrations::event_channel::EventChannel;
@@ -42,6 +43,32 @@ pub async fn save(
     Ok(())
 }
 
+pub async fn save_with_events(
+    info: &SessionInfo,
+    messages: &[Message],
+    metrics: &SessionMetrics,
+    read_file_state: &FileReadState,
+    next_turn_id: u64,
+    reason: &str,
+) -> Result<(), AgentError> {
+    info.emit_turn_event(&TurnEvent::PersistenceStarted { reason: reason.into() });
+    match save(info.session_id(), info.config(), messages, metrics, read_file_state, next_turn_id)
+        .await
+    {
+        Ok(()) => {
+            info.emit_turn_event(&TurnEvent::PersistenceCompleted { reason: reason.into() });
+            Ok(())
+        }
+        Err(error) => {
+            info.emit_turn_event(&TurnEvent::PersistenceFailed {
+                reason: reason.into(),
+                error: error.to_string(),
+            });
+            Err(error)
+        }
+    }
+}
+
 pub async fn save_pre_compact_snapshot(
     session_id: &str,
     config: &AgentConfig,
@@ -52,6 +79,27 @@ pub async fn save_pre_compact_snapshot(
         storage.save_snapshot(&snapshot_id, messages).await
     } else {
         Ok(())
+    }
+}
+
+pub async fn save_pre_compact_snapshot_with_events(
+    info: &SessionInfo,
+    messages: &[Message],
+    reason: &str,
+) -> Result<(), AgentError> {
+    info.emit_turn_event(&TurnEvent::PersistenceStarted { reason: reason.into() });
+    match save_pre_compact_snapshot(info.session_id(), info.config(), messages).await {
+        Ok(()) => {
+            info.emit_turn_event(&TurnEvent::PersistenceCompleted { reason: reason.into() });
+            Ok(())
+        }
+        Err(error) => {
+            info.emit_turn_event(&TurnEvent::PersistenceFailed {
+                reason: reason.into(),
+                error: error.to_string(),
+            });
+            Err(error)
+        }
     }
 }
 

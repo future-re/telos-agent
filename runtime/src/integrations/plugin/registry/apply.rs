@@ -347,6 +347,15 @@ fn register_plugin_policies(
     for item in &config.session_start {
         add(PolicyPoint::SessionStart { mode: item.mode }, &item.command);
     }
+    for item in &config.session_end {
+        add(PolicyPoint::SessionEnd, item);
+    }
+    for item in &config.turn_start {
+        add(PolicyPoint::TurnStart, item);
+    }
+    for item in &config.model_before_request {
+        add(PolicyPoint::ModelBeforeRequest, item);
+    }
     for item in &config.model_response {
         add(PolicyPoint::ModelResponse, item);
     }

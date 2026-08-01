@@ -25,6 +25,12 @@ The legacy `hooks` and `interceptors` manifest fields are rejected. Use semantic
         "timeout": 30000
       }
     ],
+    "modelBeforeRequest": [
+      {
+        "name": "request-audit",
+        "command": "./bin/request-policy"
+      }
+    ],
     "toolBeforeInvoke": [
       {
         "name": "shell-guard",
@@ -36,13 +42,15 @@ The legacy `hooks` and `interceptors` manifest fields are rejected. Use semantic
 }
 ```
 
+Plugin manifests may declare all eight semantic points: `sessionStart`, `sessionEnd`, `turnStart`, `modelBeforeRequest`, `modelResponse`, `toolBeforeInvoke`, `toolAfterInvoke`, and `turnBeforeFinish`. `sessionStart` may filter `create` versus `resume`; the two tool points may use a glob `matcher`.
+
 Policy commands run with the plugin directory as their working directory. They receive a tagged `PolicyContext` JSON object on stdin and must write exactly one outcome object to stdout:
 
 ```json
 {"decision":"continue","feedback":["optional model feedback"]}
 ```
 
-To reject an operation, return `{"decision":"reject","reason":"explanation"}`. Policy process failures and policy rejections are emitted as distinct `PolicyFailed` and `PolicyRejected` events. Output is bounded to 1 MiB, and invalid matchers, empty commands, or zero timeouts fail manifest validation.
+To reject an operation, return `{"decision":"reject","reason":"explanation"}`. Policy process failures and policy rejections are emitted as distinct `PolicyFailed` and `PolicyRejected` events. Provider retry/failure, compaction, persistence, and session close are observer events rather than command policies. Output is bounded to 1 MiB, and invalid matchers, empty commands, or zero timeouts fail manifest validation.
 
 `lspServers`, `outputStyles`, `settings`, and `userConfig` are reserved but are not runtime capabilities yet. Declaring them produces an explicit degraded plugin error instead of being silently reported as loaded.
 

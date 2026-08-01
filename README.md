@@ -240,13 +240,15 @@ async fn main() -> Result<(), AgentError> {
 1. **准备输入**：CLI/TUI 收集用户输入、项目上下文、配置、memory 和可用工具。
 2. **Prompt 构建**：`PromptAssembly` 组装 identity、tools、cwd、date、skills、git status、memory、task guidance 等 section；未配置时使用 `base_system_prompt`。
 3. **预算检查**：根据 `TokenBudget` 和 `CompactionStrategy` 判断是否需要压缩历史；超长 tool result 会按 `max_tool_result_chars` 截断。
-4. **Provider 采样**：通过 `ModelProvider` 调用 DeepSeek、双模型路由或 Mock provider；流式调用会产出 `ProviderEvent`，并按 `ModelHint` 区分 thinking、execution、recovery、summarization。
+4. **Provider 采样**：先执行 `ModelBeforeRequest` policies，再通过 `ModelProvider` 调用 DeepSeek、双模型路由或 Mock provider；流式调用会产出 `ProviderEvent`，并按 `ModelHint` 区分 thinking、execution、recovery、summarization。
 5. **模型响应 policy**：assistant message 进入历史后执行 `ModelResponse` policies，可拒绝本轮或注入反馈触发下一次迭代。
 6. **工具判定**：如果没有 tool call，进入停止阶段；否则逐条进入工具执行流水线。
 7. **工具执行**：先执行工具级校验和 JSON Schema 校验，再通过 `PermissionEngine`、工具自身 `check_permission` 和 `ApprovalHandler` 判定权限；随后在超时、panic 隔离、文件写冲突保护下调用工具。
 8. **并发编排**：只读或声明为 concurrency-safe 的工具按 `tool_concurrency_limit` 分批并发执行，结果按原始 tool call 顺序回注。
 9. **结果回注**：工具输出写回为 `Role::Tool` 消息，模型进入下一次采样，直到得到最终回复或触达迭代上限。
-10. **收尾持久化**：执行 `TurnBeforeFinish` policies，汇总 `TurnResult`、usage、metrics 和错误信息；配置了 `Storage` 时写入 JSONL 会话记录。
+10. **收尾持久化**：执行 `TurnBeforeFinish` policies，汇总 `TurnResult`、usage、metrics 和错误信息；配置了 `Storage` 时写入 JSONL 会话记录。显式调用 `AgentSession::close` 或 `AgentRuntime::close_session` 时执行 `SessionEnd` policies 并封存会话。
+
+稳定的 lifecycle policy 点共有 8 个：`SessionStart`、`SessionEnd`、`TurnStart`、`ModelBeforeRequest`、`ModelResponse`、`ToolBeforeInvoke`、`ToolAfterInvoke`、`TurnBeforeFinish`。其中 tool matcher 支持 glob。重试、provider 最终失败、压缩、持久化和关闭属于 observer 事件，通过 `TurnEvent` / event channel 暴露，不承担阻断控制流的职责。
 
 ## 核心对象
 

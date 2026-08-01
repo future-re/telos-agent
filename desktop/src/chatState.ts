@@ -217,6 +217,12 @@ export function reduceTelosEvent(
       return reduceApprovalResolved(state, event);
     case "provider_retry":
       return appendSystemEvent(state, event.message ?? "provider retry");
+    case "provider_failed":
+      return appendSystemEvent(state, event.message ?? "provider failed");
+    case "persistence_failed":
+      return appendSystemEvent(state, event.message ?? "session persistence failed");
+    case "session_closed":
+      return { ...state, status: "idle", running: false };
     case "token_budget_exceeded":
       return appendSystemEvent(state, event.message ?? "token budget exceeded");
     case "policy_rejected":

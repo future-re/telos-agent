@@ -13,7 +13,7 @@ use futures_core::Stream;
 use tokio::sync::{Mutex, mpsc, oneshot};
 
 use crate::agent::context::Conversation;
-use crate::agent::policies::{PolicyContext, PolicyDecision, SessionMode};
+use crate::agent::policies::{Policy, PolicyContext, PolicyDecision, SessionMode};
 use crate::agent::turn::{TurnEvent, TurnInputSender, TurnResult, turn_input_channel};
 use crate::config::{AgentConfig, CancellationState};
 use crate::error::AgentError;
@@ -38,6 +38,7 @@ pub struct AgentRuntime {
 pub struct AgentSession {
     session_id: Arc<str>,
     busy: Arc<AtomicBool>,
+    closed: Arc<AtomicBool>,
     inner: Arc<Mutex<SessionData>>,
 }
 
@@ -73,18 +74,19 @@ impl AgentRuntime {
         conversation.initial_messages(&self.config);
         run_session_policies(&info, &mut conversation, SessionMode::Create).await?;
         let state = RuntimeState::new();
-        session::persistence::save(
-            info.session_id(),
-            info.config(),
+        session::persistence::save_with_events(
+            &info,
             conversation.messages(),
             state.metrics(),
             state.read_file_state(),
             info.next_turn_id(),
+            "session_create",
         )
         .await?;
         Ok(AgentSession {
             session_id,
             busy: Arc::new(AtomicBool::new(false)),
+            closed: Arc::new(AtomicBool::new(false)),
             inner: Arc::new(Mutex::new(SessionData { info, conversation, state })),
         })
     }
@@ -101,19 +103,20 @@ impl AgentRuntime {
             session::persistence::resume(session_id, self.config.clone(), storage).await?;
         let mut conversation = conversation;
         run_session_policies(&info, &mut conversation, SessionMode::Resume).await?;
-        session::persistence::save(
-            info.session_id(),
-            info.config(),
+        session::persistence::save_with_events(
+            &info,
             conversation.messages(),
             state.metrics(),
             state.read_file_state(),
             info.next_turn_id(),
+            "session_resume",
         )
         .await?;
         let session_id: Arc<str> = Arc::from(info.session_id());
         Ok(AgentSession {
             session_id,
             busy: Arc::new(AtomicBool::new(false)),
+            closed: Arc::new(AtomicBool::new(false)),
             inner: Arc::new(Mutex::new(SessionData { info, conversation, state })),
         })
     }
@@ -125,9 +128,16 @@ impl AgentRuntime {
     ) -> Result<TurnHandle, AgentError> {
         tokio::runtime::Handle::try_current()
             .map_err(|_| AgentError::Config("start_turn requires a Tokio runtime".into()))?;
+        if session.closed.load(Ordering::Acquire) {
+            return Err(AgentError::SessionClosed);
+        }
         if session.busy.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err()
         {
             return Err(AgentError::SessionBusy);
+        }
+        if session.closed.load(Ordering::Acquire) {
+            session.busy.store(false, Ordering::Release);
+            return Err(AgentError::SessionClosed);
         }
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
@@ -192,6 +202,11 @@ impl AgentRuntime {
     ) -> Result<TurnResult, AgentError> {
         self.start_turn(session, input)?.finish().await
     }
+
+    /// Finish a session after running its end policies and persisting the final state.
+    pub async fn close_session(&self, session: &AgentSession) -> Result<(), AgentError> {
+        session.close().await
+    }
 }
 
 async fn run_session_policies(
@@ -199,18 +214,33 @@ async fn run_session_policies(
     conversation: &mut Conversation,
     mode: SessionMode,
 ) -> Result<(), AgentError> {
-    for policy in info.config().policies.session_start(mode) {
-        let point = "session_start";
+    run_conversation_policies(
+        info,
+        conversation,
+        "session_start",
+        "SessionStart",
+        info.config().policies.session_start(mode),
+        PolicyContext::SessionStart {
+            session_id: info.session_id().to_string(),
+            mode,
+            message_count: conversation.messages().len(),
+        },
+    )
+    .await
+}
+
+async fn run_conversation_policies(
+    info: &SessionInfo,
+    conversation: &mut Conversation,
+    point: &str,
+    display_point: &str,
+    policies: Vec<Arc<dyn Policy>>,
+    context: PolicyContext,
+) -> Result<(), AgentError> {
+    for policy in policies {
         let name = policy.name().to_string();
         info.emit_turn_event(&TurnEvent::PolicyStarted { point: point.into(), name: name.clone() });
-        let outcome = match policy
-            .evaluate(&PolicyContext::SessionStart {
-                session_id: info.session_id().to_string(),
-                mode,
-                message_count: conversation.messages().len(),
-            })
-            .await
-        {
+        let outcome = match policy.evaluate(&context).await {
             Ok(outcome) => outcome,
             Err(error) => {
                 info.emit_turn_event(&TurnEvent::PolicyFailed {
@@ -232,8 +262,7 @@ async fn run_session_policies(
                 reason: reason.clone(),
             });
             return Err(AgentError::PermissionDenied(format!(
-                "policy `{}` rejected SessionStart: {reason}",
-                name
+                "policy `{name}` rejected {display_point}: {reason}"
             )));
         }
         info.emit_turn_event(&TurnEvent::PolicyCompleted {
@@ -254,6 +283,10 @@ impl AgentSession {
         self.busy.load(Ordering::Acquire)
     }
 
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+
     pub async fn messages(&self) -> Vec<Message> {
         self.inner.lock().await.conversation.messages().to_vec()
     }
@@ -263,14 +296,85 @@ impl AgentSession {
     }
 
     pub async fn reset(&self) -> Result<(), AgentError> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(AgentError::SessionClosed);
+        }
         if self.busy.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
             return Err(AgentError::SessionBusy);
         }
         let _busy = BusyGuard(self.busy.clone());
+        if self.closed.load(Ordering::Acquire) {
+            return Err(AgentError::SessionClosed);
+        }
         let mut data = self.inner.lock().await;
+        let snapshot = SessionSnapshot::capture(&data).await;
         data.conversation.reset();
         data.info.next_turn_id = 1;
         data.state = RuntimeState::new();
+        if let Err(error) = session::persistence::save_with_events(
+            &data.info,
+            data.conversation.messages(),
+            data.state.metrics(),
+            data.state.read_file_state(),
+            data.info.next_turn_id(),
+            "session_reset",
+        )
+        .await
+        {
+            snapshot.restore(&mut data).await;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// Run `SessionEnd` policies, persist the final snapshot, and seal the session.
+    pub async fn close(&self) -> Result<(), AgentError> {
+        if self.closed.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        if self.busy.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
+            return Err(AgentError::SessionBusy);
+        }
+        let _busy = BusyGuard(self.busy.clone());
+        if self.closed.load(Ordering::Acquire) {
+            return Ok(());
+        }
+
+        let mut data = self.inner.lock().await;
+        let snapshot = SessionSnapshot::capture(&data).await;
+        let SessionData { info, conversation, state } = &mut *data;
+        let result = async {
+            run_conversation_policies(
+                info,
+                conversation,
+                "session_end",
+                "SessionEnd",
+                info.config().policies.session_end(),
+                PolicyContext::SessionEnd {
+                    session_id: info.session_id().to_string(),
+                    message_count: conversation.messages().len(),
+                    turn_count: state.metrics().turn_count() as u64,
+                },
+            )
+            .await?;
+            session::persistence::save_with_events(
+                info,
+                conversation.messages(),
+                state.metrics(),
+                state.read_file_state(),
+                info.next_turn_id(),
+                "session_close",
+            )
+            .await
+        }
+        .await;
+        if let Err(error) = result {
+            snapshot.restore(&mut data).await;
+            return Err(error);
+        }
+        let SessionData { info, .. } = &*data;
+        info.emit_turn_event(&TurnEvent::SessionClosed { session_id: info.session_id().into() });
+        self.closed.store(true, Ordering::Release);
         Ok(())
     }
 }
@@ -385,6 +489,8 @@ mod tests {
 
     struct SessionFeedback;
 
+    struct SessionEndFeedback;
+
     struct EchoTool;
 
     #[async_trait]
@@ -464,6 +570,23 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl Policy for SessionEndFeedback {
+        fn name(&self) -> &str {
+            "session-end-feedback"
+        }
+        async fn evaluate(&self, context: &PolicyContext) -> Result<PolicyOutcome, AgentError> {
+            assert!(matches!(
+                context,
+                PolicyContext::SessionEnd { message_count: 0, turn_count: 0, .. }
+            ));
+            Ok(PolicyOutcome {
+                decision: PolicyDecision::Continue,
+                feedback: vec!["closing context".into()],
+            })
+        }
+    }
+
     #[tokio::test]
     async fn create_session_runs_session_start_policies() {
         let mut registry = PolicyRegistry::new();
@@ -477,6 +600,82 @@ mod tests {
                 .unwrap();
         let session = runtime.create_session().await.unwrap();
         assert_eq!(session.messages().await.last().unwrap().text_content(), "session context");
+    }
+
+    #[tokio::test]
+    async fn turn_start_policy_feedback_is_included_in_first_provider_request() {
+        let mut registry = PolicyRegistry::new();
+        registry.register(PolicyEntry {
+            point: PolicyPoint::TurnStart,
+            policy: Arc::new(OneShotPolicyFeedback(AtomicBool::new(false))),
+        });
+        let config = AgentConfig { policies: Arc::new(registry), ..AgentConfig::default() };
+        let provider = Arc::new(MockProvider::new(vec![CompletionResponse {
+            message: Message::assistant("done"),
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+            model: None,
+        }]));
+        let runtime = AgentRuntime::new(config, provider.clone(), ToolRegistry::new()).unwrap();
+        let session = runtime.create_session().await.unwrap();
+
+        runtime.run_turn(&session, "hello").await.unwrap();
+
+        let requests = provider.requests.lock().await;
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].messages[0].text_content(), "hello");
+        assert_eq!(requests[0].messages[1].text_content(), "revise");
+    }
+
+    #[tokio::test]
+    async fn model_before_request_feedback_defers_provider_until_next_iteration() {
+        let mut registry = PolicyRegistry::new();
+        registry.register(PolicyEntry {
+            point: PolicyPoint::ModelBeforeRequest,
+            policy: Arc::new(OneShotPolicyFeedback(AtomicBool::new(false))),
+        });
+        let config = AgentConfig { policies: Arc::new(registry), ..AgentConfig::default() };
+        let provider = Arc::new(MockProvider::new(vec![CompletionResponse {
+            message: Message::assistant("done"),
+            stop_reason: StopReason::EndTurn,
+            usage: None,
+            model: None,
+        }]));
+        let runtime = AgentRuntime::new(config, provider.clone(), ToolRegistry::new()).unwrap();
+        let session = runtime.create_session().await.unwrap();
+
+        let result = runtime.run_turn(&session, "hello").await.unwrap();
+
+        assert_eq!(provider.requests.lock().await.len(), 1);
+        assert!(
+            result
+                .events
+                .iter()
+                .any(|event| matches!(event, TurnEvent::ProviderRequest { iteration: 2, .. }))
+        );
+        assert!(session.messages().await.iter().any(|message| message.text_content() == "revise"));
+    }
+
+    #[tokio::test]
+    async fn close_runs_session_end_policy_and_seals_session() {
+        let mut registry = PolicyRegistry::new();
+        registry.register(PolicyEntry {
+            point: PolicyPoint::SessionEnd,
+            policy: Arc::new(SessionEndFeedback),
+        });
+        let config = AgentConfig { policies: Arc::new(registry), ..AgentConfig::default() };
+        let runtime =
+            AgentRuntime::new(config, Arc::new(MockProvider::new(Vec::new())), ToolRegistry::new())
+                .unwrap();
+        let session = runtime.create_session().await.unwrap();
+
+        runtime.close_session(&session).await.unwrap();
+        runtime.close_session(&session).await.unwrap();
+
+        assert!(session.is_closed());
+        assert_eq!(session.messages().await[0].text_content(), "closing context");
+        assert!(matches!(runtime.start_turn(&session, "too late"), Err(AgentError::SessionClosed)));
+        assert!(matches!(session.reset().await, Err(AgentError::SessionClosed)));
     }
 
     #[tokio::test]
@@ -675,6 +874,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn terminal_provider_failure_emits_provider_failed_before_turn_failed() {
+        let runtime = AgentRuntime::new(
+            AgentConfig::default(),
+            Arc::new(MockProvider::new(Vec::new())),
+            ToolRegistry::new(),
+        )
+        .unwrap();
+        let session = runtime.create_session().await.unwrap();
+        let mut handle = runtime.start_turn(&session, "hello").unwrap();
+        let mut events = Vec::new();
+        while let Some(event) = handle.next().await {
+            events.push(event);
+        }
+        handle.finish().await.unwrap_err();
+
+        let provider_failed = events
+            .iter()
+            .position(|event| matches!(event, TurnEvent::ProviderFailed { attempts: 1, .. }))
+            .unwrap();
+        let turn_failed =
+            events.iter().position(|event| matches!(event, TurnEvent::TurnFailed { .. })).unwrap();
+        assert!(provider_failed < turn_failed);
+    }
+
+    #[tokio::test]
     async fn run_turn_commits_messages_and_returns_events() {
         let runtime = runtime_with_response("done");
         let session = runtime.create_session().await.unwrap();
@@ -682,6 +906,10 @@ mod tests {
         assert_eq!(result.final_message.text_content(), "done");
         assert!(result.events.iter().any(|event| matches!(event, TurnEvent::TurnFinished { .. })));
         assert!(matches!(result.events.last(), Some(TurnEvent::TurnFinished { .. })));
+        assert!(result.events.iter().any(|event| matches!(
+            event,
+            TurnEvent::PersistenceCompleted { reason } if reason == "turn_finish"
+        )));
         assert_eq!(session.messages().await.last().unwrap().text_content(), "done");
     }
 

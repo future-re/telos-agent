@@ -55,10 +55,10 @@ where
             && let Some(compaction) = session.config().compaction.clone()
         {
             // Persist a snapshot before mutating messages, so recovery is possible.
-            let _ = super::super::session::persistence::save_pre_compact_snapshot(
-                session.session_id(),
-                session.config(),
+            let _ = super::super::session::persistence::save_pre_compact_snapshot_with_events(
+                session,
                 context.messages(),
+                "pre_compact:token_budget",
             )
             .await;
             let started = TurnEvent::CompactionStarted { reason: "token_budget".into() };

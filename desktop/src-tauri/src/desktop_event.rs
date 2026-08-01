@@ -126,6 +126,33 @@ pub fn map_turn_event(session_id: &str, event: TurnEvent) -> DesktopEvent {
             message: Some(format!("retrying ({attempt}/{max_retries}, {delay_ms}ms)")),
             ..DesktopEvent::new("provider_retry")
         },
+        TurnEvent::ProviderFailed { attempts, error } => DesktopEvent {
+            session_id: Some(session_id.to_string()),
+            message: Some(error),
+            data: Some(serde_json::json!({"attempts": attempts})),
+            is_error: Some(true),
+            ..DesktopEvent::new("provider_failed")
+        },
+        TurnEvent::PersistenceStarted { reason } => DesktopEvent {
+            session_id: Some(session_id.to_string()),
+            message: Some(reason),
+            ..DesktopEvent::new("persistence_started")
+        },
+        TurnEvent::PersistenceCompleted { reason } => DesktopEvent {
+            session_id: Some(session_id.to_string()),
+            message: Some(reason),
+            ..DesktopEvent::new("persistence_completed")
+        },
+        TurnEvent::PersistenceFailed { reason, error } => DesktopEvent {
+            session_id: Some(session_id.to_string()),
+            detail: Some(reason),
+            message: Some(error),
+            is_error: Some(true),
+            ..DesktopEvent::new("persistence_failed")
+        },
+        TurnEvent::SessionClosed { session_id } => {
+            DesktopEvent { session_id: Some(session_id), ..DesktopEvent::new("session_closed") }
+        }
         TurnEvent::TokenBudgetExceeded { used_tokens, max_tokens } => DesktopEvent {
             session_id: Some(session_id.to_string()),
             message: Some(format!("token budget exceeded: {used_tokens}/{max_tokens}")),

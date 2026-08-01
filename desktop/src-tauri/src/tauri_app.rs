@@ -240,7 +240,18 @@ async fn reset_all_sessions(state: State<'_, AppState>) -> Result<(), String> {
         token.cancel();
     }
     deny_pending_approvals(&state.approvals, None, "session reset").await;
-    state.hosts.lock().await.clear();
+    let hosts = state.hosts.lock().await.drain().map(|(_, entry)| entry.host).collect::<Vec<_>>();
+    let mut first_error = None;
+    for host in hosts {
+        if let Err(error) = host.lock().await.close().await
+            && first_error.is_none()
+        {
+            first_error = Some(error);
+        }
+    }
+    if let Some(error) = first_error {
+        return Err(error);
+    }
     Ok(())
 }
 
@@ -250,7 +261,11 @@ async fn reset_session(state: State<'_, AppState>, request: SessionRequest) -> R
         token.cancel();
     }
     deny_pending_approvals(&state.approvals, Some(&request.session_id), "session reset").await;
-    let cwd = state.hosts.lock().await.remove(&request.session_id).and_then(|e| e.settings.cwd);
+    let entry = state.hosts.lock().await.remove(&request.session_id);
+    let cwd = entry.as_ref().and_then(|entry| entry.settings.cwd.clone());
+    if let Some(entry) = entry {
+        entry.host.lock().await.close().await?;
+    }
     delete_session_files(&request.session_id, cwd).await.ok();
     Ok(())
 }
@@ -314,12 +329,13 @@ async fn send_prompt(
             token.cancel();
         }
         deny_pending_approvals(&state.approvals, Some(&session_id), "session reset").await;
+        let entry = state.hosts.lock().await.remove(&session_id);
+        if let Some(entry) = entry {
+            entry.host.lock().await.close().await?;
+        }
     }
     let host = {
         let mut hosts = state.hosts.lock().await;
-        if request.reset.unwrap_or(false) {
-            hosts.remove(&session_id);
-        }
         if let Some(existing) = hosts.get(&session_id)
             && existing.settings == request.settings
         {

@@ -95,12 +95,14 @@ where
 {
     let max_tokens = provider.max_tokens();
     let mut retries = 0usize;
+    let mut attempts = 0usize;
 
     loop {
         if session.config().cancellation.is_cancelled() {
             return Err(AgentError::Cancelled);
         }
 
+        attempts += 1;
         let request = CompletionRequest {
             system_prompt_blocks: system_prompt_blocks.to_vec(),
             messages: context.messages().to_vec(),
@@ -120,12 +122,13 @@ where
                     && let Some(compaction) = session.config().compaction.clone()
                 {
                     warn!(error = %e, "context window exceeded; attempting compaction");
-                    let _ = super::super::session::persistence::save_pre_compact_snapshot(
-                        session.session_id(),
-                        session.config(),
-                        context.messages(),
-                    )
-                    .await;
+                    let _ =
+                        super::super::session::persistence::save_pre_compact_snapshot_with_events(
+                            session,
+                            context.messages(),
+                            "pre_compact:reactive",
+                        )
+                        .await;
                     session.emit_turn_event(&TurnEvent::CompactionStarted {
                         reason: "reactive".into(),
                     });
@@ -177,12 +180,19 @@ where
                 }
 
                 if e.is_retryable() {
-                    error!(attempts = retries + 1, error = %e, "provider retries exhausted");
-                    return Err(AgentError::ProviderRetriesExhausted {
-                        attempts: retries + 1,
+                    error!(attempts, error = %e, "provider retries exhausted");
+                    let error = AgentError::ProviderRetriesExhausted {
+                        attempts,
                         last_error: e.to_string(),
+                    };
+                    session.emit_turn_event(&TurnEvent::ProviderFailed {
+                        attempts,
+                        error: error.to_string(),
                     });
+                    return Err(error);
                 }
+                session
+                    .emit_turn_event(&TurnEvent::ProviderFailed { attempts, error: e.to_string() });
                 return Err(e);
             }
         }

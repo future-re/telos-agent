@@ -309,6 +309,20 @@ impl AgentHost {
         self.tool_details = tool_details;
         Ok(final_text)
     }
+
+    pub async fn close(&self) -> Result<(), String> {
+        const MAX_BUSY_RETRIES: usize = 100;
+        for attempt in 0..=MAX_BUSY_RETRIES {
+            match self.runtime.close_session(&self.session).await {
+                Ok(()) => return Ok(()),
+                Err(telos_agent::AgentError::SessionBusy) if attempt < MAX_BUSY_RETRIES => {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        unreachable!("close retry loop always returns")
+    }
 }
 
 async fn record_memory_from_event(
@@ -659,6 +673,7 @@ mod tests {
 
         assert_eq!(final_text, "桌面端当前使用 Mock Provider，没有真实模型调用。");
         assert!(events.iter().any(|event| event.kind == "turn_finished"));
+        host.close().await.expect("mock host should close cleanly");
     }
 
     #[test]

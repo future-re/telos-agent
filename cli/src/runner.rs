@@ -44,14 +44,17 @@ pub async fn run_single(
             )?;
             let session =
                 agent_runtime.create_session().await.context("failed to create agent session")?;
-            run_with_provider(
+            let turn_result = run_with_provider(
                 &agent_runtime,
                 &session,
                 prompt,
                 runtime.shared.memory_store.clone(),
                 config.billing.as_ref(),
             )
-            .await?;
+            .await;
+            let close_result = agent_runtime.close_session(&session).await;
+            turn_result?;
+            close_result.context("failed to close agent session")?;
         }
         ResolvedProvider::Mock(_) => {
             eprintln!("Note: using mock provider; no real model call is made.");
@@ -74,14 +77,17 @@ pub async fn run_single(
             )?;
             let session =
                 agent_runtime.create_session().await.context("failed to create agent session")?;
-            run_with_provider(
+            let turn_result = run_with_provider(
                 &agent_runtime,
                 &session,
                 prompt,
                 runtime.shared.memory_store.clone(),
                 config.billing.as_ref(),
             )
-            .await?;
+            .await;
+            let close_result = agent_runtime.close_session(&session).await;
+            turn_result?;
+            close_result.context("failed to close agent session")?;
         }
     }
 
@@ -165,6 +171,7 @@ pub async fn run_chat(
         }
     }
 
+    agent_runtime.close_session(&session).await.context("failed to close agent session")?;
     crate::runtime::process_diagnostics(&runtime.diagnostics, config).await;
     Ok(())
 }

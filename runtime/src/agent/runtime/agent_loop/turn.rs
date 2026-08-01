@@ -68,6 +68,27 @@ where
             Vec::new()
         };
         let tool_definitions = tools.definitions();
+        let hint = loop_state.model_hint(session.config());
+        loop_state.queue_feedback(
+            run_policies(
+                session,
+                "model_before_request",
+                session.config().policies.model_before_request(),
+                PolicyContext::ModelBeforeRequest {
+                    session_id: session.session_id().to_string(),
+                    turn_id,
+                    iteration,
+                    message_count: context.messages().len(),
+                    system_prompt_block_count: system_prompt_blocks.len(),
+                    tool_names: tool_definitions.iter().map(|tool| tool.name.clone()).collect(),
+                    model_hint: format!("{hint:?}").to_lowercase(),
+                },
+            )
+            .await?,
+        );
+        if append_feedback(session, context, &mut loop_state)? {
+            continue;
+        }
         emit(
             session,
             TurnEvent::ProviderRequest {
@@ -76,7 +97,6 @@ where
                 tool_count: tool_definitions.len(),
             },
         );
-        let hint = loop_state.model_hint(session.config());
         let response = provider::complete_with_retry(
             session,
             context,
@@ -150,13 +170,13 @@ where
         break (message, reason);
     };
 
-    super::super::session::persistence::save(
-        session.session_id(),
-        session.config(),
+    super::super::session::persistence::save_with_events(
+        session,
         context.messages(),
         state.metrics(),
         state.read_file_state(),
         session.next_turn_id(),
+        "turn_finish",
     )
     .await?;
 
@@ -190,8 +210,6 @@ async fn begin_turn(
             )));
     }
     context.repair_incomplete_tool_call_tail();
-    let user_message = Message::user(user_input);
-    context.journal().append_user(user_message.clone())?;
     emit(
         session,
         TurnEvent::TurnStarted {
@@ -200,7 +218,25 @@ async fn begin_turn(
             user_input: user_input.to_string(),
         },
     );
+    let feedback = run_policies(
+        session,
+        "turn_start",
+        session.config().policies.turn_start(),
+        PolicyContext::TurnStart {
+            session_id: session.session_id().to_string(),
+            turn_id,
+            input: user_input.to_string(),
+        },
+    )
+    .await?;
+    let user_message = Message::user(user_input);
+    context.journal().append_user(user_message.clone())?;
     emit(session, TurnEvent::User(user_message));
+    if !feedback.is_empty() {
+        let feedback_message = Message::user(feedback.join("\n\n"));
+        context.journal().append_user(feedback_message.clone())?;
+        emit(session, TurnEvent::User(feedback_message));
+    }
     state.metrics_mut().add_turn();
     info!(session_id = %session.session_id(), turn_id, "turn started");
 

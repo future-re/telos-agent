@@ -132,6 +132,7 @@ pub async fn run_serve(options: &SharedOptions, file_config: &FileConfig) -> Res
                 run_turn(&agent_runtime, &session, prompt).await;
             }
             "new_session" => {
+                agent_runtime.close_session(&session).await?;
                 session = agent_runtime.create_session().await?;
                 emit_event("_session_new");
             }
@@ -152,6 +153,7 @@ pub async fn run_serve(options: &SharedOptions, file_config: &FileConfig) -> Res
         }
     }
 
+    agent_runtime.close_session(&session).await?;
     Ok(())
 }
 
@@ -204,6 +206,11 @@ fn event_variant_name(event: &telos_agent::TurnEvent) -> &'static str {
         telos_agent::TurnEvent::ApprovalRequested { .. } => "ApprovalRequested",
         telos_agent::TurnEvent::ApprovalResolved { .. } => "ApprovalResolved",
         telos_agent::TurnEvent::ProviderRetry { .. } => "ProviderRetry",
+        telos_agent::TurnEvent::ProviderFailed { .. } => "ProviderFailed",
+        telos_agent::TurnEvent::PersistenceStarted { .. } => "PersistenceStarted",
+        telos_agent::TurnEvent::PersistenceCompleted { .. } => "PersistenceCompleted",
+        telos_agent::TurnEvent::PersistenceFailed { .. } => "PersistenceFailed",
+        telos_agent::TurnEvent::SessionClosed { .. } => "SessionClosed",
         telos_agent::TurnEvent::TurnFailed { .. } => "TurnFailed",
         telos_agent::TurnEvent::TurnFinished { .. } => "TurnFinished",
     }

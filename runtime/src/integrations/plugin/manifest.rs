@@ -130,6 +130,12 @@ pub struct PoliciesConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub session_start: Vec<SessionPolicyDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub session_end: Vec<CommandPolicyDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turn_start: Vec<CommandPolicyDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_before_request: Vec<CommandPolicyDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub model_response: Vec<CommandPolicyDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_before_invoke: Vec<ToolPolicyDef>,
@@ -161,6 +167,15 @@ impl PoliciesConfig {
                 &policy.command,
                 &mut errors,
             );
+        }
+        for (index, policy) in self.session_end.iter().enumerate() {
+            validate_command(&format!("policies.sessionEnd[{index}]"), policy, &mut errors);
+        }
+        for (index, policy) in self.turn_start.iter().enumerate() {
+            validate_command(&format!("policies.turnStart[{index}]"), policy, &mut errors);
+        }
+        for (index, policy) in self.model_before_request.iter().enumerate() {
+            validate_command(&format!("policies.modelBeforeRequest[{index}]"), policy, &mut errors);
         }
         for (index, policy) in self.model_response.iter().enumerate() {
             validate_command(&format!("policies.modelResponse[{index}]"), policy, &mut errors);
@@ -503,6 +518,31 @@ mod tests {
         assert!(errors.iter().any(|error| error.contains("command must not be empty")));
         assert!(errors.iter().any(|error| error.contains("timeout must be greater than zero")));
         assert!(errors.iter().any(|error| error.contains("matcher is invalid")));
+    }
+
+    #[test]
+    fn parses_all_semantic_policy_boundaries() {
+        let policies: PoliciesConfig = serde_json::from_value(json!({
+            "sessionStart": [{"command": "start"}],
+            "sessionEnd": [{"command": "end"}],
+            "turnStart": [{"command": "turn"}],
+            "modelBeforeRequest": [{"command": "before-model"}],
+            "modelResponse": [{"command": "after-model"}],
+            "toolBeforeInvoke": [{"command": "before-tool"}],
+            "toolAfterInvoke": [{"command": "after-tool"}],
+            "turnBeforeFinish": [{"command": "finish"}]
+        }))
+        .unwrap();
+
+        assert_eq!(policies.session_start.len(), 1);
+        assert_eq!(policies.session_end.len(), 1);
+        assert_eq!(policies.turn_start.len(), 1);
+        assert_eq!(policies.model_before_request.len(), 1);
+        assert_eq!(policies.model_response.len(), 1);
+        assert_eq!(policies.tool_before_invoke.len(), 1);
+        assert_eq!(policies.tool_after_invoke.len(), 1);
+        assert_eq!(policies.turn_before_finish.len(), 1);
+        assert!(policies.validate().is_empty());
     }
 
     #[test]

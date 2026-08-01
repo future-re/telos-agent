@@ -29,11 +29,11 @@ Sensitive tool calls can be gated by `ApprovalHandler`, `ApprovalRequest`, and `
 
 ## Events
 
-`TurnEvent` exposes runtime progress such as sampling, tool execution, compaction, and stop phases. The TUI consumes these events to render streaming model output, tool status, approvals, and turn summaries.
+`TurnEvent` exposes runtime progress such as sampling, provider retry/failure, tool execution, compaction, persistence, session close, and turn completion/failure. The TUI and external event channel can consume the same events for rendering, audit, and telemetry.
 
 ## Lifecycle policies
 
-`PolicyRegistry` runs semantic lifecycle policies at session start, after model responses, before and after tool invocation, and before a turn finishes. A policy may continue, reject, or return feedback for another model iteration. These policies are distinct from `ApprovalHandler` and `PermissionEngine`, which govern human/tool authorization.
+`PolicyRegistry` runs semantic lifecycle policies at eight stable boundaries: `SessionStart`, `SessionEnd`, `TurnStart`, `ModelBeforeRequest`, `ModelResponse`, `ToolBeforeInvoke`, `ToolAfterInvoke`, and `TurnBeforeFinish`. A policy may continue, reject, or return feedback for model context. These control-flow policies are distinct from observer events and from `ApprovalHandler` / `PermissionEngine`, which govern human and tool authorization.
 
 ## Storage
 

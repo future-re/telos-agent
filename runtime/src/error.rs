@@ -69,6 +69,9 @@ pub enum AgentError {
     /// Another turn is already running for this session.
     #[error("session is already running a turn")]
     SessionBusy,
+    /// The session has been explicitly closed and cannot accept further mutations.
+    #[error("session is closed")]
+    SessionClosed,
     /// The turn was cancelled via [`CancellationState`](crate::CancellationState).
     #[error("cancelled")]
     Cancelled,

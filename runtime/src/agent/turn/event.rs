@@ -101,6 +101,23 @@ pub enum TurnEvent {
         max_retries: usize,
         delay_ms: u64,
     },
+    ProviderFailed {
+        attempts: usize,
+        error: String,
+    },
+    PersistenceStarted {
+        reason: String,
+    },
+    PersistenceCompleted {
+        reason: String,
+    },
+    PersistenceFailed {
+        reason: String,
+        error: String,
+    },
+    SessionClosed {
+        session_id: String,
+    },
     TurnFailed {
         error: String,
     },
@@ -221,6 +238,19 @@ impl TurnEvent {
             TurnEvent::ProviderRetry { attempt, max_retries, delay_ms } => {
                 format!("provider_retry:{attempt}/{max_retries} delay={delay_ms}ms")
             }
+            TurnEvent::ProviderFailed { attempts, error } => {
+                format!("provider_failed:attempts={attempts}:{error}")
+            }
+            TurnEvent::PersistenceStarted { reason } => {
+                format!("persistence_started:{reason}")
+            }
+            TurnEvent::PersistenceCompleted { reason } => {
+                format!("persistence_completed:{reason}")
+            }
+            TurnEvent::PersistenceFailed { reason, error } => {
+                format!("persistence_failed:{reason}:{error}")
+            }
+            TurnEvent::SessionClosed { session_id } => format!("session_closed:{session_id}"),
             TurnEvent::TurnFailed { error } => format!("turn_failed:{error}"),
             TurnEvent::TurnFinished { stop_reason, final_text } => {
                 format!("turn_finished:{stop_reason:?}:{final_text}")

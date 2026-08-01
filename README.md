@@ -12,7 +12,7 @@
 
 | 模块 | 说明 |
 | --- | --- |
-| [`telos_agent`](core/README.md) | 核心 runtime、provider、工具系统、权限、memory、MCP、storage |
+| [`telos_agent`](runtime/README.md) | 核心 runtime、provider、工具系统、权限、memory、MCP、storage |
 | [`telos-cli`](cli/README.md) | Codex-style 全屏 TUI 和命令行客户端 |
 | `desktop/` | 基于同一 runtime 的桌面端壳层 |
 | [`site/`](site/) | 在线引导与项目站点 |
@@ -106,8 +106,9 @@ cargo add telos_agent
 
 ```rust
 use serde_json::{json, Value};
+use std::sync::Arc;
 use telos_agent::{
-    AgentConfig, AgentError, AgentSession, CompletionResponse, Message, MockProvider,
+    AgentConfig, AgentError, AgentRuntime, CompletionResponse, Message, MockProvider,
     StopReason, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
 };
 
@@ -134,21 +135,27 @@ impl Tool for EchoTool {
 
 #[tokio::main]
 async fn main() -> Result<(), AgentError> {
-    let provider = MockProvider::new(vec![CompletionResponse {
+    let provider = Arc::new(MockProvider::new(vec![CompletionResponse {
         message: Message::assistant("done"),
         stop_reason: StopReason::EndTurn,
         usage: None,
-    }]);
+        model: None,
+    }]));
 
     let mut tools = ToolRegistry::new();
     tools.register(EchoTool);
 
-    let mut session = AgentSession::new(AgentConfig {
-        base_system_prompt: Some("You are a concise assistant.".into()),
-        ..Default::default()
-    })?;
+    let runtime = AgentRuntime::new(
+        AgentConfig {
+            base_system_prompt: Some("You are a concise assistant.".into()),
+            ..Default::default()
+        },
+        provider,
+        tools,
+    )?;
+    let session = runtime.create_session().await?;
 
-    let result = session.run_turn(&provider, &tools, "hello").await?;
+    let result = runtime.run_turn(&session, "hello").await?;
     println!("{}", result.final_message.text_content());
     Ok(())
 }
@@ -158,9 +165,9 @@ async fn main() -> Result<(), AgentError> {
 
 ### Core Runtime
 
-- `AgentSession` 驱动 turn 循环：采样 -> 工具执行 -> 结果回注。
+- `AgentRuntime` 持有 provider、工具和配置，`AgentSession` 保存隔离的会话状态。
 - `TurnEvent` 流式事件暴露采样、工具、compaction、停止等阶段。
-- Hook phase 当前在 turn loop 内执行 `PostSampling` 和 `Stop`，hook 注册表保留扩展接口。
+- `LifecyclePolicy` 语义的 policy 点覆盖 session start、模型响应、工具调用前后和 turn 收尾，可继续、拒绝或注入反馈。
 - 取消检查点可在 provider 调用或迭代间隙安全中断。
 
 ### Provider
@@ -202,7 +209,7 @@ async fn main() -> Result<(), AgentError> {
 ### 存储与会话管理
 
 - `JsonlStorage` JSONL 持久化，`NoopStorage` 用于无持久化场景。
-- Token 预算感知 compaction（`SummaryCompaction` + 字符截断）。
+- Token 预算感知 compaction（`SummaryHistoryCompaction` + tool result 字符截断）。
 - 任务管理系统（`TaskManager`，支持 blocked_by/blocks 依赖）。
 
 ### CLI / TUI
@@ -215,8 +222,9 @@ async fn main() -> Result<(), AgentError> {
 
 | 层 | 职责 |
 | --- | --- |
-| **Session** | `AgentSession` 持有消息历史、配置、文件读状态，暴露 `run_turn` / `run_turn_stream` |
-| **Runtime** | 单轮 turn 内的迭代循环、provider 调用、compaction、hook、工具编排、持久化 |
+| **Session** | `AgentSession` 持有消息历史、指标和文件读状态；不直接拥有 provider 或工具 |
+| **Runtime** | `AgentRuntime` 暴露 `run_turn` / `start_turn`，负责 provider、工具和 turn 生命周期 |
+| **Lifecycle Policy** | `PolicyRegistry` 在稳定语义点执行继续、拒绝和反馈注入；与工具审批策略分离 |
 | **Provider** | `ModelProvider` 统一封装不同 LLM 后端，流式输出统一为 `ProviderEvent` |
 | **Tool** | `Tool` trait + 执行器：参数校验、权限判定、审批、调用、结果格式化 |
 | **Prompt** | `PromptAssembly` 动态组装 system prompt，缓存静态 section |
@@ -233,19 +241,20 @@ async fn main() -> Result<(), AgentError> {
 2. **Prompt 构建**：`PromptAssembly` 组装 identity、tools、cwd、date、skills、git status、memory、task guidance 等 section；未配置时使用 `base_system_prompt`。
 3. **预算检查**：根据 `TokenBudget` 和 `CompactionStrategy` 判断是否需要压缩历史；超长 tool result 会按 `max_tool_result_chars` 截断。
 4. **Provider 采样**：通过 `ModelProvider` 调用 DeepSeek、双模型路由或 Mock provider；流式调用会产出 `ProviderEvent`，并按 `ModelHint` 区分 thinking、execution、recovery、summarization。
-5. **Hook 阶段**：assistant message 进入历史后触发 `PostSampling` hook，便于扩展审计、指标或自定义流程。
+5. **模型响应 policy**：assistant message 进入历史后执行 `ModelResponse` policies，可拒绝本轮或注入反馈触发下一次迭代。
 6. **工具判定**：如果没有 tool call，进入停止阶段；否则逐条进入工具执行流水线。
 7. **工具执行**：先执行工具级校验和 JSON Schema 校验，再通过 `PermissionEngine`、工具自身 `check_permission` 和 `ApprovalHandler` 判定权限；随后在超时、panic 隔离、文件写冲突保护下调用工具。
 8. **并发编排**：只读或声明为 concurrency-safe 的工具按 `tool_concurrency_limit` 分批并发执行，结果按原始 tool call 顺序回注。
 9. **结果回注**：工具输出写回为 `Role::Tool` 消息，模型进入下一次采样，直到得到最终回复或触达迭代上限。
-10. **收尾持久化**：触发 `Stop` hook，汇总 `TurnResult`、usage、metrics 和错误信息；配置了 `Storage` 时写入 JSONL 会话记录。
+10. **收尾持久化**：执行 `TurnBeforeFinish` policies，汇总 `TurnResult`、usage、metrics 和错误信息；配置了 `Storage` 时写入 JSONL 会话记录。
 
 ## 核心对象
 
 | 类型 / Trait | 职责 |
 | --- | --- |
-| `AgentSession` | 保存消息历史和运行状态，驱动 `run_turn` / `run_turn_stream`。 |
-| `AgentConfig` | 配置 prompt、cwd、env、权限、审批、storage、compaction、token budget、hooks、插件、skills 和取消状态。 |
+| `AgentRuntime` / `AgentSession` | runtime 持有 provider 与工具并驱动 `run_turn` / `start_turn`；session 保存隔离的消息和运行状态。 |
+| `AgentConfig` | 配置 prompt、cwd、env、权限、审批、storage、compaction、token budget、policies、插件、skills 和取消状态。 |
+| `Policy` / `PolicyRegistry` | lifecycle 扩展点；支持继续、拒绝和反馈注入，不替代 `ApprovalHandler`。 |
 | `ModelProvider` | Provider 抽象，统一非流式 `complete` 和流式 `stream_complete`。 |
 | `DeepSeekProvider` / `RoutedProvider` / `MockProvider` | 内置 provider：真实 DeepSeek、双模型路由和测试用 mock。 |
 | `CompletionRequest` / `CompletionResponse` / `ProviderEvent` | Provider 的输入、输出和流式事件模型。 |
@@ -356,15 +365,15 @@ cd desktop
 npm run tauri build
 ```
 
-desktop 后端通过 `desktop/src-tauri/Cargo.toml` 里的 `telos_agent = { path = "../../core" }`
-依赖本仓库的 `core/`，发布构建会使用当前 checkout/tag 的本地源码。
+desktop 后端通过 `desktop/src-tauri/Cargo.toml` 里的 `telos_agent = { path = "../../runtime" }`
+依赖本仓库的 `runtime/`，发布构建会使用当前 checkout/tag 的本地源码。
 
 Windows 和 macOS 发布包通过 GitHub Actions 构建。推送版本 tag 后会分别在
 Windows/macOS runner 上构建安装包并上传到 GitHub Release：
 
 ```bash
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
 也可以在 GitHub Actions 里手动运行 `Release Desktop` workflow，并填写

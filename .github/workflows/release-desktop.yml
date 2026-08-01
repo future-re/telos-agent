@@ -79,8 +79,8 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-desktop-${{ hashFiles('Cargo.lock') }}
+            desktop/src-tauri/target/
+          key: ${{ runner.os }}-cargo-desktop-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-desktop-
 
       - name: Install frontend dependencies
@@ -106,10 +106,25 @@ jobs:
           echo "Overriding version to ${{ steps.app-version.outputs.version }}"
           node -e "
             const fs = require('fs');
+            const version = '${{ steps.app-version.outputs.version }}';
             const conf = JSON.parse(fs.readFileSync('desktop/src-tauri/tauri.conf.json','utf8'));
-            conf.version = '${{ steps.app-version.outputs.version }}';
+            conf.version = version;
             fs.writeFileSync('desktop/src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
+            const pkg = JSON.parse(fs.readFileSync('desktop/package.json','utf8'));
+            pkg.version = version;
+            fs.writeFileSync('desktop/package.json', JSON.stringify(pkg, null, 2) + '\n');
+            const lock = JSON.parse(fs.readFileSync('desktop/package-lock.json','utf8'));
+            lock.version = version;
+            lock.packages[''].version = version;
+            fs.writeFileSync('desktop/package-lock.json', JSON.stringify(lock, null, 2) + '\n');
+            const cargoPath = 'desktop/src-tauri/Cargo.toml';
+            const cargo = fs.readFileSync(cargoPath, 'utf8').replace(/^version = \"[^\"]+\"/m, 'version = \"' + version + '\"');
+            fs.writeFileSync(cargoPath, cargo);
           "
+
+      - name: Test desktop frontend
+        working-directory: desktop
+        run: npm test
 
       - name: Prepare bundled Python automation runtime
         if: matrix.runtime_bundle
@@ -129,18 +144,18 @@ jobs:
         shell: bash
         run: |
           echo "=== Bundle output ==="
-          find target/release/bundle -type f 2>/dev/null || echo "(no bundle dir)"
+          find desktop/src-tauri/target/release/bundle -type f 2>/dev/null || echo "(no bundle dir)"
           echo "---"
-          echo "dmg/*.dmg:" $(ls target/release/bundle/dmg/*.dmg 2>/dev/null || echo "(none)")
-          echo "macos/*.app:" $(ls target/release/bundle/macos/*.app 2>/dev/null || echo "(none)")
-          echo "macos/*.tar.gz:" $(ls target/release/bundle/macos/*.tar.gz 2>/dev/null || echo "(none)")
+          echo "dmg/*.dmg:" $(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg 2>/dev/null || echo "(none)")
+          echo "macos/*.app:" $(ls desktop/src-tauri/target/release/bundle/macos/*.app 2>/dev/null || echo "(none)")
+          echo "macos/*.tar.gz:" $(ls desktop/src-tauri/target/release/bundle/macos/*.tar.gz 2>/dev/null || echo "(none)")
 
       - name: Stage variant artifacts
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "dist-desktop/${{ matrix.target }}-${{ matrix.variant }}"
-          find target/release/bundle -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.tar.gz' \) -print0 |
+          find desktop/src-tauri/target/release/bundle -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.tar.gz' \) -print0 |
             while IFS= read -r -d '' file; do
               base="$(basename "$file")"
               ext="${base##*.}"

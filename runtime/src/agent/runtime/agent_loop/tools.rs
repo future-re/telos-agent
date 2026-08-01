@@ -6,7 +6,7 @@ use crate::agent::compaction::{MessageTruncationConfig, truncate_message};
 use crate::agent::context::Conversation;
 use crate::agent::turn::TurnEvent;
 use crate::error::AgentError;
-use crate::model::message::Message;
+use crate::model::message::{Message, ToolResult};
 use crate::tools::api::ToolRegistry;
 use crate::tools::executor::{
     ToolExecutionEvent, ToolExecutionStreamItem, execute_tool_calls_stream, tool_result_detail,
@@ -14,6 +14,11 @@ use crate::tools::executor::{
 use tracing::debug;
 
 use super::super::{session::SessionInfo, state::RuntimeState};
+
+pub(super) struct ToolBatchOutcome {
+    pub(super) message: Message,
+    pub(super) feedback: Vec<String>,
+}
 
 /// Executes a batch of tool calls for the given turn.
 ///
@@ -25,15 +30,14 @@ use super::super::{session::SessionInfo, state::RuntimeState};
 /// # Errors
 /// Returns `AgentError::Cancelled` if the session's cancellation token
 /// fires before execution finishes.
-pub(super) async fn execute_tool_calls_phase(
+pub(super) async fn execute(
     session: &mut SessionInfo,
     context: &mut Conversation,
     state: &mut RuntimeState,
     tools: &ToolRegistry,
     tool_calls: Vec<crate::model::message::ToolCall>,
     turn_id: u64,
-) -> Result<(Message, Vec<String>, Vec<TurnEvent>), AgentError> {
-    let mut events = Vec::new();
+) -> Result<ToolBatchOutcome, AgentError> {
     // Snapshot messages and config so the execution stream can reference them
     // without borrowing `context` or `session` for its entire lifetime.
     let messages = Arc::new(context.messages().to_vec());
@@ -79,9 +83,14 @@ pub(super) async fn execute_tool_calls_phase(
                     ToolExecutionEvent::PolicyCompleted { point, name, feedback_count } => {
                         TurnEvent::PolicyCompleted { point, name, feedback_count }
                     }
+                    ToolExecutionEvent::PolicyRejected { point, name, reason } => {
+                        TurnEvent::PolicyRejected { point, name, reason }
+                    }
+                    ToolExecutionEvent::PolicyFailed { point, name, error } => {
+                        TurnEvent::PolicyFailed { point, name, error }
+                    }
                 };
                 session.emit_turn_event(&turn_event);
-                events.push(turn_event);
             }
             // Terminal result → record as ToolCompleted and retain for the result message.
             ToolExecutionStreamItem::Result { result, feedback: item_feedback } => {
@@ -92,7 +101,6 @@ pub(super) async fn execute_tool_calls_phase(
                     detail: result.is_error.then(|| tool_result_detail(&result.content)),
                 };
                 session.emit_turn_event(&event);
-                events.push(event);
                 tool_results.push(result);
                 feedback.extend(item_feedback);
             }
@@ -103,7 +111,7 @@ pub(super) async fn execute_tool_calls_phase(
     // memory state as dirty below.
     let memory_mutations: Vec<String> = tool_results
         .iter()
-        .filter(|r| !r.is_error && &r.name == "MemoryWrite" || &r.name == "MemoryEdit")
+        .filter(|result| is_successful_memory_mutation(result))
         .map(|r| r.name.clone())
         .collect();
 
@@ -128,8 +136,6 @@ pub(super) async fn execute_tool_calls_phase(
         let completed = TurnEvent::CompactionCompleted { reason: "tool_result_budget".into() };
         session.emit_turn_event(&started);
         session.emit_turn_event(&completed);
-        events.push(started);
-        events.push(completed);
     }
 
     // If any memory tool wrote or edited state, mark context dirty and, if
@@ -157,5 +163,31 @@ pub(super) async fn execute_tool_calls_phase(
         }
     }
 
-    Ok((truncation.message, feedback, events))
+    Ok(ToolBatchOutcome { message: truncation.message, feedback })
+}
+
+fn is_successful_memory_mutation(result: &ToolResult) -> bool {
+    !result.is_error && matches!(result.name.as_str(), "MemoryWrite" | "MemoryEdit")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool_result(name: &str, is_error: bool) -> ToolResult {
+        ToolResult {
+            tool_call_id: "call-1".into(),
+            name: name.into(),
+            content: serde_json::json!({}),
+            is_error,
+        }
+    }
+
+    #[test]
+    fn only_successful_memory_writes_and_edits_mark_memory_dirty() {
+        assert!(is_successful_memory_mutation(&tool_result("MemoryWrite", false)));
+        assert!(is_successful_memory_mutation(&tool_result("MemoryEdit", false)));
+        assert!(!is_successful_memory_mutation(&tool_result("MemoryEdit", true)));
+        assert!(!is_successful_memory_mutation(&tool_result("FileEdit", false)));
+    }
 }

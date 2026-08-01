@@ -7,7 +7,7 @@ use serde_json::Value;
 /// Lifecycle event emitted by the executor for one tool invocation.
 #[derive(Debug, Clone)]
 pub enum ToolExecutionEvent {
-    /// Emitted once when the tool starts (after permission, before `invoke`).
+    /// Emitted once when a call enters the executor, before validation and permission checks.
     ToolStarted {
         tool_call_id: String,
         name: String,
@@ -40,6 +40,16 @@ pub enum ToolExecutionEvent {
         point: String,
         name: String,
         feedback_count: usize,
+    },
+    PolicyRejected {
+        point: String,
+        name: String,
+        reason: String,
+    },
+    PolicyFailed {
+        point: String,
+        name: String,
+        error: String,
     },
 }
 

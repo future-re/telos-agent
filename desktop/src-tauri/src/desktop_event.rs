@@ -132,6 +132,58 @@ pub fn map_turn_event(session_id: &str, event: TurnEvent) -> DesktopEvent {
             is_error: Some(true),
             ..DesktopEvent::new("token_budget_exceeded")
         },
+        TurnEvent::PolicyStarted { point, name } => DesktopEvent {
+            session_id: Some(session_id.to_string()),
+            tool_name: Some(name),
+            detail: Some(point),
+            ..DesktopEvent::new("policy_started")
+        },
+        TurnEvent::PolicyCompleted { point, name, feedback_count } => DesktopEvent {
+            session_id: Some(session_id.to_string()),
+            tool_name: Some(name),
+            detail: Some(point),
+            data: Some(serde_json::json!({"feedbackCount": feedback_count})),
+            ..DesktopEvent::new("policy_completed")
+        },
+        TurnEvent::PolicyRejected { point, name, reason } => DesktopEvent {
+            session_id: Some(session_id.to_string()),
+            tool_name: Some(name),
+            detail: Some(point),
+            message: Some(reason),
+            is_error: Some(true),
+            ..DesktopEvent::new("policy_rejected")
+        },
+        TurnEvent::PolicyFailed { point, name, error } => DesktopEvent {
+            session_id: Some(session_id.to_string()),
+            tool_name: Some(name),
+            detail: Some(point),
+            message: Some(error),
+            is_error: Some(true),
+            ..DesktopEvent::new("policy_failed")
+        },
+        TurnEvent::CompactionStarted { reason } => DesktopEvent {
+            session_id: Some(session_id.to_string()),
+            message: Some(reason),
+            ..DesktopEvent::new("compaction_started")
+        },
+        TurnEvent::CompactionCompleted { reason } => DesktopEvent {
+            session_id: Some(session_id.to_string()),
+            message: Some(reason),
+            ..DesktopEvent::new("compaction_completed")
+        },
+        TurnEvent::CompactionFailed { reason, error } => DesktopEvent {
+            session_id: Some(session_id.to_string()),
+            detail: Some(reason),
+            message: Some(error),
+            is_error: Some(true),
+            ..DesktopEvent::new("compaction_failed")
+        },
+        TurnEvent::TurnFailed { error } => DesktopEvent {
+            session_id: Some(session_id.to_string()),
+            message: Some(error),
+            is_error: Some(true),
+            ..DesktopEvent::new("turn_failed")
+        },
         TurnEvent::ToolResult(_) => DesktopEvent::new("ignored"),
         _ => DesktopEvent::new("ignored"),
     }
@@ -175,5 +227,23 @@ mod tests {
         assert_eq!(event.prompt_cache_hit_tokens, Some(3));
         assert_eq!(event.reasoning_tokens, Some(2));
         assert_eq!(event.model.as_deref(), Some("deepseek-v4-flash"));
+    }
+
+    #[test]
+    fn maps_policy_failure_for_frontend() {
+        let event = map_turn_event(
+            "session-1",
+            TurnEvent::PolicyFailed {
+                point: "tool_before_invoke".into(),
+                name: "shell-guard".into(),
+                error: "process exited".into(),
+            },
+        );
+
+        assert_eq!(event.kind, "policy_failed");
+        assert_eq!(event.tool_name.as_deref(), Some("shell-guard"));
+        assert_eq!(event.detail.as_deref(), Some("tool_before_invoke"));
+        assert_eq!(event.message.as_deref(), Some("process exited"));
+        assert_eq!(event.is_error, Some(true));
     }
 }

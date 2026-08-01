@@ -29,4 +29,4 @@ Changelog = "https://github.com/future-re/telos-agent/blob/main/CHANGELOG.md"
 manifest-path = "cli/Cargo.toml"
 bindings = "bin"
 strip = true
-sdist-include = ["Cargo.lock", "Cargo.toml", "core/**/*", "cli/**/*", "LICENSE", "README.md"]
+sdist-include = ["Cargo.lock", "Cargo.toml", "runtime/**/*", "host/**/*", "cli/**/*", "LICENSE", "README.md"]

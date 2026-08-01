@@ -4,6 +4,7 @@
 /desktop/dist/
 /desktop/.vite/
 /desktop/src-tauri/target
+/wsl2_api/Cargo.lock
 /site/node_modules/
 /site/dist/
 /site/.astro/

@@ -65,6 +65,47 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --verbose
 
+  desktop:
+    name: Desktop frontend and Rust host
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Test frontend
+        working-directory: desktop
+        run: npm test
+      - name: Build frontend
+        working-directory: desktop
+        run: npm run build
+      - name: Test Rust host
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml
+      - name: Format Rust host
+        run: cargo fmt --manifest-path desktop/src-tauri/Cargo.toml -- --check
+      - name: Lint Rust host
+        run: cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+
+  wsl2-api:
+    name: WSL2 API (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt --manifest-path wsl2_api/Cargo.toml -- --check
+      - run: cargo test --manifest-path wsl2_api/Cargo.toml
+      - run: cargo clippy --manifest-path wsl2_api/Cargo.toml --all-targets -- -D warnings
+
   docs:
     name: API Docs
     runs-on: ubuntu-latest
@@ -83,8 +124,8 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-docs-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-docs-
-      - name: Generate core API docs
-        run: ./scripts/generate-core-api-docs.sh
+      - name: Generate runtime API docs
+        run: ./scripts/generate-runtime-api-docs.sh
       - name: Upload API docs artifact
         uses: actions/upload-artifact@v7
         with:

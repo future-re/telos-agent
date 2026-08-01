@@ -96,6 +96,9 @@ fn default_policy_timeout_ms() -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandPolicyDef {
+    /// Stable identifier used in lifecycle events. Generated from declaration order when omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub command: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
@@ -134,6 +137,57 @@ pub struct PoliciesConfig {
     pub tool_after_invoke: Vec<ToolPolicyDef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub turn_before_finish: Vec<CommandPolicyDef>,
+}
+
+impl PoliciesConfig {
+    pub(crate) fn validate(&self) -> Vec<String> {
+        fn validate_command(path: &str, policy: &CommandPolicyDef, errors: &mut Vec<String>) {
+            if policy.name.as_ref().is_some_and(|name| name.trim().is_empty()) {
+                errors.push(format!("{path}.name must not be empty"));
+            }
+            if policy.command.trim().is_empty() {
+                errors.push(format!("{path}.command must not be empty"));
+            }
+            if policy.timeout == 0 {
+                errors.push(format!("{path}.timeout must be greater than zero"));
+            }
+        }
+
+        let mut errors = Vec::new();
+
+        for (index, policy) in self.session_start.iter().enumerate() {
+            validate_command(
+                &format!("policies.sessionStart[{index}]"),
+                &policy.command,
+                &mut errors,
+            );
+        }
+        for (index, policy) in self.model_response.iter().enumerate() {
+            validate_command(&format!("policies.modelResponse[{index}]"), policy, &mut errors);
+        }
+        for (index, policy) in self.tool_before_invoke.iter().enumerate() {
+            let path = format!("policies.toolBeforeInvoke[{index}]");
+            validate_command(&path, &policy.command, &mut errors);
+            if let Some(matcher) = &policy.matcher
+                && let Err(error) = glob::Pattern::new(matcher)
+            {
+                errors.push(format!("{path}.matcher is invalid: {error}"));
+            }
+        }
+        for (index, policy) in self.tool_after_invoke.iter().enumerate() {
+            let path = format!("policies.toolAfterInvoke[{index}]");
+            validate_command(&path, &policy.command, &mut errors);
+            if let Some(matcher) = &policy.matcher
+                && let Err(error) = glob::Pattern::new(matcher)
+            {
+                errors.push(format!("{path}.matcher is invalid: {error}"));
+            }
+        }
+        for (index, policy) in self.turn_before_finish.iter().enumerate() {
+            validate_command(&format!("policies.turnBeforeFinish[{index}]"), policy, &mut errors);
+        }
+        errors
+    }
 }
 
 // --- MCP configuration ---
@@ -434,6 +488,21 @@ mod tests {
         assert_eq!(dep.display(), "my-dep");
         let id = dep.resolve("my-marketplace");
         assert_eq!(id.to_string(), "my-dep@my-marketplace");
+    }
+
+    #[test]
+    fn policy_validation_rejects_invalid_commands_timeouts_and_matchers() {
+        let policies: PoliciesConfig = serde_json::from_value(json!({
+            "modelResponse": [{"name": "", "command": "", "timeout": 0}],
+            "toolBeforeInvoke": [{"matcher": "[", "command": "check"}]
+        }))
+        .unwrap();
+
+        let errors = policies.validate();
+        assert!(errors.iter().any(|error| error.contains("name must not be empty")));
+        assert!(errors.iter().any(|error| error.contains("command must not be empty")));
+        assert!(errors.iter().any(|error| error.contains("timeout must be greater than zero")));
+        assert!(errors.iter().any(|error| error.contains("matcher is invalid")));
     }
 
     #[test]

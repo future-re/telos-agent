@@ -219,6 +219,25 @@ export function reduceTelosEvent(
       return appendSystemEvent(state, event.message ?? "provider retry");
     case "token_budget_exceeded":
       return appendSystemEvent(state, event.message ?? "token budget exceeded");
+    case "policy_rejected":
+      return appendSystemEvent(state, event.message ?? "lifecycle policy rejected the operation");
+    case "policy_failed":
+      return appendSystemEvent(state, event.message ?? "lifecycle policy failed");
+    case "compaction_started":
+      return { ...state, status: "compacting context" };
+    case "compaction_completed":
+      return { ...state, status: "thinking" };
+    case "compaction_failed":
+      return appendSystemEvent(state, event.message ?? "context compaction failed");
+    case "turn_failed": {
+      const next = appendSystemEvent(state, event.message ?? "turn failed");
+      return {
+        ...next,
+        status: "error",
+        running: false,
+        messages: next.messages.map((message) => ({ ...message, streaming: false })),
+      };
+    }
     default:
       return state;
   }

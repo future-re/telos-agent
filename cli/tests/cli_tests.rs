@@ -235,7 +235,7 @@ fn memory_runtime_registers_tools() {
     telos_cli::memory_runtime::register_memory_runtime(&mut tools, &mut assembly, store);
 
     assert!(tools.get("MemoryRead").is_ok());
-    assert!(tools.get("memory_write").is_ok());
+    assert!(tools.get("MemoryWrite").is_ok());
 }
 
 // ── Onboarding tests ───────────────────────────────────────────────────────

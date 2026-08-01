@@ -349,8 +349,6 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/compaction/test_summary.txt"
     ));
-    const TEST_SUMMARY_OUTPUT: &str = "test_summary_output.txt";
-
     struct FakeProvider;
 
     #[async_trait::async_trait]
@@ -446,12 +444,12 @@ mod tests {
         let summary_text = messages[1].text_content();
         assert!(!summary_text.trim().is_empty());
         assert_ne!(summary_text.trim(), TEST_SUMMARY_FIXTURE.trim());
-        let output_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/compaction")
-            .join(TEST_SUMMARY_OUTPUT);
-        std::fs::write(&output_path, summary_text.trim()).unwrap_or_else(|err| {
-            panic!("failed to write summary output to {}: {err}", output_path.display())
-        });
+        if let Some(output_path) = std::env::var_os("TELOS_TEST_SUMMARY_OUTPUT") {
+            let output_path = std::path::PathBuf::from(output_path);
+            std::fs::write(&output_path, summary_text.trim()).unwrap_or_else(|err| {
+                panic!("failed to write summary output to {}: {err}", output_path.display())
+            });
+        }
         assert_eq!(messages[2], recent_message);
     }
 

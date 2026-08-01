@@ -106,39 +106,6 @@ impl ConversationJournal<'_> {
     }
 }
 
-#[cfg(test)]
-mod journal_tests {
-    use super::*;
-    use crate::model::message::{ContentBlock, Role, ToolCall};
-
-    #[test]
-    fn feedback_cannot_split_tool_call_and_result() {
-        let mut conversation = Conversation::new();
-        conversation
-            .journal()
-            .append_assistant(Message {
-                role: Role::Assistant,
-                blocks: vec![ContentBlock::ToolCall(ToolCall {
-                    id: "call-1".into(),
-                    name: "Read".into(),
-                    arguments: serde_json::json!({}),
-                })],
-            })
-            .unwrap();
-        assert!(conversation.journal().append_user(Message::user("feedback")).is_err());
-        conversation
-            .journal()
-            .resolve_tool_calls(Message::tool_results(vec![ToolResult {
-                tool_call_id: "call-1".into(),
-                name: "Read".into(),
-                content: serde_json::json!({"ok": true}),
-                is_error: false,
-            }]))
-            .unwrap();
-        conversation.journal().append_user(Message::user("feedback")).unwrap();
-    }
-}
-
 impl Conversation {
     pub(crate) fn messages(&self) -> &[Message] {
         &self.messages
@@ -230,5 +197,38 @@ impl Conversation {
         if !tool_results.is_empty() {
             self.messages.push(Message::tool_results(tool_results));
         }
+    }
+}
+
+#[cfg(test)]
+mod journal_tests {
+    use super::*;
+    use crate::model::message::{ContentBlock, Role, ToolCall};
+
+    #[test]
+    fn feedback_cannot_split_tool_call_and_result() {
+        let mut conversation = Conversation::new();
+        conversation
+            .journal()
+            .append_assistant(Message {
+                role: Role::Assistant,
+                blocks: vec![ContentBlock::ToolCall(ToolCall {
+                    id: "call-1".into(),
+                    name: "Read".into(),
+                    arguments: serde_json::json!({}),
+                })],
+            })
+            .unwrap();
+        assert!(conversation.journal().append_user(Message::user("feedback")).is_err());
+        conversation
+            .journal()
+            .resolve_tool_calls(Message::tool_results(vec![ToolResult {
+                tool_call_id: "call-1".into(),
+                name: "Read".into(),
+                content: serde_json::json!({"ok": true}),
+                is_error: false,
+            }]))
+            .unwrap();
+        conversation.journal().append_user(Message::user("feedback")).unwrap();
     }
 }

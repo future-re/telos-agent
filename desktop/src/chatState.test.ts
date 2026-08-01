@@ -239,4 +239,20 @@ describe("reduceTelosEvent", () => {
       },
     });
   });
+
+  it("ends the running state and records a turn failure", () => {
+    const running = { ...initialChatState, running: true, status: "thinking" };
+
+    const failed = reduceTelosEvent(running, {
+      kind: "turn_failed",
+      message: "token budget exceeded",
+    });
+
+    expect(failed.running).toBe(false);
+    expect(failed.status).toBe("error");
+    expect(failed.messages[failed.messages.length - 1]).toMatchObject({
+      role: "system",
+      content: "token budget exceeded",
+    });
+  });
 });

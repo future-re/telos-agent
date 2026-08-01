@@ -4,11 +4,35 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
 use crate::agent::policies::{Policy, PolicyContext, PolicyOutcome};
 use crate::error::AgentError;
+
+const MAX_POLICY_OUTPUT_BYTES: usize = 1024 * 1024;
+
+struct LimitedOutput {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+async fn read_limited(mut reader: impl AsyncRead + Unpin) -> std::io::Result<LimitedOutput> {
+    let mut bytes = Vec::new();
+    let mut truncated = false;
+    let mut chunk = [0_u8; 8192];
+    loop {
+        let read = reader.read(&mut chunk).await?;
+        if read == 0 {
+            break;
+        }
+        let remaining = MAX_POLICY_OUTPUT_BYTES.saturating_sub(bytes.len());
+        let retained = remaining.min(read);
+        bytes.extend_from_slice(&chunk[..retained]);
+        truncated |= retained < read;
+    }
+    Ok(LimitedOutput { bytes, truncated })
+}
 
 pub struct CommandPolicy {
     name: String,
@@ -80,26 +104,42 @@ impl Policy for CommandPolicy {
                 message: format!("policy stdin failed: {error}"),
             })?;
         }
-        let output = tokio::time::timeout(
-            std::time::Duration::from_millis(self.timeout_ms),
-            child.wait_with_output(),
-        )
-        .await
-        .map_err(|_| AgentError::ToolExecution {
-            tool: self.name.clone(),
-            message: "policy timed out".into(),
-        })?
-        .map_err(|error| AgentError::ToolExecution {
-            tool: self.name.clone(),
-            message: format!("policy failed: {error}"),
-        })?;
-        if !output.status.success() {
+        let stdout = child.stdout.take().expect("policy stdout must be piped");
+        let stderr = child.stderr.take().expect("policy stderr must be piped");
+        let output =
+            tokio::time::timeout(std::time::Duration::from_millis(self.timeout_ms), async {
+                let (status, stdout, stderr) =
+                    tokio::try_join!(child.wait(), read_limited(stdout), read_limited(stderr))?;
+                Ok::<_, std::io::Error>((status, stdout, stderr))
+            })
+            .await
+            .map_err(|_| AgentError::ToolExecution {
+                tool: self.name.clone(),
+                message: "policy timed out".into(),
+            })?
+            .map_err(|error| AgentError::ToolExecution {
+                tool: self.name.clone(),
+                message: format!("policy failed: {error}"),
+            })?;
+        let (status, stdout, stderr) = output;
+        if !status.success() {
+            let stderr_text = String::from_utf8_lossy(&stderr.bytes).trim().to_string();
+            let detail = if stderr_text.is_empty() {
+                format!("policy exited with status {status}")
+            } else if stderr.truncated {
+                format!("{stderr_text}… [truncated]")
+            } else {
+                stderr_text
+            };
+            return Err(AgentError::ToolExecution { tool: self.name.clone(), message: detail });
+        }
+        if stdout.truncated {
             return Err(AgentError::ToolExecution {
                 tool: self.name.clone(),
-                message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                message: format!("policy output exceeded {MAX_POLICY_OUTPUT_BYTES} bytes"),
             });
         }
-        serde_json::from_slice(&output.stdout).map_err(|error| AgentError::ToolExecution {
+        serde_json::from_slice(&stdout.bytes).map_err(|error| AgentError::ToolExecution {
             tool: self.name.clone(),
             message: format!("invalid policy outcome: {error}"),
         })
@@ -123,5 +163,54 @@ mod tests {
         );
         assert_eq!(PathBuf::from(policy.command_path()), root.join("./bin/check"));
         assert_eq!(PathBuf::from(policy.resolve(&policy.args[0])), root.join("config.json"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn executes_command_policy_with_json_protocol() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("check-policy.sh");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+payload=$(cat)
+case "$payload" in
+  *'"point":"session_start"'*) ;;
+  *) echo "missing policy context" >&2; exit 2 ;;
+esac
+printf '%s' '{"decision":"continue","feedback":["checked"]}'
+"#,
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&script).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&script, permissions).unwrap();
+
+        let policy = CommandPolicy::new(
+            "test-policy".into(),
+            "./check-policy.sh".into(),
+            Vec::new(),
+            1_000,
+            dir.path().to_path_buf(),
+            HashMap::new(),
+        );
+        let outcome = policy
+            .evaluate(&PolicyContext::SessionStart {
+                session_id: "session-1".into(),
+                mode: crate::SessionMode::Create,
+                message_count: 0,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outcome,
+            PolicyOutcome {
+                decision: crate::PolicyDecision::Continue,
+                feedback: vec!["checked".into()],
+            }
+        );
     }
 }

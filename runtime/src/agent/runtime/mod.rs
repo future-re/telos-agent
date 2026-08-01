@@ -1,6 +1,6 @@
 //! Public agent runtime facade.
 
-mod pass;
+mod agent_loop;
 mod session;
 mod state;
 
@@ -21,7 +21,7 @@ use crate::model::message::Message;
 use crate::model::provider::{ErasedProvider, ModelProvider};
 use crate::tools::api::ToolRegistry;
 
-use self::pass::runner::run_turn;
+use self::agent_loop::run_turn;
 use self::session::SessionInfo;
 use self::state::RuntimeState;
 
@@ -200,22 +200,47 @@ async fn run_session_policies(
     mode: SessionMode,
 ) -> Result<(), AgentError> {
     for policy in info.config().policies.session_start(mode) {
-        let outcome = policy
+        let point = "session_start";
+        let name = policy.name().to_string();
+        info.emit_turn_event(&TurnEvent::PolicyStarted { point: point.into(), name: name.clone() });
+        let outcome = match policy
             .evaluate(&PolicyContext::SessionStart {
                 session_id: info.session_id().to_string(),
                 mode,
                 message_count: conversation.messages().len(),
             })
-            .await?;
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                info.emit_turn_event(&TurnEvent::PolicyFailed {
+                    point: point.into(),
+                    name,
+                    error: error.to_string(),
+                });
+                return Err(error);
+            }
+        };
+        let feedback_count = outcome.feedback.len();
         for feedback in outcome.feedback {
             conversation.push_message(Message::user(feedback));
         }
         if let PolicyDecision::Reject { reason } = outcome.decision {
+            info.emit_turn_event(&TurnEvent::PolicyRejected {
+                point: point.into(),
+                name: name.clone(),
+                reason: reason.clone(),
+            });
             return Err(AgentError::PermissionDenied(format!(
                 "policy `{}` rejected SessionStart: {reason}",
-                policy.name()
+                name
             )));
         }
+        info.emit_turn_event(&TurnEvent::PolicyCompleted {
+            point: point.into(),
+            name,
+            feedback_count,
+        });
     }
     Ok(())
 }
@@ -335,6 +360,8 @@ mod tests {
         Policy, PolicyContext, PolicyDecision, PolicyEntry, PolicyOutcome, PolicyPoint,
         PolicyRegistry,
     };
+    use crate::config::{RetryConfig, TokenBudget};
+    use crate::error::ProviderError;
     use crate::model::message::{ContentBlock, Role, ToolCall};
     use crate::model::mock::MockProvider;
     use crate::model::provider::{
@@ -378,12 +405,34 @@ mod tests {
         }
     }
 
-    struct OneShotPassFeedback(AtomicBool);
+    struct OneShotPolicyFeedback(AtomicBool);
+
+    struct RetryOnceProvider {
+        calls: AtomicUsize,
+    }
 
     #[async_trait]
-    impl Policy for OneShotPassFeedback {
+    impl ModelProvider for RetryOnceProvider {
+        async fn complete(
+            &self,
+            _request: CompletionRequest,
+        ) -> Result<CompletionResponse, AgentError> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err(AgentError::Provider(ProviderError::Network("temporary".into())));
+            }
+            Ok(CompletionResponse {
+                message: Message::assistant("recovered"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+                model: None,
+            })
+        }
+    }
+
+    #[async_trait]
+    impl Policy for OneShotPolicyFeedback {
         fn name(&self) -> &str {
-            "pass-feedback"
+            "policy-feedback"
         }
 
         async fn evaluate(&self, _: &PolicyContext) -> Result<PolicyOutcome, AgentError> {
@@ -422,8 +471,7 @@ mod tests {
             point: PolicyPoint::SessionStart { mode: Some(SessionMode::Create) },
             policy: Arc::new(SessionFeedback),
         });
-        let mut config = AgentConfig::default();
-        config.policies = Arc::new(registry);
+        let config = AgentConfig { policies: Arc::new(registry), ..AgentConfig::default() };
         let runtime =
             AgentRuntime::new(config, Arc::new(MockProvider::new(Vec::new())), ToolRegistry::new())
                 .unwrap();
@@ -432,14 +480,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pass_feedback_triggers_another_model_iteration() {
+    async fn policy_feedback_triggers_another_model_iteration() {
         let mut registry = PolicyRegistry::new();
         registry.register(PolicyEntry {
             point: PolicyPoint::TurnBeforeFinish,
-            policy: Arc::new(OneShotPassFeedback(AtomicBool::new(false))),
+            policy: Arc::new(OneShotPolicyFeedback(AtomicBool::new(false))),
         });
-        let mut config = AgentConfig::default();
-        config.policies = Arc::new(registry);
+        let config = AgentConfig { policies: Arc::new(registry), ..AgentConfig::default() };
         let provider = Arc::new(MockProvider::new(vec![
             CompletionResponse {
                 message: Message::assistant("first"),
@@ -466,10 +513,9 @@ mod tests {
         let mut registry = PolicyRegistry::new();
         registry.register(PolicyEntry {
             point: PolicyPoint::ModelResponse,
-            policy: Arc::new(OneShotPassFeedback(AtomicBool::new(false))),
+            policy: Arc::new(OneShotPolicyFeedback(AtomicBool::new(false))),
         });
-        let mut config = AgentConfig::default();
-        config.policies = Arc::new(registry);
+        let config = AgentConfig { policies: Arc::new(registry), ..AgentConfig::default() };
         let provider = Arc::new(MockProvider::new(vec![
             CompletionResponse {
                 message: Message {
@@ -504,6 +550,131 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tool_result_always_triggers_a_follow_up_model_iteration() {
+        let provider = Arc::new(MockProvider::new(vec![
+            CompletionResponse {
+                message: Message {
+                    role: Role::Assistant,
+                    blocks: vec![ContentBlock::ToolCall(ToolCall {
+                        id: "call-1".into(),
+                        name: "Echo".into(),
+                        arguments: serde_json::json!({}),
+                    })],
+                },
+                stop_reason: StopReason::ToolUse,
+                usage: None,
+                model: None,
+            },
+            CompletionResponse {
+                message: Message::assistant("done after tool"),
+                stop_reason: StopReason::EndTurn,
+                usage: None,
+                model: None,
+            },
+        ]));
+        let mut tools = ToolRegistry::new();
+        tools.register(EchoTool);
+        let runtime = AgentRuntime::new(AgentConfig::default(), provider, tools).unwrap();
+        let session = runtime.create_session().await.unwrap();
+
+        let result = runtime.run_turn(&session, "use the tool").await.unwrap();
+
+        assert_eq!(result.final_message.text_content(), "done after tool");
+        assert_eq!(
+            result
+                .events
+                .iter()
+                .filter(|event| matches!(event, TurnEvent::IterationStarted { .. }))
+                .count(),
+            2
+        );
+        let messages = session.messages().await;
+        let tool_index = messages.iter().position(|message| message.role == Role::Tool).unwrap();
+        let final_index = messages
+            .iter()
+            .position(|message| message.text_content() == "done after tool")
+            .unwrap();
+        assert!(tool_index < final_index);
+    }
+
+    #[tokio::test]
+    async fn max_iterations_failure_rolls_back_the_entire_turn() {
+        let provider = Arc::new(MockProvider::new(vec![CompletionResponse {
+            message: Message {
+                role: Role::Assistant,
+                blocks: vec![ContentBlock::ToolCall(ToolCall {
+                    id: "call-1".into(),
+                    name: "Echo".into(),
+                    arguments: serde_json::json!({}),
+                })],
+            },
+            stop_reason: StopReason::ToolUse,
+            usage: None,
+            model: None,
+        }]));
+        let config = AgentConfig { max_iterations: Some(1), ..AgentConfig::default() };
+        let mut tools = ToolRegistry::new();
+        tools.register(EchoTool);
+        let runtime = AgentRuntime::new(config, provider, tools).unwrap();
+        let session = runtime.create_session().await.unwrap();
+
+        let error = runtime.run_turn(&session, "use the tool").await.unwrap_err();
+
+        assert!(matches!(error, AgentError::MaxIterations(1)));
+        assert!(session.messages().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn hard_token_budget_emits_event_returns_error_and_rolls_back() {
+        let config = AgentConfig {
+            token_budget: Some(TokenBudget { max_tokens: 1, compact_at_tokens: 1 }),
+            compaction: None,
+            ..AgentConfig::default()
+        };
+        let runtime =
+            AgentRuntime::new(config, Arc::new(MockProvider::new(Vec::new())), ToolRegistry::new())
+                .unwrap();
+        let session = runtime.create_session().await.unwrap();
+        let mut handle = runtime
+            .start_turn(&session, "this input is intentionally over the token budget")
+            .unwrap();
+        let mut events = Vec::new();
+        while let Some(event) = handle.next().await {
+            events.push(event);
+        }
+        let error = handle.finish().await.unwrap_err();
+
+        assert!(matches!(error, AgentError::TokenBudgetExceeded { max_tokens: 1, .. }));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, TurnEvent::TokenBudgetExceeded { max_tokens: 1, .. }))
+        );
+        assert!(events.iter().any(|event| matches!(event, TurnEvent::TurnFailed { .. })));
+        assert!(session.messages().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn retryable_provider_failure_emits_retry_and_recovers() {
+        let config = AgentConfig {
+            retry: RetryConfig { max_retries: 1, base_delay_ms: 0, max_delay_ms: 0 },
+            ..AgentConfig::default()
+        };
+        let provider = Arc::new(RetryOnceProvider { calls: AtomicUsize::new(0) });
+        let runtime = AgentRuntime::new(config, provider.clone(), ToolRegistry::new()).unwrap();
+        let session = runtime.create_session().await.unwrap();
+
+        let result = runtime.run_turn(&session, "hello").await.unwrap();
+
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(result.final_message.text_content(), "recovered");
+        assert!(result.events.iter().any(|event| matches!(
+            event,
+            TurnEvent::ProviderRetry { attempt: 1, max_retries: 1, .. }
+        )));
+    }
+
+    #[tokio::test]
     async fn run_turn_commits_messages_and_returns_events() {
         let runtime = runtime_with_response("done");
         let session = runtime.create_session().await.unwrap();
@@ -527,6 +698,11 @@ mod tests {
         release: Arc<tokio::sync::Notify>,
     }
 
+    struct MidTurnInputProvider {
+        calls: AtomicUsize,
+        release_first: Arc<tokio::sync::Notify>,
+    }
+
     #[async_trait]
     impl ModelProvider for ControlledProvider {
         async fn complete(
@@ -544,6 +720,37 @@ mod tests {
                 yield ProviderEvent::MessageStart;
                 yield ProviderEvent::TextDelta("partial".into());
                 self.release.notified().await;
+                yield ProviderEvent::MessageStop {
+                    stop_reason: StopReason::EndTurn,
+                    usage: None,
+                    model: None,
+                };
+            })
+        }
+    }
+
+    #[async_trait]
+    impl ModelProvider for MidTurnInputProvider {
+        async fn complete(
+            &self,
+            _request: CompletionRequest,
+        ) -> Result<CompletionResponse, AgentError> {
+            unreachable!("the mid-turn input provider uses its stream implementation")
+        }
+
+        fn stream_complete<'a>(
+            &'a self,
+            _request: CompletionRequest,
+        ) -> Pin<Box<dyn Stream<Item = Result<ProviderEvent, AgentError>> + Send + 'a>> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async_stream::try_stream! {
+                yield ProviderEvent::MessageStart;
+                if call == 0 {
+                    yield ProviderEvent::TextDelta("first response".into());
+                    self.release_first.notified().await;
+                } else {
+                    yield ProviderEvent::TextDelta("response after input".into());
+                }
                 yield ProviderEvent::MessageStop {
                     stop_reason: StopReason::EndTurn,
                     usage: None,
@@ -577,6 +784,48 @@ mod tests {
         assert!(session.is_busy());
         release.notify_waiters();
         handle.finish().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn input_received_during_sampling_starts_another_iteration() {
+        let release_first = Arc::new(tokio::sync::Notify::new());
+        let runtime = AgentRuntime::new(
+            AgentConfig::default(),
+            Arc::new(MidTurnInputProvider {
+                calls: AtomicUsize::new(0),
+                release_first: Arc::clone(&release_first),
+            }),
+            ToolRegistry::new(),
+        )
+        .unwrap();
+        let session = runtime.create_session().await.unwrap();
+        let mut handle = runtime.start_turn(&session, "initial input").unwrap();
+
+        loop {
+            let event = tokio::time::timeout(std::time::Duration::from_secs(1), handle.next())
+                .await
+                .expect("first response delta should arrive")
+                .expect("event stream should remain open");
+            if matches!(event, TurnEvent::AssistantDelta { ref text } if text == "first response") {
+                break;
+            }
+        }
+        handle.input_sender().send("follow-up input".into()).unwrap();
+        release_first.notify_one();
+
+        let result = handle.finish().await.unwrap();
+
+        assert_eq!(result.final_message.text_content(), "response after input");
+        let messages = session.messages().await;
+        let follow_up_index = messages
+            .iter()
+            .position(|message| message.text_content() == "follow-up input")
+            .unwrap();
+        let final_index = messages
+            .iter()
+            .position(|message| message.text_content() == "response after input")
+            .unwrap();
+        assert!(follow_up_index < final_index);
     }
 
     #[tokio::test]
@@ -635,8 +884,10 @@ mod tests {
 
     #[tokio::test]
     async fn persistence_failure_rolls_back_turn() {
-        let mut config = AgentConfig::default();
-        config.storage = Some(Arc::new(FailingStorage(AtomicUsize::new(0))));
+        let config = AgentConfig {
+            storage: Some(Arc::new(FailingStorage(AtomicUsize::new(0)))),
+            ..AgentConfig::default()
+        };
         let provider = Arc::new(MockProvider::new(vec![CompletionResponse {
             message: Message::assistant("done"),
             stop_reason: StopReason::EndTurn,
@@ -655,8 +906,10 @@ mod tests {
     #[tokio::test]
     async fn resume_restores_persisted_conversation() {
         let dir = tempfile::tempdir().unwrap();
-        let mut config = AgentConfig::default();
-        config.storage = Some(Arc::new(crate::storage::JsonlStorage::new(dir.path()).unwrap()));
+        let config = AgentConfig {
+            storage: Some(Arc::new(crate::storage::JsonlStorage::new(dir.path()).unwrap())),
+            ..AgentConfig::default()
+        };
         let provider = Arc::new(MockProvider::new(vec![CompletionResponse {
             message: Message::assistant("persisted"),
             stop_reason: StopReason::EndTurn,

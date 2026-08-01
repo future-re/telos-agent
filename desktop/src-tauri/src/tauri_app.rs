@@ -336,10 +336,9 @@ async fn send_prompt(
             {
                 settings.runtime_dir = Some(resource_dir.join("resources"));
             }
-            let host = Arc::new(Mutex::new(AgentHost::new(
-                settings.clone(),
-                Some(manual_approval_handler),
-            )?));
+            let host = Arc::new(Mutex::new(
+                AgentHost::new(settings.clone(), Some(manual_approval_handler)).await?,
+            ));
             hosts.insert(session_id.clone(), HostEntry { settings, host: host.clone() });
             host
         }

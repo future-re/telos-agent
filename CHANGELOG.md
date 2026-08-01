@@ -7,13 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Replaced the internal pass state machine with a direct `agent_loop` owned by `AgentRuntime`.
+- Replaced removed plugin hooks/interceptors with semantic lifecycle policies for session, model, tool, and turn boundaries.
+- Lifecycle policy events now stream as they happen and distinguish completion, rejection, and execution failure.
+
+### Fixed
+- Corrected crates.io and Python sdist paths after the `core` directory was renamed to `runtime`.
+- Moved built-in prompt templates into the runtime crate so published source archives compile independently.
+- Advanced workspace package versions together so dependent crates resolve the current runtime API.
+- Added dedicated desktop and Windows WSL2 CI gates, and corrected desktop release artifact paths.
+- Aligned site CI with Astro's supported Node.js versions.
+- Restored workspace tests, strict Clippy, and runtime doctests.
+
 ## [0.1.2] - 2026-06-29
 
 ### Added
 - **Prompt system v2**: expanded `PromptAssembly` with built-in sections (`ToneStyleSection`, `TaskGuidanceSection`, `SafetySection`, `ToolUsageSection`), richer `IdentitySection`, and `PromptBlock` cache boundary support.
 - **Default prompt assembly**: `default_coding_assembly()` helper, `AgentConfig::with_default_prompt_assembly()` builder, automatic fallback when no prompt is configured.
 - **Tool prompts**: `Tool::prompt_text()` injects usage guidance into the system prompt; `ToolPromptsSection` renders all registered tool prompts.
-- **System reminders**: `SystemReminder` enum with runtime injection of `<system-reminder>` messages after compaction and hook interception.
+- **System reminders**: `SystemReminder` enum with runtime injection of `<system-reminder>` messages after compaction and lifecycle interception.
 - **Bundled skills**: `explore` skill for deep codebase research; `AgentConfig::with_bundled_skills()` loads and exposes bundled skills.
 - Release workflow: changelog generation, checksum calculation, desktop artifact upload.
 
@@ -75,7 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Integration test suite (22 tests)
 - GitHub Actions CI (build + test on push/PR to main)
 
-[Unreleased]: https://github.com/future-re/tiny_agent_core/compare/v0.1.2...HEAD
-[0.1.2]: https://github.com/future-re/tiny_agent_core/releases/tag/v0.1.2
-[0.1.1]: https://github.com/future-re/tiny_agent_core/releases/tag/v0.1.1
-[0.1.0]: https://github.com/future-re/tiny_agent_core/releases/tag/v0.1.0
+[Unreleased]: https://github.com/future-re/telos-agent/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/future-re/telos-agent/releases/tag/v0.1.2
+[0.1.1]: https://github.com/future-re/telos-agent/releases/tag/v0.1.1
+[0.1.0]: https://github.com/future-re/telos-agent/releases/tag/v0.1.0

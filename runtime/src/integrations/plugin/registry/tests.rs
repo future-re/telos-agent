@@ -249,6 +249,118 @@ fn apply_registers_plugin_tools_with_namespace() {
     assert!(tool.is_ok(), "plugin tool should be registered with namespace prefix");
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn apply_registers_and_executes_command_policy() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = TempDir::new().unwrap();
+    let plugin_dir = tmp.path().join("installed").join("policy-plugin@mkt");
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    let script = plugin_dir.join("guard.sh");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\ncat >/dev/null\nprintf '%s' '{\"decision\":\"continue\",\"feedback\":[\"from plugin\"]}'\n",
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&script).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&script, permissions).unwrap();
+    let manifest = serde_json::json!({
+        "name": "policy-plugin",
+        "policies": {
+            "sessionStart": [{
+                "name": "session-guard",
+                "command": "./guard.sh"
+            }]
+        }
+    });
+    std::fs::write(
+        plugin_dir.join("plugin.json"),
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+
+    let mut registry = PluginRegistry::new(tmp.path());
+    registry.discover_installed().unwrap();
+    registry.enable(&PluginId::parse("policy-plugin@mkt").unwrap()).unwrap();
+    let mut tools = crate::ToolRegistry::new();
+    let mut policies = crate::PolicyRegistry::new();
+    let mut skills = crate::SkillRegistry::new();
+    let mut mcp = crate::McpManager::new(std::collections::HashMap::new());
+    let mut prompt = crate::PromptAssembly::new();
+    registry
+        .apply(
+            &mut tools,
+            &mut policies,
+            &std::collections::HashMap::new(),
+            &mut skills,
+            &mut mcp,
+            &mut prompt,
+        )
+        .unwrap();
+
+    let registered = policies.session_start(crate::SessionMode::Create);
+    assert_eq!(registered.len(), 1);
+    assert_eq!(registered[0].name(), "plugin::policy-plugin::session-guard");
+    let outcome = registered[0]
+        .evaluate(&crate::PolicyContext::SessionStart {
+            session_id: "session-1".into(),
+            mode: crate::SessionMode::Create,
+            message_count: 0,
+        })
+        .await
+        .unwrap();
+    assert_eq!(outcome.feedback, vec!["from plugin"]);
+}
+
+#[test]
+fn apply_reports_declared_but_unsupported_components() {
+    let tmp = TempDir::new().unwrap();
+    let plugin_dir = tmp.path().join("installed").join("future-plugin@mkt");
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    std::fs::write(plugin_dir.join("style.json"), "{}").unwrap();
+    std::fs::write(
+        plugin_dir.join("plugin.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "name": "future-plugin",
+            "outputStyles": ["style.json"],
+            "settings": {"theme": "dark"}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let mut registry = PluginRegistry::new(tmp.path());
+    registry.discover_installed().unwrap();
+    registry.enable(&PluginId::parse("future-plugin@mkt").unwrap()).unwrap();
+    let mut tools = crate::ToolRegistry::new();
+    let mut policies = crate::PolicyRegistry::new();
+    let mut skills = crate::SkillRegistry::new();
+    let mut mcp = crate::McpManager::new(std::collections::HashMap::new());
+    let mut prompt = crate::PromptAssembly::new();
+
+    let errors = registry
+        .apply(
+            &mut tools,
+            &mut policies,
+            &std::collections::HashMap::new(),
+            &mut skills,
+            &mut mcp,
+            &mut prompt,
+        )
+        .unwrap_err();
+
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        PluginError::ComponentLoadFailed(_, detail) if detail.contains("output style")
+    )));
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        PluginError::ComponentLoadFailed(_, detail) if detail.contains("settings")
+    )));
+}
+
 #[test]
 fn apply_subagents_registers_plugin_agents_with_namespace() {
     let tmp = TempDir::new().unwrap();

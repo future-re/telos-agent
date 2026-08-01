@@ -7,9 +7,44 @@ telos includes extension points for plugins and MCP so tool ecosystems can be re
 
 ## Plugins
 
-The core API exposes `PluginRegistry`, `PluginId`, `PluginError`, and `BUILTIN_MARKETPLACE`. Plugins can load manifest metadata, tool specs, skills, prompt sections, MCP declarations, and subagents.
+The runtime API exposes `PluginRegistry`, `PluginId`, `PluginError`, and `BUILTIN_MARKETPLACE`. Plugins can load tool specs, lifecycle policies, skills, prompt sections, MCP declarations, and subagents.
 
 Marketplace metadata is represented by `BUILTIN_MARKETPLACE` and plugin registry data. Use it to describe available plugin entries rather than hard-coding extension behavior in a client.
+
+The legacy `hooks` and `interceptors` manifest fields are rejected. Use semantic lifecycle policies instead:
+
+```json
+{
+  "name": "guardrails",
+  "policies": {
+    "sessionStart": [
+      {
+        "name": "load-context",
+        "mode": "create",
+        "command": "./bin/session-policy",
+        "timeout": 30000
+      }
+    ],
+    "toolBeforeInvoke": [
+      {
+        "name": "shell-guard",
+        "matcher": "Bash*",
+        "command": "./bin/tool-policy"
+      }
+    ]
+  }
+}
+```
+
+Policy commands run with the plugin directory as their working directory. They receive a tagged `PolicyContext` JSON object on stdin and must write exactly one outcome object to stdout:
+
+```json
+{"decision":"continue","feedback":["optional model feedback"]}
+```
+
+To reject an operation, return `{"decision":"reject","reason":"explanation"}`. Policy process failures and policy rejections are emitted as distinct `PolicyFailed` and `PolicyRejected` events. Output is bounded to 1 MiB, and invalid matchers, empty commands, or zero timeouts fail manifest validation.
+
+`lspServers`, `outputStyles`, `settings`, and `userConfig` are reserved but are not runtime capabilities yet. Declaring them produces an explicit degraded plugin error instead of being silently reported as loaded.
 
 ## Skills
 

@@ -16,7 +16,7 @@ pub use context::{
 
 macro_rules! prompt_template {
     ($name:expr) => {
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../prompt/", $name))
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/prompt/", $name))
     };
 }
 

@@ -5,13 +5,13 @@ description: Understand the runtime pieces that make up a telos agent turn.
 
 telos is organized around a small set of runtime concepts that can be used from the library, CLI, or product clients.
 
-## AgentSession
+## AgentRuntime and AgentSession
 
-`AgentSession` holds conversation state and configuration for the turn loop. It exposes blocking and streaming turn APIs through `run_turn` and `run_turn_stream`, returning `TurnResult` data and emitting `TurnEvent` values as work progresses.
+`AgentRuntime` owns configuration, the model provider, and the tool registry. `AgentSession` holds isolated conversation state and metrics. `run_turn` collects a complete result; `start_turn` returns a streaming handle that emits `TurnEvent` values and finishes with a `TurnResult`.
 
 ## Provider
 
-A `ModelProvider` connects the runtime to an LLM backend. The core crate includes `DeepSeekProvider`, `RoutedProvider`, and `MockProvider`. The CLI currently supports `deepseek` and `mock` providers.
+A `ModelProvider` connects the runtime to an LLM backend. The runtime crate includes `DeepSeekProvider`, `RoutedProvider`, and `MockProvider`. The CLI currently supports `deepseek` and `mock` providers.
 
 `RoutedProvider` supports dual-model routing, with a thinking model for planning and recovery and a fast model for tool execution and routine follow-up iterations.
 
@@ -31,9 +31,13 @@ Sensitive tool calls can be gated by `ApprovalHandler`, `ApprovalRequest`, and `
 
 `TurnEvent` exposes runtime progress such as sampling, tool execution, compaction, and stop phases. The TUI consumes these events to render streaming model output, tool status, approvals, and turn summaries.
 
+## Lifecycle policies
+
+`PolicyRegistry` runs semantic lifecycle policies at session start, after model responses, before and after tool invocation, and before a turn finishes. A policy may continue, reject, or return feedback for another model iteration. These policies are distinct from `ApprovalHandler` and `PermissionEngine`, which govern human/tool authorization.
+
 ## Storage
 
-The `Storage` trait supports persistent session state. The core crate includes `JsonlStorage` for JSONL persistence and `NoopStorage` for sessions that should not write state.
+The `Storage` trait supports persistent session state. The runtime crate includes `JsonlStorage` for JSONL persistence and `NoopStorage` for sessions that should not write state.
 
 ## Memory
 

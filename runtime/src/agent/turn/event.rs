@@ -59,6 +59,10 @@ pub enum TurnEvent {
     CompactionCompleted {
         reason: String,
     },
+    CompactionFailed {
+        reason: String,
+        error: String,
+    },
     TokenBudgetExceeded {
         used_tokens: usize,
         max_tokens: usize,
@@ -71,6 +75,16 @@ pub enum TurnEvent {
         point: String,
         name: String,
         feedback_count: usize,
+    },
+    PolicyRejected {
+        point: String,
+        name: String,
+        reason: String,
+    },
+    PolicyFailed {
+        point: String,
+        name: String,
+        error: String,
     },
     ApprovalRequested {
         tool_call_id: String,
@@ -180,6 +194,9 @@ impl TurnEvent {
             }
             TurnEvent::CompactionStarted { reason } => format!("compaction_started:{reason}"),
             TurnEvent::CompactionCompleted { reason } => format!("compaction_completed:{reason}"),
+            TurnEvent::CompactionFailed { reason, error } => {
+                format!("compaction_failed:{reason}:{error}")
+            }
             TurnEvent::TokenBudgetExceeded { used_tokens, max_tokens } => {
                 format!("token_budget_exceeded:{used_tokens}/{max_tokens}")
             }
@@ -188,6 +205,12 @@ impl TurnEvent {
             }
             TurnEvent::PolicyCompleted { point, name, feedback_count } => {
                 format!("policy_completed:{point}:{name}:{feedback_count}")
+            }
+            TurnEvent::PolicyRejected { point, name, reason } => {
+                format!("policy_rejected:{point}:{name}:{reason}")
+            }
+            TurnEvent::PolicyFailed { point, name, error } => {
+                format!("policy_failed:{point}:{name}:{error}")
             }
             TurnEvent::ApprovalRequested { tool_call_id, name, reason } => {
                 format!("approval_requested:{name}#{tool_call_id}:{reason}")

@@ -7,28 +7,19 @@ use crate::error::AgentError;
 use crate::model::provider::ModelProvider;
 
 use super::super::{session::SessionInfo, state::RuntimeState};
-use super::MAX_CONSECUTIVE_COMPACTION_FAILURES;
+const MAX_CONSECUTIVE_COMPACTION_FAILURES: usize = 3;
 
-/// Outcome of the compaction phase.
-pub(super) enum CompactionPhaseResult {
-    /// Proceed with the current turn, possibly with compaction events recorded.
-    Continue { events: Vec<TurnEvent>, compactions: usize },
-    /// The turn must be aborted (e.g., token budget is already exceeded).
-    AbortTurn { events: Vec<TurnEvent> },
-}
-
-pub(super) async fn run_compaction_phase<P>(
+pub(super) async fn compact_if_needed<P>(
     session: &mut SessionInfo,
     context: &mut Conversation,
     state: &mut RuntimeState,
     provider: &P,
     iteration: usize,
-) -> Result<CompactionPhaseResult, AgentError>
+) -> Result<bool, AgentError>
 where
     P: ModelProvider,
 {
-    let mut events = Vec::new();
-    let mut compactions = 0;
+    let mut compacted = false;
 
     // Circuit breaker: skip compaction after repeated failures.
     if state.compaction_failures() >= MAX_CONSECUTIVE_COMPACTION_FAILURES {
@@ -37,7 +28,7 @@ where
             failures = state.compaction_failures(),
             "compaction circuit breaker open — skipping compaction this iteration"
         );
-        return Ok(CompactionPhaseResult::Continue { events, compactions });
+        return Ok(compacted);
     }
 
     if let Some(budget) = session.config().token_budget {
@@ -54,8 +45,10 @@ where
                 max_tokens: budget.max_tokens,
             };
             session.emit_turn_event(&event);
-            events.push(event);
-            return Ok(CompactionPhaseResult::AbortTurn { events });
+            return Err(AgentError::TokenBudgetExceeded {
+                used_tokens: estimated_tokens,
+                max_tokens: budget.max_tokens,
+            });
         }
         // Soft threshold: compact to stay within budget.
         if estimated_tokens >= budget.compact_at_tokens
@@ -70,10 +63,9 @@ where
             .await;
             let started = TurnEvent::CompactionStarted { reason: "token_budget".into() };
             session.emit_turn_event(&started);
-            events.push(started);
             match compaction.compact(context.messages_mut(), provider).await {
                 Ok(true) => {
-                    compactions += 1;
+                    compacted = true;
                     state.set_compaction_failures(0);
                     info!(iteration, "token-budget compaction applied");
                 }
@@ -87,18 +79,17 @@ where
                         error = %e,
                         "compaction failed"
                     );
-                    let completed =
-                        TurnEvent::CompactionCompleted { reason: "token_budget".into() };
-                    session.emit_turn_event(&completed);
-                    events.push(completed);
+                    session.emit_turn_event(&TurnEvent::CompactionFailed {
+                        reason: "token_budget".into(),
+                        error: e.to_string(),
+                    });
                     return Err(e);
                 }
             }
             let completed = TurnEvent::CompactionCompleted { reason: "token_budget".into() };
             session.emit_turn_event(&completed);
-            events.push(completed);
         }
     }
 
-    Ok(CompactionPhaseResult::Continue { events, compactions })
+    Ok(compacted)
 }

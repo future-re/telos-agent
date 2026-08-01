@@ -8,13 +8,13 @@ use crate::config::CancellationState;
 use crate::error::AgentError;
 use crate::model::message::{Message, Role};
 use crate::model::provider::{
-    CompletionRequest, CompletionResponse, ModelProvider, ProviderEvent, StopReason, TokenUsage,
+    CompletionRequest, CompletionResponse, ModelProvider, ProviderEvent, StopReason,
 };
 use crate::{ModelHint, ToolDefinition, TurnEvent};
 
 use super::super::{session::SessionInfo, state::RuntimeState};
 
-pub async fn call_provider<P: ModelProvider, F: FnMut(TurnEvent)>(
+async fn stream_completion<P: ModelProvider, F: FnMut(TurnEvent)>(
     request: CompletionRequest,
     provider: &P,
     cancellation: &CancellationState,
@@ -81,7 +81,7 @@ pub async fn call_provider<P: ModelProvider, F: FnMut(TurnEvent)>(
     Ok(CompletionResponse { message, stop_reason, usage, model })
 }
 
-pub(super) async fn call_with_retry<P>(
+pub(super) async fn complete_with_retry<P>(
     session: &mut SessionInfo,
     context: &mut Conversation,
     state: &mut RuntimeState,
@@ -89,13 +89,12 @@ pub(super) async fn call_with_retry<P>(
     system_prompt_blocks: &[PromptBlock],
     tool_definitions: &[ToolDefinition],
     hint: ModelHint,
-) -> Result<(Message, StopReason, Option<TokenUsage>, Option<String>, Vec<TurnEvent>), AgentError>
+) -> Result<CompletionResponse, AgentError>
 where
     P: ModelProvider,
 {
     let max_tokens = provider.max_tokens();
     let mut retries = 0usize;
-    let mut events = Vec::new();
 
     loop {
         if session.config().cancellation.is_cancelled() {
@@ -110,25 +109,26 @@ where
             max_tokens: Some(max_tokens),
         };
         let cancellation = session.config().cancellation.clone();
-        match call_provider(request, provider, &cancellation, |event| {
+        match stream_completion(request, provider, &cancellation, |event| {
             session.emit_turn_event(&event)
         })
         .await
         {
-            Ok(response) => {
-                return Ok((
-                    response.message,
-                    response.stop_reason,
-                    response.usage,
-                    response.model,
-                    events,
-                ));
-            }
+            Ok(response) => return Ok(response),
             Err(e) => {
                 if e.is_context_too_long()
                     && let Some(compaction) = session.config().compaction.clone()
                 {
                     warn!(error = %e, "context window exceeded; attempting compaction");
+                    let _ = super::super::session::persistence::save_pre_compact_snapshot(
+                        session.session_id(),
+                        session.config(),
+                        context.messages(),
+                    )
+                    .await;
+                    session.emit_turn_event(&TurnEvent::CompactionStarted {
+                        reason: "reactive".into(),
+                    });
                     match compaction.compact(context.messages_mut(), provider).await {
                         Ok(true) => {
                             info!("reactive compaction succeeded");
@@ -138,17 +138,23 @@ where
                                     reason: "reactive".into(),
                                 },
                             );
-                            events.push(TurnEvent::CompactionStarted { reason: "reactive".into() });
-                            events
-                                .push(TurnEvent::CompactionCompleted { reason: "reactive".into() });
-                            for event in events.iter().rev().take(2).rev() {
-                                session.emit_turn_event(event);
-                            }
+                            session.emit_turn_event(&TurnEvent::CompactionCompleted {
+                                reason: "reactive".into(),
+                            });
                             continue;
                         }
-                        Ok(false) => warn!("reactive compaction had no effect"),
+                        Ok(false) => {
+                            warn!("reactive compaction had no effect");
+                            session.emit_turn_event(&TurnEvent::CompactionCompleted {
+                                reason: "reactive".into(),
+                            });
+                        }
                         Err(compaction_error) => {
-                            warn!(error = %compaction_error, "reactive compaction failed")
+                            warn!(error = %compaction_error, "reactive compaction failed");
+                            session.emit_turn_event(&TurnEvent::CompactionFailed {
+                                reason: "reactive".into(),
+                                error: compaction_error.to_string(),
+                            });
                         }
                     }
                 }
@@ -157,14 +163,11 @@ where
                     retries += 1;
                     let delay = session.config().retry.delay_for(retries);
                     state.metrics_mut().add_retry();
-                    events.push(TurnEvent::ProviderRetry {
+                    session.emit_turn_event(&TurnEvent::ProviderRetry {
                         attempt: retries,
                         max_retries: session.config().retry.max_retries,
                         delay_ms: delay.as_millis() as u64,
                     });
-                    if let Some(event) = events.last() {
-                        session.emit_turn_event(event);
-                    }
                     warn!(attempt = retries, error = %e, "provider call failed; retrying");
                     tokio::select! {
                         _ = cancellation.cancelled() => return Err(AgentError::Cancelled),

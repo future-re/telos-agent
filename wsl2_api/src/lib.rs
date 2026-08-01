@@ -185,7 +185,7 @@ pub fn launch(
     stderr: Option<HANDLE>,
 ) -> Result<HANDLE> {
     let dist_w = to_wide(distribution)?;
-    let cmd_w = command.map(|c| to_wide(c)).transpose()?;
+    let cmd_w = command.map(to_wide).transpose()?;
     let cmd_ptr = cmd_w.as_ref().map_or(std::ptr::null(), |v| v.as_ptr());
     let mut process: HANDLE = std::ptr::null_mut();
     let hr = unsafe {
@@ -212,7 +212,7 @@ pub fn launch(
 /// Returns the process exit code.
 pub fn launch_interactive(distribution: &str, command: Option<&str>, use_cwd: bool) -> Result<u32> {
     let dist_w = to_wide(distribution)?;
-    let cmd_w = command.map(|c| to_wide(c)).transpose()?;
+    let cmd_w = command.map(to_wide).transpose()?;
     let cmd_ptr = cmd_w.as_ref().map_or(std::ptr::null(), |v| v.as_ptr());
     let mut exit_code = 0u32;
     let hr = unsafe {

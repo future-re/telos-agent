@@ -203,7 +203,7 @@ pub struct AgentHost {
 }
 
 impl AgentHost {
-    pub fn new(
+    pub async fn new(
         overrides: DesktopSettingsOverrides,
         manual_approval_handler: Option<Arc<dyn ApprovalHandler>>,
     ) -> Result<Self, String> {
@@ -648,6 +648,7 @@ mod tests {
             },
             None,
         )
+        .await
         .expect("mock host should initialize");
 
         let mut events = Vec::new();

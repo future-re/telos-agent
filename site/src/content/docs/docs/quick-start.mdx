@@ -68,17 +68,19 @@ Minimal runtime example:
 
 ```rust
 use telos_agent::{
-    AgentConfig, AgentSession, DeepSeekConfig, DeepSeekProvider, ToolRegistry,
+    AgentConfig, AgentRuntime, DeepSeekConfig, DeepSeekProvider, ToolRegistry,
     register_core_tools,
 };
+use std::sync::Arc;
 
 # async fn example() -> Result<(), telos_agent::AgentError> {
-let provider = DeepSeekProvider::new(DeepSeekConfig::from_env("deepseek-v4-pro")?);
+let provider = Arc::new(DeepSeekProvider::new(DeepSeekConfig::from_env("deepseek-v4-pro")?));
 let mut tools = ToolRegistry::new();
 register_core_tools(&mut tools);
 
-let mut session = AgentSession::new(AgentConfig::default())?;
-let result = session.run_turn(&provider, &tools, "Summarize this project").await?;
+let runtime = AgentRuntime::new(AgentConfig::default(), provider, tools)?;
+let session = runtime.create_session().await?;
+let result = runtime.run_turn(&session, "Summarize this project").await?;
 println!("{}", result.final_message.text_content());
 # Ok(())
 # }

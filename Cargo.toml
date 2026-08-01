@@ -1,5 +1,6 @@
 [workspace]
-# members = ["runtime", "cli", "desktop/src-tauri", "wsl2_api"]
 members = ["runtime", "host", "cli"]
+# Platform-specific crates are tested by dedicated CI jobs. Keeping them outside the main
+# workspace avoids pulling Tauri/Windows-only dependencies into every runtime build.
 exclude = ["desktop/src-tauri", "wsl2_api"]
 resolver = "3"

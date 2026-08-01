@@ -38,12 +38,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: site/package-lock.json
 
       - name: Generate Rust API docs
-        run: ./scripts/generate-core-api-docs.sh
+        run: ./scripts/generate-runtime-api-docs.sh
 
       - name: Install site dependencies
         working-directory: site

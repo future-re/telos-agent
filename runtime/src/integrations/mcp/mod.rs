@@ -6,7 +6,7 @@
 //! # Quick start
 //!
 //! ```rust,no_run
-//! use telos_agent::mcp::{McpClient, McpServerConfig};
+//! use telos_agent::integrations::mcp::{McpClient, McpServerConfig};
 //!
 //! # async fn example() -> Result<(), telos_agent::AgentError> {
 //! let config = McpServerConfig::new("npx", vec![

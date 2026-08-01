@@ -25,7 +25,8 @@ pub(crate) async fn invoke_tool(
     context: ToolContext,
     config: &AgentConfig,
     tools: &ToolRegistry,
-) -> (Vec<ToolExecutionEvent>, ToolResult, Vec<String>) {
+    emit_event: &(dyn Fn(ToolExecutionEvent) + Sync),
+) -> (ToolResult, Vec<String>) {
     // 1. Validate
     if let Err(err) = validate_call(&call, &tool, &context, config, tools).await {
         record_tool_failure(
@@ -36,12 +37,11 @@ pub(crate) async fn invoke_tool(
             &err.to_string(),
         )
         .await;
-        return (Vec::new(), error_result(&call, "validation_error", err.to_string()), Vec::new());
+        return (error_result(&call, "validation_error", err.to_string()), Vec::new());
     }
 
     // 2. Permission + approval loop
     let tool_name = tool.definition().name.clone();
-    let mut events = Vec::new();
     let permission = loop {
         let decision = evaluate_permission(&call, &tool, &context, config, &tool_name).await;
 
@@ -52,7 +52,7 @@ pub(crate) async fn invoke_tool(
             break decision;
         };
 
-        events.push(ToolExecutionEvent::ApprovalRequested {
+        emit_event(ToolExecutionEvent::ApprovalRequested {
             tool_call_id: call.id.clone(),
             name: call.name.clone(),
             reason: reason.clone(),
@@ -66,7 +66,7 @@ pub(crate) async fn invoke_tool(
             reason: reason.clone(),
         };
         let approval = handler.ask(request).await;
-        events.push(ToolExecutionEvent::ApprovalResolved {
+        emit_event(ToolExecutionEvent::ApprovalResolved {
             tool_call_id: call.id.clone(),
             name: call.name.clone(),
             decision: format!("{approval:?}"),
@@ -93,7 +93,7 @@ pub(crate) async fn invoke_tool(
     // 3. Invoke or return error
     match permission {
         Ok(PermissionDecision::Allow) => {
-            let (mut feedback, before_events) = match evaluate_tool_policies(
+            let mut feedback = match evaluate_tool_policies(
                 config.policies.tool_before(&call.name),
                 PolicyContext::ToolBeforeInvoke {
                     session_id: context.session_id.clone(),
@@ -101,15 +101,16 @@ pub(crate) async fn invoke_tool(
                     call: call.clone(),
                 },
                 "tool_before_invoke",
+                emit_event,
             )
             .await
             {
                 Ok(outcome) => outcome,
-                Err(reason) => {
-                    return (events, error_result(&call, "policy_rejected", reason), Vec::new());
+                Err(failure) => {
+                    let (kind, reason) = failure.into_parts();
+                    return (error_result(&call, kind, reason), Vec::new());
                 }
             };
-            events.extend(before_events);
             let mut result = match run_tool(&call, &tool, context.clone(), config).await {
                 Ok(output) => ToolResult {
                     tool_call_id: call.id.clone(),
@@ -139,16 +140,19 @@ pub(crate) async fn invoke_tool(
                     result: result.clone(),
                 },
                 "tool_after_invoke",
+                emit_event,
             )
             .await
             {
-                Ok((after_feedback, after_events)) => {
+                Ok(after_feedback) => {
                     feedback.extend(after_feedback);
-                    events.extend(after_events);
                 }
-                Err(reason) => result = error_result(&call, "policy_rejected", reason),
+                Err(failure) => {
+                    let (kind, reason) = failure.into_parts();
+                    result = error_result(&call, kind, reason);
+                }
             }
-            (events, result, feedback)
+            (result, feedback)
         }
         Ok(PermissionDecision::Deny { reason }) => {
             record_tool_failure(
@@ -159,7 +163,7 @@ pub(crate) async fn invoke_tool(
                 &reason,
             )
             .await;
-            (events, error_result(&call, "permission_denied", reason), Vec::new())
+            (error_result(&call, "permission_denied", reason), Vec::new())
         }
         Ok(PermissionDecision::Ask { reason }) => {
             record_tool_failure(
@@ -170,13 +174,13 @@ pub(crate) async fn invoke_tool(
                 &reason,
             )
             .await;
-            (events, error_result(&call, "permission_required", reason), Vec::new())
+            (error_result(&call, "permission_required", reason), Vec::new())
         }
         Err(err) => {
             let msg = err.to_string();
             record_tool_failure(config, &context, &call, ToolFailureKind::PermissionError, &msg)
                 .await;
-            (events, error_result(&call, "permission_error", msg), Vec::new())
+            (error_result(&call, "permission_error", msg), Vec::new())
         }
     }
 }
@@ -185,27 +189,59 @@ async fn evaluate_tool_policies(
     policies: Vec<Arc<dyn crate::Policy>>,
     context: PolicyContext,
     point: &str,
-) -> Result<(Vec<String>, Vec<ToolExecutionEvent>), String> {
+    emit_event: &(dyn Fn(ToolExecutionEvent) + Sync),
+) -> Result<Vec<String>, ToolPolicyFailure> {
     let mut feedback = Vec::new();
-    let mut events = Vec::new();
     for policy in policies {
-        events.push(ToolExecutionEvent::PolicyStarted {
+        emit_event(ToolExecutionEvent::PolicyStarted {
             point: point.into(),
             name: policy.name().into(),
         });
-        let outcome = policy.evaluate(&context).await.map_err(|error| error.to_string())?;
+        let outcome = match policy.evaluate(&context).await {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let error = error.to_string();
+                emit_event(ToolExecutionEvent::PolicyFailed {
+                    point: point.into(),
+                    name: policy.name().into(),
+                    error: error.clone(),
+                });
+                return Err(ToolPolicyFailure::Failed { error });
+            }
+        };
         let feedback_count = outcome.feedback.len();
         feedback.extend(outcome.feedback);
         if let PolicyDecision::Reject { reason } = outcome.decision {
-            return Err(format!("policy `{}` rejected: {reason}", policy.name()));
+            emit_event(ToolExecutionEvent::PolicyRejected {
+                point: point.into(),
+                name: policy.name().into(),
+                reason: reason.clone(),
+            });
+            return Err(ToolPolicyFailure::Rejected {
+                reason: format!("policy `{}` rejected: {reason}", policy.name()),
+            });
         }
-        events.push(ToolExecutionEvent::PolicyCompleted {
+        emit_event(ToolExecutionEvent::PolicyCompleted {
             point: point.into(),
             name: policy.name().into(),
             feedback_count,
         });
     }
-    Ok((feedback, events))
+    Ok(feedback)
+}
+
+enum ToolPolicyFailure {
+    Rejected { reason: String },
+    Failed { error: String },
+}
+
+impl ToolPolicyFailure {
+    fn into_parts(self) -> (&'static str, String) {
+        match self {
+            Self::Rejected { reason } => ("policy_rejected", reason),
+            Self::Failed { error } => ("policy_failed", error),
+        }
+    }
 }
 
 // ── Pipeline helpers ────────────────────────────────────────────────────────

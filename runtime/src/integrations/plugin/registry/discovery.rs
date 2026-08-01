@@ -78,10 +78,15 @@ impl PluginRegistry {
                 reason: format!("invalid manifest: {e}"),
             })?;
 
-        if manifest.name.is_empty() {
-            return Err(PluginError::ManifestValidation {
-                errors: vec!["name must not be empty".into()],
-            });
+        let mut validation_errors = Vec::new();
+        if manifest.name.trim().is_empty() {
+            validation_errors.push("name must not be empty".into());
+        }
+        if let Some(policies) = &manifest.policies {
+            validation_errors.extend(policies.validate());
+        }
+        if !validation_errors.is_empty() {
+            return Err(PluginError::ManifestValidation { errors: validation_errors });
         }
 
         // Determine marketplace from the parent directory name

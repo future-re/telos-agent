@@ -8,7 +8,9 @@ use crate::model::message::ToolCall;
 use crate::tools::api::{
     FileReadState, Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry,
 };
-use crate::tools::executor::{ToolExecutionStreamItem, execute_tool_calls_stream};
+use crate::tools::executor::{
+    ToolExecutionEvent, ToolExecutionStreamItem, execute_tool_calls_stream,
+};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde_json::Value;
@@ -52,7 +54,9 @@ impl Tool for ProbeTool {
 struct PanickingTool;
 
 struct RejectTool;
+struct FailPolicy;
 struct CountPolicy(Arc<AtomicUsize>);
+struct BlockingPolicy(Arc<tokio::sync::Notify>);
 
 #[async_trait]
 impl Policy for RejectTool {
@@ -69,12 +73,35 @@ impl Policy for RejectTool {
 }
 
 #[async_trait]
+impl Policy for FailPolicy {
+    fn name(&self) -> &str {
+        "fail-policy"
+    }
+
+    async fn evaluate(&self, _: &PolicyContext) -> Result<PolicyOutcome, AgentError> {
+        Err(AgentError::Config("policy process failed".into()))
+    }
+}
+
+#[async_trait]
 impl Policy for CountPolicy {
     fn name(&self) -> &str {
         "count"
     }
     async fn evaluate(&self, _: &PolicyContext) -> Result<PolicyOutcome, AgentError> {
         self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(PolicyOutcome::continue_())
+    }
+}
+
+#[async_trait]
+impl Policy for BlockingPolicy {
+    fn name(&self) -> &str {
+        "blocking-policy"
+    }
+
+    async fn evaluate(&self, _: &PolicyContext) -> Result<PolicyOutcome, AgentError> {
+        self.0.notified().await;
         Ok(PolicyOutcome::continue_())
     }
 }
@@ -207,7 +234,7 @@ async fn before_tool_policy_rejects_without_invoking_tool() {
         policy: Arc::new(RejectTool),
     });
     let config = AgentConfig { policies: Arc::new(policies), ..test_config(1) };
-    let results = collect_results(execute_tool_calls_stream(
+    let mut stream = Box::pin(execute_tool_calls_stream(
         vec![make_call("call-1", "probe")],
         &tools,
         &config,
@@ -215,13 +242,124 @@ async fn before_tool_policy_rejects_without_invoking_tool() {
         1,
         Arc::new(vec![]),
         empty_read_file_state(),
-    ))
-    .await;
+    ));
+    let mut results = Vec::new();
+    let mut events = Vec::new();
+    while let Some(item) = stream.next().await {
+        match item {
+            ToolExecutionStreamItem::Event(event) => events.push(event),
+            ToolExecutionStreamItem::Result { result, .. } => results.push(result),
+        }
+    }
 
     assert_eq!(results.len(), 1);
     assert!(results[0].is_error);
     assert!(results[0].content.to_string().contains("blocked by test"));
+    assert!(matches!(
+        events.as_slice(),
+        [
+            ToolExecutionEvent::ToolStarted { .. },
+            ToolExecutionEvent::PolicyStarted { .. },
+            ToolExecutionEvent::PolicyRejected { .. }
+        ]
+    ));
     assert_eq!(max.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn failed_tool_policy_emits_failed_event_and_distinct_error_kind() {
+    let mut tools = ToolRegistry::new();
+    tools.register(ProbeTool {
+        current: Arc::new(AtomicUsize::new(0)),
+        max: Arc::new(AtomicUsize::new(0)),
+        delay: std::time::Duration::from_millis(1),
+    });
+    let mut policies = PolicyRegistry::new();
+    policies.register(PolicyEntry {
+        point: PolicyPoint::ToolBeforeInvoke { matcher: Some("probe".into()) },
+        policy: Arc::new(FailPolicy),
+    });
+    let config = AgentConfig { policies: Arc::new(policies), ..test_config(1) };
+    let mut stream = Box::pin(execute_tool_calls_stream(
+        vec![make_call("call-1", "probe")],
+        &tools,
+        &config,
+        "session-1",
+        1,
+        Arc::new(vec![]),
+        empty_read_file_state(),
+    ));
+    let mut result = None;
+    let mut events = Vec::new();
+    while let Some(item) = stream.next().await {
+        match item {
+            ToolExecutionStreamItem::Event(event) => events.push(event),
+            ToolExecutionStreamItem::Result { result: item, .. } => result = Some(item),
+        }
+    }
+
+    let result = result.unwrap();
+    assert!(result.content.to_string().contains("policy_failed"));
+    assert!(matches!(
+        events.as_slice(),
+        [
+            ToolExecutionEvent::ToolStarted { .. },
+            ToolExecutionEvent::PolicyStarted { .. },
+            ToolExecutionEvent::PolicyFailed { .. }
+        ]
+    ));
+}
+
+#[tokio::test]
+async fn policy_started_is_streamed_before_policy_evaluation_finishes() {
+    let mut tools = ToolRegistry::new();
+    tools.register(ProbeTool {
+        current: Arc::new(AtomicUsize::new(0)),
+        max: Arc::new(AtomicUsize::new(0)),
+        delay: std::time::Duration::from_millis(1),
+    });
+    let release = Arc::new(tokio::sync::Notify::new());
+    let mut policies = PolicyRegistry::new();
+    policies.register(PolicyEntry {
+        point: PolicyPoint::ToolBeforeInvoke { matcher: Some("probe".into()) },
+        policy: Arc::new(BlockingPolicy(release.clone())),
+    });
+    let config = AgentConfig { policies: Arc::new(policies), ..test_config(1) };
+    let mut stream = Box::pin(execute_tool_calls_stream(
+        vec![make_call("call-1", "probe")],
+        &tools,
+        &config,
+        "session-1",
+        1,
+        Arc::new(vec![]),
+        empty_read_file_state(),
+    ));
+
+    let first = tokio::time::timeout(std::time::Duration::from_millis(250), stream.next())
+        .await
+        .expect("ToolStarted should be emitted before policy evaluation")
+        .expect("stream should emit an event");
+    assert!(matches!(
+        first,
+        ToolExecutionStreamItem::Event(ToolExecutionEvent::ToolStarted { .. })
+    ));
+    let second = tokio::time::timeout(std::time::Duration::from_millis(250), stream.next())
+        .await
+        .expect("PolicyStarted should be emitted while the policy is still blocked")
+        .expect("stream should emit another event");
+    assert!(matches!(
+        second,
+        ToolExecutionStreamItem::Event(ToolExecutionEvent::PolicyStarted { .. })
+    ));
+
+    release.notify_one();
+    let mut remaining_events = Vec::new();
+    while let Some(item) = stream.next().await {
+        if let ToolExecutionStreamItem::Event(event) = item {
+            remaining_events.push(event);
+        }
+    }
+    assert!(matches!(remaining_events.as_slice(), [ToolExecutionEvent::PolicyCompleted { .. }]));
 }
 
 #[tokio::test]

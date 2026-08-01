@@ -60,6 +60,9 @@ pub enum AgentError {
     /// The turn loop exceeded [`AgentConfig::max_iterations`](crate::AgentConfig::max_iterations).
     #[error("maximum tool iterations reached: {0}")]
     MaxIterations(usize),
+    /// The conversation exceeded the configured hard token budget before a provider call.
+    #[error("token budget exceeded: {used_tokens}/{max_tokens}")]
+    TokenBudgetExceeded { used_tokens: usize, max_tokens: usize },
     /// Provider retries exhausted — every attempt failed.
     #[error("provider retries exhausted after {attempts} attempts: {last_error}")]
     ProviderRetriesExhausted { attempts: usize, last_error: String },

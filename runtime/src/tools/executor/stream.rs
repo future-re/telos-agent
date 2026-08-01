@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tracing::warn;
 
 use super::batch::build_batches;
-use super::invoke::{invoke_tool, json_error_payload, record_tool_failure, tool_detail};
+use super::invoke::{invoke_tool, json_error_payload, record_tool_failure};
 use super::types::{PreparedCall, ToolExecutionEvent, ToolExecutionStreamItem};
 
 enum WorkerMessage {
@@ -34,13 +34,34 @@ pub fn execute_tool_calls_stream<'a>(
 
     stream! {
         for batch in batches {
-            let items = if batch.concurrency_safe && config.tool_concurrency_limit > 1 {
-                execute_concurrent_batch(batch.calls, tools.clone(), config.clone()).await
-            } else {
-                execute_sequential_batch(batch.calls, tools.clone(), config.clone()).await
+            let (send, mut recv) = tokio::sync::mpsc::unbounded_channel();
+            let batch_tools = tools.clone();
+            let batch_config = config.clone();
+            let run_concurrently = batch.concurrency_safe && config.tool_concurrency_limit > 1;
+            let coordinator = async move {
+                if run_concurrently {
+                    execute_concurrent_batch(batch.calls, batch_tools, batch_config, send).await;
+                } else {
+                    execute_sequential_batch(batch.calls, batch_tools, batch_config, send).await;
+                }
             };
-            for item in items {
-                yield item;
+            tokio::pin!(coordinator);
+            loop {
+                tokio::select! {
+                    biased;
+                    maybe_item = recv.recv() => {
+                        match maybe_item {
+                            Some(item) => yield item,
+                            None => break,
+                        }
+                    }
+                    () = &mut coordinator => {
+                        while let Ok(item) = recv.try_recv() {
+                            yield item;
+                        }
+                        break;
+                    }
+                }
             }
         }
     }
@@ -50,12 +71,12 @@ async fn execute_concurrent_batch(
     calls: Vec<PreparedCall>,
     tools: ToolRegistry,
     config: AgentConfig,
-) -> Vec<ToolExecutionStreamItem> {
+    output: tokio::sync::mpsc::UnboundedSender<ToolExecutionStreamItem>,
+) {
     let limit = config.tool_concurrency_limit;
     let mut queued = calls.into_iter().peekable();
     let mut active = 0usize;
     let mut completed = Vec::new();
-    let mut items = Vec::new();
     let (send, mut recv) = tokio::sync::mpsc::unbounded_channel::<WorkerMessage>();
     let worker_tx = send.clone();
     let mut join_set = tokio::task::JoinSet::new();
@@ -79,7 +100,7 @@ async fn execute_concurrent_batch(
     loop {
         match recv.recv().await {
             Some(WorkerMessage::Event(event)) => {
-                items.push(ToolExecutionStreamItem::Event(event));
+                let _ = output.send(ToolExecutionStreamItem::Event(event));
             }
             Some(WorkerMessage::Done { index, result, feedback }) => {
                 active -= 1;
@@ -109,32 +130,31 @@ async fn execute_concurrent_batch(
 
     completed.sort_by_key(|(index, _, _)| *index);
     for (_, result, feedback) in completed {
-        items.push(ToolExecutionStreamItem::Result { result, feedback });
+        let _ = output.send(ToolExecutionStreamItem::Result { result, feedback });
     }
-
-    items
 }
 
 async fn execute_sequential_batch(
     calls: Vec<PreparedCall>,
     tools: ToolRegistry,
     config: AgentConfig,
-) -> Vec<ToolExecutionStreamItem> {
-    let mut items = Vec::new();
+    output: tokio::sync::mpsc::UnboundedSender<ToolExecutionStreamItem>,
+) {
     for prepared in calls {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<WorkerMessage>();
         let mut join_set = tokio::task::JoinSet::new();
         spawn_tool_event_worker(&mut join_set, prepared, tools.clone(), config.clone(), tx);
         while let Some(msg) = rx.recv().await {
             match msg {
-                WorkerMessage::Event(event) => items.push(ToolExecutionStreamItem::Event(event)),
+                WorkerMessage::Event(event) => {
+                    let _ = output.send(ToolExecutionStreamItem::Event(event));
+                }
                 WorkerMessage::Done { index: _, result, feedback } => {
-                    items.push(ToolExecutionStreamItem::Result { result, feedback })
+                    let _ = output.send(ToolExecutionStreamItem::Result { result, feedback });
                 }
             }
         }
     }
-    items
 }
 
 fn spawn_tool_event_worker(
@@ -189,7 +209,7 @@ async fn run_tool_with_event_forwarding(
     tx: tokio::sync::mpsc::UnboundedSender<WorkerMessage>,
 ) {
     let index = prepared.index;
-    let detail = tool_detail(&tools, &prepared.call.name, &prepared.call.arguments);
+    let detail = super::invoke::tool_detail(&tools, &prepared.call.name, &prepared.call.arguments);
     let _ = tx.send(WorkerMessage::Event(ToolExecutionEvent::ToolStarted {
         tool_call_id: prepared.call.id.clone(),
         name: prepared.call.name.clone(),
@@ -203,9 +223,13 @@ async fn run_tool_with_event_forwarding(
     let call = prepared.call.clone();
     let tool = tools.get(&prepared.call.name);
     let context_for_not_found = context.clone();
+    let event_tx = tx.clone();
     let result_task = async move {
+        let emit_event = |event| {
+            let _ = event_tx.send(WorkerMessage::Event(event));
+        };
         match tool {
-            Ok(tool) => invoke_tool(call, tool, context, &config, &tools).await,
+            Ok(tool) => invoke_tool(call, tool, context, &config, &tools, &emit_event).await,
             Err(err) => {
                 record_tool_failure(
                     &config,
@@ -216,7 +240,6 @@ async fn run_tool_with_event_forwarding(
                 )
                 .await;
                 (
-                    Vec::new(),
                     ToolResult {
                         tool_call_id: call.id.clone(),
                         name: call.name.clone(),
@@ -230,7 +253,7 @@ async fn run_tool_with_event_forwarding(
     };
     tokio::pin!(result_task);
 
-    let (approval_events, result, feedback) = loop {
+    let (result, feedback) = loop {
         tokio::select! {
             maybe_progress = progress_rx.recv() => {
                 if let Some(progress) = maybe_progress {
@@ -255,10 +278,6 @@ async fn run_tool_with_event_forwarding(
             }
         }
     };
-
-    for event in approval_events {
-        let _ = tx.send(WorkerMessage::Event(event));
-    }
 
     let _ = tx.send(WorkerMessage::Done { index, result, feedback });
 }

@@ -15,7 +15,7 @@ The runtime follows the loop described by the project README:
 intent -> execute -> think -> complete
 ```
 
-In library terms, `AgentSession` owns the conversation state and runs a turn through `run_turn` or `run_turn_stream`. During a turn, telos samples from a `ModelProvider`, dispatches requested tools from a `ToolRegistry`, applies approval policy before sensitive work, records events, and returns a `TurnResult`.
+In library terms, `AgentRuntime` owns configuration, the provider, and tools, while each `AgentSession` owns isolated conversation state. Use `AgentRuntime.run_turn` for a collected result or `AgentRuntime.start_turn` for a `TurnEvent` stream and final `TurnResult`.
 
 ## Core Surfaces
 

@@ -98,11 +98,14 @@ impl PluginRegistry {
             // --- LSP Servers ---
             if plugin.manifest.lsp_servers.is_some() {
                 component_count += 1;
-                tracing::info!(
+                tracing::warn!(
                     plugin = %plugin.id,
                     "plugin declares LSP servers — LSP integration not yet wired into the agent runtime"
                 );
-                loaded_count += 1;
+                errors.push(PluginError::ComponentLoadFailed(
+                    plugin.id.clone(),
+                    "LSP servers are declared but not supported by this runtime".into(),
+                ));
             }
 
             // --- Output Styles ---
@@ -110,21 +113,32 @@ impl PluginRegistry {
                 component_count += styles.len();
                 for style_path in styles {
                     let abs_path = plugin.path.join(style_path);
-                    if abs_path.exists() {
-                        tracing::info!(
-                            plugin = %plugin.id,
-                            style = %style_path,
-                            "plugin output style available (not yet wired into the agent runtime)"
-                        );
-                        loaded_count += 1;
+                    let detail = if abs_path.exists() {
+                        format!("output style `{style_path}` is not supported by this runtime")
                     } else {
-                        tracing::warn!(
-                            plugin = %plugin.id,
-                            style = %style_path,
-                            "plugin output style file not found"
-                        );
-                    }
+                        format!("output style file `{style_path}` does not exist")
+                    };
+                    tracing::warn!(plugin = %plugin.id, style = %style_path, "{detail}");
+                    errors.push(PluginError::ComponentLoadFailed(plugin.id.clone(), detail));
                 }
+            }
+
+            // These manifest fields are reserved for a future host configuration API. Treat them
+            // as unsupported instead of silently claiming the plugin loaded successfully.
+            if plugin.manifest.settings.is_some() {
+                component_count += 1;
+                errors.push(PluginError::ComponentLoadFailed(
+                    plugin.id.clone(),
+                    "plugin settings are declared but no settings consumer is configured".into(),
+                ));
+            }
+            if plugin.manifest.user_config.is_some() {
+                component_count += 1;
+                errors.push(PluginError::ComponentLoadFailed(
+                    plugin.id.clone(),
+                    "plugin userConfig is declared but no host configuration UI is configured"
+                        .into(),
+                ));
             }
 
             // --- Skills ---
@@ -313,7 +327,10 @@ fn register_plugin_policies(
 ) -> usize {
     let mut count = 0;
     let mut add = |point, command: &crate::integrations::plugin::manifest::CommandPolicyDef| {
-        let name = format!("plugin_{plugin}_policy_{count}");
+        let name = command.name.as_ref().map_or_else(
+            || format!("plugin::{plugin}::policy::{count}"),
+            |name| format!("plugin::{plugin}::{name}"),
+        );
         registry.register(PolicyEntry {
             point,
             policy: std::sync::Arc::new(CommandPolicy::new(

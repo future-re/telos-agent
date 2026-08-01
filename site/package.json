@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
@@ -11,12 +14,12 @@
     "check:i18n": "node scripts/check-homepage-i18n.mjs"
   },
   "dependencies": {
-    "@astrojs/starlight": "0.29.0",
-    "astro": "4.16.18"
+    "@astrojs/starlight": "0.41.6",
+    "astro": "7.1.6"
   },
   "devDependencies": {
-    "@astrojs/check": "0.9.4",
-    "@astrojs/sitemap": "3.3.1",
+    "@astrojs/check": "0.9.10",
+    "@astrojs/sitemap": "3.7.3",
     "typescript": "5.9.3"
   }
 }

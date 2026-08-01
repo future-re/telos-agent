@@ -55,6 +55,7 @@ async fn main() -> Result<(), AgentError> {
         message: Message::assistant("done"),
         stop_reason: StopReason::EndTurn,
         usage: None,
+        model: None,
     }]));
 
     let mut tools = ToolRegistry::new();
@@ -76,7 +77,10 @@ async fn main() -> Result<(), AgentError> {
 
 - `AgentRuntime` owns providers and tools; `AgentSession` owns conversation state.
 - `TurnEvent` exposes streaming assistant text, thinking text, tool calls,
-  progress, usage, retries, and turn completion.
+  progress, usage, retries, lifecycle-policy outcomes, and turn completion.
+- `PolicyRegistry` provides semantic lifecycle policy points for session start,
+  model responses, tool calls, and turn completion. Tool approval remains a
+  separate `ApprovalHandler` concern.
 - `ModelProvider` abstracts LLM backends. The crate includes DeepSeek, routed
   dual-model, erased-provider, and mock providers.
 - `Tool` and `ToolRegistry` provide pluggable tools with JSON Schema validation.

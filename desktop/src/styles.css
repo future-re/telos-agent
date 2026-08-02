@@ -80,18 +80,6 @@
     BlinkMacSystemFont, sans-serif;
 }
 
-:root[data-font="wenkai"] {
-  --app-font-sans:
-    "LXGW WenKai", "Noto Sans SC Variable", "Microsoft YaHei UI",
-    "Microsoft YaHei", "PingFang SC", ui-sans-serif, system-ui, sans-serif;
-}
-
-:root[data-font="serif"] {
-  --app-font-sans:
-    "Noto Serif SC", "Songti SC", SimSun, "Noto Sans SC Variable",
-    "Microsoft YaHei UI", serif;
-}
-
 :root[data-theme="warm"] {
   --background: #faf8f3;
   --foreground: #1f2428;

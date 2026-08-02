@@ -8,12 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Added transactional plugin install, upgrade, and uninstall flows for local, Git, GitHub, npm, and pip sources.
+- Added a project-scoped, cross-process writer lock for plugin management.
 - Added CLI and desktop plugin management, validated per-project configuration, output styles, and read-only LSP tools.
 
 ### Changed
-- Plugin manifests now require `manifestVersion: 2`, a semver version, versioned dependency objects, and an exact match with marketplace entry versions; v1 is intentionally rejected.
-- Plugin install and upgrade now reuse satisfying installed dependencies, replace catalog versions only when required, reject replacement of active plugins, and roll back every affected directory when validation or commit fails.
+- Plugin manifests now require `manifestVersion: 3`, a semver version, same-marketplace dependency objects, and an exact match with marketplace entry versions; older manifests are intentionally rejected.
+- Plugin and marketplace sources are limited to local directories and GitHub. Entries must contain a complete `plugin.json`; manifest synthesis and overrides were removed.
+- Plugin state, configuration, and marketplace registrations now share one atomic `.telos/plugins/state.json`; legacy files are detected but never deleted automatically.
+- Plugin install and upgrade now reuse satisfying installed dependencies, reject replacement of active plugins, and commit each prepared directory independently instead of maintaining a batch rollback state machine.
 - Marketplace refresh is metadata-only: deleted entries are reported as retained orphaned plugins, marketplace removal is blocked while plugins remain installed, and the obsolete `forceRemoveDeletedPlugins` field is rejected.
 - Replaced the internal pass state machine with a direct `agent_loop` owned by `AgentRuntime`.
 - Replaced removed plugin hooks/interceptors with semantic lifecycle policies for session, model, tool, and turn boundaries.

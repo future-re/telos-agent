@@ -8,8 +8,6 @@ use serde_json::Value;
 use crate::integrations::plugin::manifest::{ConfigOptionType, PluginManifest, UserConfigOption};
 use crate::integrations::plugin::{PluginError, PluginId};
 
-const CONFIG_VERSION: u64 = 1;
-
 #[derive(Clone, Default)]
 pub struct ResolvedPluginConfig {
     values: HashMap<String, Value>,
@@ -98,16 +96,9 @@ impl PluginConfigStore {
         if !self.path.exists() {
             return Ok(());
         }
-        let content = std::fs::read_to_string(&self.path)?;
-        let root: Value = serde_json::from_str(&content)?;
-        let version = root.get("version").and_then(Value::as_u64).unwrap_or(0);
-        if version != CONFIG_VERSION {
-            return Err(PluginError::Other(format!(
-                "unsupported plugin config version {version}; expected {CONFIG_VERSION}"
-            )));
-        }
+        let root = crate::integrations::plugin::state::read(&self.path)?;
         let mut values = HashMap::new();
-        if let Some(plugins) = root.get("plugins").and_then(Value::as_object) {
+        if let Some(plugins) = root.get("config").and_then(Value::as_object) {
             for (id, config) in plugins {
                 let Some(id) = PluginId::parse(id) else {
                     continue;
@@ -123,21 +114,13 @@ impl PluginConfigStore {
     }
 
     pub fn save(&self) -> Result<(), PluginError> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         let plugins: HashMap<String, &HashMap<String, Value>> =
             self.values.iter().map(|(id, values)| (id.to_string(), values)).collect();
-        let bytes = serde_json::to_vec_pretty(&serde_json::json!({
-            "version": CONFIG_VERSION,
-            "plugins": plugins,
-        }))?;
-        let temporary = self.path.with_extension("json.tmp");
-        std::fs::write(&temporary, bytes)?;
-        restrict_file_permissions(&temporary)?;
-        replace_file(&temporary, &self.path)?;
-        restrict_file_permissions(&self.path)?;
-        Ok(())
+        crate::integrations::plugin::state::write_section(
+            &self.path,
+            "config",
+            serde_json::to_value(plugins)?,
+        )
     }
 
     pub fn set(
@@ -373,45 +356,6 @@ fn scalar_env_value(value: &Value) -> String {
     }
 }
 
-#[cfg(unix)]
-fn restrict_file_permissions(path: &Path) -> Result<(), PluginError> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn restrict_file_permissions(_path: &Path) -> Result<(), PluginError> {
-    Ok(())
-}
-
-#[cfg(windows)]
-fn replace_file(source: &Path, target: &Path) -> Result<(), PluginError> {
-    let backup = target.with_extension("json.backup");
-    if backup.exists() {
-        std::fs::remove_file(&backup)?;
-    }
-    if target.exists() {
-        std::fs::rename(target, &backup)?;
-    }
-    if let Err(error) = std::fs::rename(source, target) {
-        if backup.exists() {
-            let _ = std::fs::rename(&backup, target);
-        }
-        return Err(error.into());
-    }
-    if backup.exists() {
-        let _ = std::fs::remove_file(backup);
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn replace_file(source: &Path, target: &Path) -> Result<(), PluginError> {
-    std::fs::rename(source, target)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -419,7 +363,7 @@ mod tests {
 
     fn manifest() -> PluginManifest {
         serde_json::from_value(json!({
-            "manifestVersion": 2,
+            "manifestVersion": 3,
             "name": "configured",
             "version": "1.0.0",
             "settings": {"mode": "safe"},
@@ -447,7 +391,7 @@ mod tests {
     #[test]
     fn validates_persists_and_redacts_plugin_configuration() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("plugin_config.json");
+        let path = dir.path().join("state.json");
         let id = PluginId::parse("configured@test").unwrap();
         let mut store = PluginConfigStore::new(&path);
         store.set(&id, &manifest(), HashMap::from([("token".into(), json!("secret"))])).unwrap();
@@ -479,7 +423,7 @@ mod tests {
     fn partial_updates_preserve_existing_sensitive_values() {
         let dir = tempfile::tempdir().unwrap();
         let id = PluginId::parse("configured@test").unwrap();
-        let mut store = PluginConfigStore::new(dir.path().join("plugin_config.json"));
+        let mut store = PluginConfigStore::new(dir.path().join("state.json"));
         store.set(&id, &manifest(), HashMap::from([("token".into(), json!("secret"))])).unwrap();
 
         store.set(&id, &manifest(), HashMap::from([("limit".into(), json!(4))])).unwrap();
@@ -492,7 +436,7 @@ mod tests {
     #[test]
     fn rejects_reserved_and_colliding_environment_keys() {
         let reserved: PluginManifest = serde_json::from_value(json!({
-            "manifestVersion": 2,
+            "manifestVersion": 3,
             "name": "reserved",
             "version": "1.0.0",
             "settings": {"config": "bad"}
@@ -505,7 +449,7 @@ mod tests {
         );
 
         let colliding: PluginManifest = serde_json::from_value(json!({
-            "manifestVersion": 2,
+            "manifestVersion": 3,
             "name": "colliding",
             "version": "1.0.0",
             "settings": {"foo-bar": 1, "foo_bar": 2}

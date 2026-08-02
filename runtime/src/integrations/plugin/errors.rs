@@ -12,8 +12,6 @@ pub enum DependencyReason {
     NotEnabled,
     /// The dependency was not found in any configured marketplace.
     NotFound,
-    /// The declaring marketplace does not allow this cross-marketplace dependency.
-    NotAllowed,
 }
 
 impl std::fmt::Display for DependencyReason {
@@ -21,7 +19,6 @@ impl std::fmt::Display for DependencyReason {
         match self {
             DependencyReason::NotEnabled => write!(f, "not enabled"),
             DependencyReason::NotFound => write!(f, "not found"),
-            DependencyReason::NotAllowed => write!(f, "not allowed by marketplace policy"),
         }
     }
 }
@@ -44,12 +41,6 @@ pub enum PluginError {
     MarketplaceNotFound { marketplace: String, available: Vec<String> },
     #[error("git clone failed for {url}: {reason}")]
     GitCloneFailed { url: String, reason: String },
-    #[error("npm install failed for {package}: {reason}")]
-    NpmInstallFailed { package: String, reason: String },
-    #[error("pip install failed for {package}: {reason}")]
-    PipInstallFailed { package: String, reason: String },
-    #[error("network error fetching {url}: {detail}")]
-    NetworkError { url: String, detail: String },
 
     // --- Dependencies ---
     #[error("dependency '{dependency}' is {reason}")]

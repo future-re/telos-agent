@@ -10,8 +10,8 @@ impl PluginRegistry {
     /// Scan the installed directory and load all plugins found there.
     ///
     /// Each subdirectory that contains a `plugin.json` is loaded.
-    /// Plugins are NOT auto-enabled — state is restored from `plugin_state.json`.
-    pub fn discover_installed(&self) -> Result<Vec<PluginId>, PluginError> {
+    /// Plugins are NOT auto-enabled — state is restored from `state.json`.
+    pub(crate) fn discover_installed(&self) -> Result<Vec<PluginId>, PluginError> {
         let installed_dir = self.installed_dir();
         if !installed_dir.exists() {
             return Ok(Vec::new());
@@ -38,13 +38,7 @@ impl PluginRegistry {
                     discovered.push(id.clone());
                     self.register(plugin);
                 }
-                Err(err) => {
-                    tracing::warn!(
-                        dir = %dir.display(),
-                        error = %err,
-                        "failed to load plugin from installed directory"
-                    );
-                }
+                Err(error) => return Err(error),
             }
         }
 
@@ -87,9 +81,9 @@ impl PluginRegistry {
                     .into(),
             );
         }
-        if manifest.manifest_version != 2 {
+        if manifest.manifest_version != 3 {
             validation_errors.push(format!(
-                "unsupported manifestVersion {}; expected 2",
+                "unsupported manifestVersion {}; expected 3",
                 manifest.manifest_version
             ));
         }
@@ -100,13 +94,6 @@ impl PluginRegistry {
             if !crate::integrations::plugin::is_valid_id_part(&dependency.name) {
                 validation_errors
                     .push(format!("dependencies[{index}].name is not a valid plugin name"));
-            }
-            if dependency.marketplace.as_ref().is_some_and(|marketplace| {
-                !crate::integrations::plugin::is_valid_id_part(marketplace)
-            }) {
-                validation_errors.push(format!(
-                    "dependencies[{index}].marketplace is not a valid marketplace name"
-                ));
             }
         }
         validation_errors

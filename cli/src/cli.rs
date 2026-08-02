@@ -83,31 +83,12 @@ pub enum PluginCommand {
         #[clap(long)]
         name: Option<String>,
     },
-    MarketplaceAddUrl {
-        url: String,
-        #[clap(long)]
-        name: Option<String>,
-    },
     MarketplaceAddGithub {
         repo: String,
         #[clap(long = "ref")]
         ref_: Option<String>,
         #[clap(long)]
         path: Option<String>,
-        #[clap(long)]
-        name: Option<String>,
-    },
-    MarketplaceAddGit {
-        url: String,
-        #[clap(long = "ref")]
-        ref_: Option<String>,
-        #[clap(long)]
-        path: Option<String>,
-        #[clap(long)]
-        name: Option<String>,
-    },
-    MarketplaceAddNpm {
-        package: String,
         #[clap(long)]
         name: Option<String>,
     },
@@ -250,5 +231,15 @@ mod tests {
                 command: PluginCommand::MarketplaceSearch { query }
             }) if query == "format"
         ));
+
+        assert!(
+            Cli::try_parse_from([
+                "telos",
+                "plugin",
+                "marketplace-add-url",
+                "https://example.com/marketplace.json",
+            ])
+            .is_err()
+        );
     }
 }

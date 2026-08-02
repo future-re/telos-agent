@@ -1,16 +1,26 @@
 ---
 title: Desktop Client
-description: Track the current desktop client scaffold and product direction.
+description: Run, test, build, and distribute the Tauri desktop client.
 ---
 
-The desktop client is currently a scaffold for a future macOS and Windows product direction. It uses Tauri with Vite, React, and TypeScript.
+The desktop client is a Tauri application for macOS and Windows. Its React interface drives the same Rust runtime used by the CLI, including sessions, approvals, memory, provider settings, usage history, and plugin management.
 
 The runtime boundary remains the Rust agent core: the desktop product direction can build on the same session, provider, tool, approval, storage, memory, plugin, and MCP concepts used by the library and CLI.
 
 ## Current Status
 
-- Tauri provides the native desktop shell.
-- Vite, React, and TypeScript provide the frontend scaffold.
-- The target product direction is desktop distribution for macOS and Windows.
+- Tauri provides the native shell and Rust command boundary.
+- Vite, React, and TypeScript provide the tested frontend.
+- Tagged releases build Windows installers and macOS application bundles through GitHub Actions.
+- Local development and production builds use the commands in the repository `desktop/` directory.
 
-The repository docs do not yet describe a packaged desktop release flow. For current usage, install the CLI or embed the `telos_agent` library.
+```bash
+cd desktop
+npm ci
+npm test
+npm run tauri dev
+# or build a local package
+npm run tauri build
+```
+
+Published packages are attached to matching GitHub Releases. macOS packages are not currently notarized; follow the release notes for the explicit local verification step instead of assuming an operating-system trust signature.

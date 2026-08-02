@@ -28,7 +28,7 @@ export function PluginSettings({ cwd }: { cwd: string }) {
   const [plugins, setPlugins] = useState<DesktopPluginInfo[]>([]);
   const [marketplacePlugins, setMarketplacePlugins] = useState<DesktopMarketplacePlugin[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState<string>();
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
   const refresh = useCallback(async () => {
@@ -62,7 +62,7 @@ export function PluginSettings({ cwd }: { cwd: string }) {
   }, [plugins]);
 
   async function mutate(id: string, command: string, extra = {}) {
-    setBusy(id);
+    setBusy(true);
     setError(undefined);
     try {
       await invoke(command, {
@@ -72,7 +72,7 @@ export function PluginSettings({ cwd }: { cwd: string }) {
     } catch (reason) {
       setError(String(reason));
     } finally {
-      setBusy(undefined);
+      setBusy(false);
     }
   }
 
@@ -94,7 +94,7 @@ export function PluginSettings({ cwd }: { cwd: string }) {
         <p className="text-xs text-muted-foreground">
           启停和配置会持久化；已运行的会话需重新创建后生效。
         </p>
-        <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>
+        <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void refresh()}>
           <RefreshCw className="size-3.5" aria-hidden="true" />
           刷新
         </Button>
@@ -127,7 +127,7 @@ export function PluginSettings({ cwd }: { cwd: string }) {
                     type="button"
                     size="sm"
                     variant={active ? "outline" : "default"}
-                    disabled={busy === plugin.id}
+                    disabled={busy}
                     onClick={() => void mutate(plugin.id, "set_plugin_enabled", { enabled: !active })}
                   >
                     {active ? "停用" : "启用"}
@@ -142,8 +142,8 @@ export function PluginSettings({ cwd }: { cwd: string }) {
                   </p>
                 )}
                 <div className="mt-2 flex gap-2">
-                  <Button type="button" size="sm" variant="outline" disabled={busy === plugin.id || !replaceable} title={!replaceable ? "请先停用插件" : undefined} onClick={() => void mutate(plugin.id, "upgrade_plugin")}>升级</Button>
-                  <Button type="button" size="sm" variant="outline" disabled={busy === plugin.id || active} title={active ? "请先停用插件" : undefined} onClick={() => void mutate(plugin.id, "uninstall_plugin")}>卸载</Button>
+                  <Button type="button" size="sm" variant="outline" disabled={busy || !replaceable} title={!replaceable ? "请先停用插件" : undefined} onClick={() => void mutate(plugin.id, "upgrade_plugin")}>升级</Button>
+                  <Button type="button" size="sm" variant="outline" disabled={busy || active} title={active ? "请先停用插件" : undefined} onClick={() => void mutate(plugin.id, "uninstall_plugin")}>卸载</Button>
                 </div>
                 {plugin.errors.map((message) => (
                   <p key={message} className="mt-1 text-xs text-destructive">{message}</p>
@@ -163,10 +163,10 @@ export function PluginSettings({ cwd }: { cwd: string }) {
                       className="min-h-20 font-mono text-xs"
                     />
                     <div className="flex gap-2">
-                      <Button type="button" size="sm" disabled={busy === plugin.id} onClick={() => void saveConfig(plugin.id)}>
+                      <Button type="button" size="sm" disabled={busy} onClick={() => void saveConfig(plugin.id)}>
                         保存配置
                       </Button>
-                      <Button type="button" size="sm" variant="outline" disabled={busy === plugin.id} onClick={() => void mutate(plugin.id, "clear_plugin_config")}>
+                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void mutate(plugin.id, "clear_plugin_config")}>
                         清空配置
                       </Button>
                     </div>
@@ -190,7 +190,7 @@ export function PluginSettings({ cwd }: { cwd: string }) {
                 <p className="truncate font-mono text-[11px] text-muted-foreground">{plugin.id} · {plugin.version}</p>
                 {plugin.description && <p className="mt-1 text-xs text-muted-foreground">{plugin.description}</p>}
               </div>
-              <Button type="button" size="sm" disabled={busy === plugin.id} onClick={() => void mutate(plugin.id, "install_plugin")}>安装</Button>
+              <Button type="button" size="sm" disabled={busy} onClick={() => void mutate(plugin.id, "install_plugin")}>安装</Button>
             </article>
           ))}
         </section>

@@ -1,4 +1,4 @@
-//! Coordination between installed plugins and side-effect-free marketplace refreshes.
+//! Coordination between installed plugins and marketplace refreshes.
 
 use std::collections::HashSet;
 
@@ -6,17 +6,12 @@ use crate::integrations::plugin::registry::lifecycle::PluginRegistry;
 use crate::integrations::plugin::{MarketplaceRefreshReport, MarketplaceRegistry, PluginError};
 
 impl PluginRegistry {
-    pub fn refresh_marketplace(
+    pub(crate) fn refresh_marketplace(
         &self,
         marketplaces: &mut MarketplaceRegistry,
         name: &str,
     ) -> Result<MarketplaceRefreshReport, PluginError> {
-        let _operation = self.operation_lock.lock().expect("plugin operation lock poisoned");
-        let snapshot = marketplaces.snapshot(name)?;
-        if let Err(error) = marketplaces.refresh_unchecked(name) {
-            marketplaces.finish_snapshot(snapshot);
-            return Err(error);
-        }
+        marketplaces.refresh_unchecked(name)?;
         let refreshed = marketplaces.get(name).expect("refreshed marketplace remains registered");
         let new_names =
             refreshed.plugins.iter().map(|entry| entry.name.clone()).collect::<HashSet<_>>();
@@ -30,24 +25,15 @@ impl PluginRegistry {
             .collect::<Vec<_>>();
         orphaned.sort_by_key(ToString::to_string);
 
-        if let Err(error) = marketplaces.save() {
-            if let Err(rollback) = marketplaces.restore_snapshot(snapshot) {
-                return Err(PluginError::Other(format!(
-                    "marketplace save failed: {error}; restoring the previous catalog also failed: {rollback}"
-                )));
-            }
-            return Err(error);
-        }
-        marketplaces.finish_snapshot(snapshot);
+        marketplaces.save()?;
         Ok(MarketplaceRefreshReport { orphaned })
     }
 
-    pub fn remove_marketplace(
+    pub(crate) fn remove_marketplace(
         &self,
         marketplaces: &mut MarketplaceRegistry,
         name: &str,
     ) -> Result<(), PluginError> {
-        let _operation = self.operation_lock.lock().expect("plugin operation lock poisoned");
         let mut installed = self
             .list_all()
             .into_iter()
@@ -61,18 +47,8 @@ impl PluginRegistry {
                 plugins: installed,
             });
         }
-        let snapshot = marketplaces.snapshot(name)?;
-        if let Err(error) = marketplaces.remove_unchecked(name).and_then(|_| marketplaces.save()) {
-            if let Err(rollback) =
-                marketplaces.restore_snapshot(snapshot).and_then(|_| marketplaces.save())
-            {
-                return Err(PluginError::Other(format!(
-                    "marketplace removal failed: {error}; restoring it also failed: {rollback}"
-                )));
-            }
-            return Err(error);
-        }
-        marketplaces.finish_snapshot(snapshot);
+        marketplaces.remove_unchecked(name)?;
+        marketplaces.save()?;
         Ok(())
     }
 }
@@ -90,7 +66,7 @@ mod tests {
         std::fs::write(
             source.join("plugin.json"),
             serde_json::to_vec_pretty(&serde_json::json!({
-                "manifestVersion": 2,
+                "manifestVersion": 3,
                 "name": "managed",
                 "version": "1.0.0"
             }))

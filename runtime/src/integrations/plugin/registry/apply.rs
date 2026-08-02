@@ -302,9 +302,6 @@ impl PluginRegistry {
             }
         }
 
-        if let Err(error) = self.save_state() {
-            errors.push(error);
-        }
         if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 
@@ -424,10 +421,6 @@ impl PluginRegistry {
                 plugin_errors.extend_from_slice(&errors[error_start..]);
                 self.mark_degraded(&plugin.id, plugin_errors);
             }
-        }
-
-        if let Err(error) = self.save_state() {
-            errors.push(error);
         }
 
         if errors.is_empty() { Ok(()) } else { Err(errors) }

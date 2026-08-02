@@ -151,36 +151,17 @@ fn policy_registry_for_config(agent_config: &AgentConfig) -> crate::PolicyRegist
 fn create_plugin_registry(project_root_or_cwd: &Path) -> Option<Arc<crate::PluginRegistry>> {
     let telos_dir = project_root_or_cwd.join(".telos");
     let plugins_root = telos_dir.join("plugins");
-    let registry = crate::PluginRegistry::new(&plugins_root);
-
-    let installed_dir = registry.installed_dir();
-    if let Err(e) = std::fs::create_dir_all(&installed_dir) {
-        tracing::debug!(path = %installed_dir.display(), error = %e, "failed to create plugin installed dir");
-    }
-
-    let discovered = match registry.discover_installed() {
-        Ok(ids) => {
-            tracing::info!(count = ids.len(), "discovered installed plugins");
-            ids
-        }
-        Err(e) => {
-            tracing::debug!(error = %e, "failed to discover installed plugins");
-            Vec::new()
+    let manager = match crate::PluginManager::open(&plugins_root) {
+        Ok(manager) => manager,
+        Err(error) => {
+            tracing::warn!(%error, "failed to open plugin manager");
+            return None;
         }
     };
-
-    if discovered.is_empty() {
+    if manager.registry().is_empty() {
         return None;
     }
-
-    if let Err(e) = registry.load_state() {
-        tracing::warn!(error = %e, "failed to load plugin state");
-    }
-    if let Err(e) = registry.load_config() {
-        tracing::warn!(error = %e, "failed to load plugin configuration");
-    }
-
-    Some(Arc::new(registry))
+    Some(Arc::new(manager.into_registry()))
 }
 
 pub fn task_manager_for_root(project_root_or_cwd: &Path) -> Arc<crate::TaskManager> {

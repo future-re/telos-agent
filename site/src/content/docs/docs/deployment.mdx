@@ -45,4 +45,4 @@ The wider website plan copies generated Rust API docs into the static output aft
 
 ## Desktop Releases
 
-The desktop client is currently a Tauri, Vite, React, and TypeScript scaffold for a future macOS and Windows product direction. The repository docs do not yet describe a packaged desktop release process.
+The `release-desktop.yml` workflow builds Windows and macOS packages for version tags and uploads them to the matching GitHub Release. Local packages can be produced from `desktop/` with `npm run tauri build`. macOS artifacts are currently unsigned/notarized, so release notes must keep the trust limitation visible.

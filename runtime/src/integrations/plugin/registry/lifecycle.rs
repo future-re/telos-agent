@@ -6,25 +6,23 @@ use crate::integrations::plugin::{PluginConfigStore, ResolvedPluginConfig};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Mutex, RwLock};
+use std::sync::RwLock;
 
 pub struct PluginRegistry {
     pub(crate) plugins: RwLock<HashMap<PluginId, PluginEntry>>,
     pub(crate) plugins_root: PathBuf,
     pub(crate) config_store: RwLock<PluginConfigStore>,
-    pub(crate) operation_lock: Mutex<()>,
 }
 
 impl PluginRegistry {
     /// Create a new registry backed by `plugins_root` (typically `~/.telos/plugins/`).
-    pub fn new(plugins_root: impl Into<PathBuf>) -> Self {
+    pub(crate) fn new(plugins_root: impl Into<PathBuf>) -> Self {
         let plugins_root = plugins_root.into();
-        let config_store = PluginConfigStore::new(plugins_root.join("plugin_config.json"));
+        let config_store = PluginConfigStore::new(plugins_root.join("state.json"));
         Self {
             plugins: RwLock::new(HashMap::new()),
             plugins_root,
             config_store: RwLock::new(config_store),
-            operation_lock: Mutex::new(()),
         }
     }
     /// Path where installed plugins live.
@@ -34,14 +32,14 @@ impl PluginRegistry {
 
     /// Path to the state file.
     pub fn state_path(&self) -> PathBuf {
-        self.plugins_root.join("plugin_state.json")
+        self.plugins_root.join("state.json")
     }
 
     pub fn load_config(&self) -> Result<(), PluginError> {
         self.config_store.write().expect("plugin config lock poisoned").load()
     }
 
-    pub fn set_config(
+    pub(crate) fn set_config(
         &self,
         id: &PluginId,
         values: HashMap<String, Value>,
@@ -61,7 +59,7 @@ impl PluginRegistry {
         self.config_store.write().expect("plugin config lock poisoned").set(id, &manifest, values)
     }
 
-    pub fn clear_config(&self, id: &PluginId) -> Result<(), PluginError> {
+    pub(crate) fn clear_config(&self, id: &PluginId) -> Result<(), PluginError> {
         self.config_store.write().expect("plugin config lock poisoned").clear(id)
     }
 
@@ -105,7 +103,7 @@ impl PluginRegistry {
     /// Enable a plugin. Call this after registration.
     ///
     /// This is idempotent — enabling an already-enabled plugin is a no-op.
-    pub fn enable(&self, id: &PluginId) -> Result<(), PluginError> {
+    pub(crate) fn enable(&self, id: &PluginId) -> Result<(), PluginError> {
         self.resolved_config(id)?;
         self.validate_dependencies(id)?;
         let mut plugins = self.plugins.write().expect("plugin registry lock poisoned");
@@ -125,7 +123,7 @@ impl PluginRegistry {
     /// Disable a plugin. Does not uninstall — the plugin stays on disk.
     ///
     /// This is idempotent — disabling an already-disabled plugin is a no-op.
-    pub fn disable(&self, id: &PluginId) -> Result<(), PluginError> {
+    pub(crate) fn disable(&self, id: &PluginId) -> Result<(), PluginError> {
         let mut plugins = self.plugins.write().expect("plugin registry lock poisoned");
         let dependents =
             plugins

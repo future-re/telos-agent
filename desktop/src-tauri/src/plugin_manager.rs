@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 use serde_json::Value;
-use telos_agent::{MarketplaceRegistry, PluginId, PluginRegistry};
+use telos_agent::{PluginId, PluginManager};
 
 use crate::agent_host::{DesktopSettingsOverrides, resolve_desktop_settings};
 
@@ -33,13 +33,14 @@ pub struct DesktopMarketplacePlugin {
 
 pub fn list_plugins(cwd: Option<PathBuf>) -> Result<Vec<DesktopPluginInfo>, String> {
     let root = plugins_root(cwd)?;
-    let registry = load_plugin_registry(&root)?;
-    let marketplaces = load_marketplaces(&root)?;
-    let mut plugins = registry
+    let manager = load_manager(&root)?;
+    let mut plugins = manager
+        .registry()
         .list_all()
         .into_iter()
         .map(|entry| {
-            let config = registry
+            let config = manager
+                .registry()
                 .resolved_config(&entry.plugin.id)
                 .map(|config| serde_json::to_value(config.redacted_values()).unwrap_or(Value::Null))
                 .unwrap_or(Value::Null);
@@ -48,7 +49,11 @@ pub fn list_plugins(cwd: Option<PathBuf>) -> Result<Vec<DesktopPluginInfo>, Stri
                 name: entry.plugin.manifest.name,
                 description: entry.plugin.manifest.description,
                 version: entry.plugin.manifest.version.to_string(),
-                source_status: marketplaces.source_status(&entry.plugin.id).as_str().to_string(),
+                source_status: manager
+                    .marketplaces()
+                    .source_status(&entry.plugin.id)
+                    .as_str()
+                    .to_string(),
                 status: format!("{:?}", entry.status).to_lowercase(),
                 errors: entry.load_errors.into_iter().map(|error| error.to_string()).collect(),
                 config_schema: serde_json::to_value(entry.plugin.manifest.user_config)
@@ -62,14 +67,14 @@ pub fn list_plugins(cwd: Option<PathBuf>) -> Result<Vec<DesktopPluginInfo>, Stri
 }
 
 pub fn set_plugin_enabled(cwd: Option<PathBuf>, id: &str, enabled: bool) -> Result<(), String> {
-    let registry = plugin_registry(cwd)?;
+    let manager = plugin_manager(cwd)?;
     let id = parse_plugin_id(id)?;
     if enabled {
-        registry.enable(&id).map_err(|error| error.to_string())?;
+        manager.enable(&id).map_err(|error| error.to_string())?;
     } else {
-        registry.disable(&id).map_err(|error| error.to_string())?;
+        manager.disable(&id).map_err(|error| error.to_string())?;
     }
-    registry.save_state().map_err(|error| error.to_string())
+    Ok(())
 }
 
 pub fn set_plugin_config(
@@ -77,27 +82,23 @@ pub fn set_plugin_config(
     id: &str,
     values: HashMap<String, Value>,
 ) -> Result<(), String> {
-    let registry = plugin_registry(cwd)?;
-    registry
-        .set_config(&parse_plugin_id(id)?, values)
-        .map_err(|error| error.to_string())
+    let manager = plugin_manager(cwd)?;
+    manager.set_config(&parse_plugin_id(id)?, values).map_err(|error| error.to_string())
 }
 
 pub fn clear_plugin_config(cwd: Option<PathBuf>, id: &str) -> Result<(), String> {
-    let registry = plugin_registry(cwd)?;
-    registry.clear_config(&parse_plugin_id(id)?).map_err(|error| error.to_string())
+    let manager = plugin_manager(cwd)?;
+    manager.clear_config(&parse_plugin_id(id)?).map_err(|error| error.to_string())
 }
 
 pub fn list_marketplace_plugins(
     cwd: Option<PathBuf>,
 ) -> Result<Vec<DesktopMarketplacePlugin>, String> {
     let root = plugins_root(cwd)?;
-    let registry = load_plugin_registry(&root)?;
-    let mut marketplaces = MarketplaceRegistry::new(&root);
-    marketplaces.load().map_err(|error| error.to_string())?;
+    let manager = load_manager(&root)?;
     let mut plugins = Vec::new();
-    for marketplace in marketplaces.names() {
-        if let Some(catalog) = marketplaces.get(marketplace) {
+    for marketplace in manager.marketplaces().names() {
+        if let Some(catalog) = manager.marketplaces().get(marketplace) {
             plugins.extend(catalog.plugins.iter().map(|entry| {
                 let id = PluginId { name: entry.name.clone(), marketplace: marketplace.clone() };
                 DesktopMarketplacePlugin {
@@ -105,7 +106,7 @@ pub fn list_marketplace_plugins(
                     name: entry.name.clone(),
                     description: entry.description.clone(),
                     version: entry.version.to_string(),
-                    installed: registry.is_installed(&id),
+                    installed: manager.registry().is_installed(&id),
                 }
             }));
         }
@@ -116,36 +117,26 @@ pub fn list_marketplace_plugins(
 
 pub fn install_plugin(cwd: Option<PathBuf>, id: &str) -> Result<(), String> {
     let root = plugins_root(cwd)?;
-    let registry = load_plugin_registry(&root)?;
-    let mut marketplaces = load_marketplaces(&root)?;
+    let mut manager = load_manager(&root)?;
     let id = parse_plugin_id(id)?;
-    registry
-        .refresh_marketplace(&mut marketplaces, &id.marketplace)
-        .map_err(|error| error.to_string())?;
-    registry.install(&marketplaces, &id).map_err(|error| error.to_string())
+    manager.install(&id).map_err(|error| error.to_string())
 }
 
 pub fn upgrade_plugin(cwd: Option<PathBuf>, id: &str) -> Result<(), String> {
     let root = plugins_root(cwd)?;
-    let registry = load_plugin_registry(&root)?;
-    let mut marketplaces = load_marketplaces(&root)?;
+    let mut manager = load_manager(&root)?;
     let id = parse_plugin_id(id)?;
-    registry
-        .refresh_marketplace(&mut marketplaces, &id.marketplace)
-        .map_err(|error| error.to_string())?;
-    registry.upgrade(&marketplaces, &id).map_err(|error| error.to_string())
+    manager.upgrade(&id).map_err(|error| error.to_string())
 }
 
 pub fn uninstall_plugin(cwd: Option<PathBuf>, id: &str) -> Result<(), String> {
     let root = plugins_root(cwd)?;
-    load_plugin_registry(&root)?
-        .uninstall(&parse_plugin_id(id)?)
-        .map_err(|error| error.to_string())
+    load_manager(&root)?.uninstall(&parse_plugin_id(id)?).map_err(|error| error.to_string())
 }
 
-fn plugin_registry(cwd: Option<PathBuf>) -> Result<PluginRegistry, String> {
+fn plugin_manager(cwd: Option<PathBuf>) -> Result<PluginManager, String> {
     let root = plugins_root(cwd)?;
-    load_plugin_registry(&root)
+    load_manager(&root)
 }
 
 fn plugins_root(cwd: Option<PathBuf>) -> Result<PathBuf, String> {
@@ -156,19 +147,8 @@ fn plugins_root(cwd: Option<PathBuf>) -> Result<PathBuf, String> {
     Ok(settings.project_root_or_cwd.join(".telos").join("plugins"))
 }
 
-fn load_plugin_registry(root: &std::path::Path) -> Result<PluginRegistry, String> {
-    std::fs::create_dir_all(root.join("installed")).map_err(|error| error.to_string())?;
-    let registry = PluginRegistry::new(root);
-    registry.discover_installed().map_err(|error| error.to_string())?;
-    registry.load_state().map_err(|error| error.to_string())?;
-    registry.load_config().map_err(|error| error.to_string())?;
-    Ok(registry)
-}
-
-fn load_marketplaces(root: &std::path::Path) -> Result<MarketplaceRegistry, String> {
-    let mut marketplaces = MarketplaceRegistry::new(root);
-    marketplaces.load().map_err(|error| error.to_string())?;
-    Ok(marketplaces)
+fn load_manager(root: &std::path::Path) -> Result<PluginManager, String> {
+    PluginManager::open(root).map_err(|error| error.to_string())
 }
 
 fn parse_plugin_id(value: &str) -> Result<PluginId, String> {
@@ -184,14 +164,12 @@ mod tests {
     fn lists_toggles_and_configures_project_plugins() {
         let project = tempfile::tempdir().unwrap();
         std::fs::create_dir(project.path().join(".git")).unwrap();
-        let plugin = project
-            .path()
-            .join(".telos/plugins/installed/configurable@test");
+        let plugin = project.path().join(".telos/plugins/installed/configurable@test");
         std::fs::create_dir_all(&plugin).unwrap();
         std::fs::write(
             plugin.join("plugin.json"),
             serde_json::to_vec_pretty(&serde_json::json!({
-                "manifestVersion": 2,
+                "manifestVersion": 3,
                 "name": "configurable",
                 "version": "1.0.0",
                 "userConfig": {
@@ -234,7 +212,7 @@ mod tests {
         std::fs::write(
             source.join("plugin.json"),
             serde_json::to_vec_pretty(&serde_json::json!({
-                "manifestVersion": 2,
+                "manifestVersion": 3,
                 "name": "managed",
                 "version": "1.0.0"
             }))
@@ -255,26 +233,28 @@ mod tests {
                     source: PluginSource::Local { path: source },
                     category: None,
                     tags: Vec::new(),
-                    strict: true,
-                    manifest_override: None,
                 }],
-                allow_cross_marketplace_deps_on: None,
             })
             .unwrap(),
         )
         .unwrap();
         let root = project.path().join(".telos/plugins");
-        let mut marketplaces = MarketplaceRegistry::new(&root);
-        marketplaces
-            .add_named(MarketplaceSource::Local { path: marketplace_dir }, Some("local".into()))
+        let mut manager = PluginManager::open(&root).unwrap();
+        manager
+            .add_marketplace(
+                MarketplaceSource::Local { path: marketplace_dir },
+                Some("local".into()),
+            )
             .unwrap();
-        marketplaces.save().unwrap();
+        drop(manager);
 
         install_plugin(Some(project.path().into()), "managed@local").unwrap();
-        assert!(list_marketplace_plugins(Some(project.path().into()))
-            .unwrap()
-            .into_iter()
-            .any(|plugin| plugin.id == "managed@local" && plugin.installed));
+        assert!(
+            list_marketplace_plugins(Some(project.path().into()))
+                .unwrap()
+                .into_iter()
+                .any(|plugin| plugin.id == "managed@local" && plugin.installed)
+        );
         upgrade_plugin(Some(project.path().into()), "managed@local").unwrap();
         uninstall_plugin(Some(project.path().into()), "managed@local").unwrap();
         assert!(list_plugins(Some(project.path().into())).unwrap().is_empty());

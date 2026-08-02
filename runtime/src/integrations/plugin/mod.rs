@@ -5,16 +5,18 @@
 //! prompt sections, and output styles.
 //!
 //! Plugins are installed from marketplaces — curated collections fetched from
-//! GitHub, git URLs, npm, pip, or local directories.
+//! GitHub or local directories.
 
 pub mod config;
 pub mod errors;
 pub mod lsp_tool;
+pub mod manager;
 pub mod manifest;
 pub mod marketplace;
 pub mod policy_loader;
 pub mod registry;
 pub mod sources;
+pub(crate) mod state;
 pub mod tool_loader;
 
 use serde::{Deserialize, Serialize};
@@ -23,11 +25,11 @@ use std::fmt;
 pub use config::{PluginConfigStore, ResolvedPluginConfig};
 pub use errors::{DependencyReason, PluginError};
 pub use lsp_tool::LspTool;
+pub use manager::PluginManager;
 pub use manifest::{
     CommandPolicyDef, ConfigOptionType, DependencyRef, LspServerEntry, LspServersConfig,
-    MarketplaceEntry, McpServerEntry, McpServersConfig, PartialPluginManifest, PluginAuthor,
-    PluginManifest, PluginSource, PoliciesConfig, SessionPolicyDef, ToolPolicyDef,
-    UserConfigOption,
+    MarketplaceEntry, McpServerEntry, McpServersConfig, PluginAuthor, PluginManifest, PluginSource,
+    PoliciesConfig, SessionPolicyDef, ToolPolicyDef, UserConfigOption,
 };
 pub use marketplace::{
     Marketplace, MarketplaceRefreshReport, MarketplaceRegistry, PluginSourceStatus,

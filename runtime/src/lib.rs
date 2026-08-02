@@ -210,8 +210,8 @@ pub use integrations::mcp::{McpClient, McpManager, McpTool, McpToolBridge};
 // Plugin — marketplace-based plugin system for extensibility.
 pub use integrations::plugin::{
     BUILTIN_MARKETPLACE, Marketplace, MarketplaceEntry, MarketplaceRegistry, MarketplaceSource,
-    PluginError, PluginId, PluginManifest, PluginPromptSection, PluginRegistry, PluginSource,
-    PluginStatus,
+    PluginError, PluginId, PluginManager, PluginManifest, PluginPromptSection, PluginRegistry,
+    PluginSource, PluginStatus,
 };
 // Prompt system — modular, cache-aware construction of the system prompt.
 pub use agent::prompt::{

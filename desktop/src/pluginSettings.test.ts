@@ -147,4 +147,46 @@ describe("editableConfig", () => {
     expect((upgrade as HTMLButtonElement).disabled).toBe(true);
     expect(upgrade.getAttribute("title")).toBe("请先停用插件");
   });
+
+  it("serializes all plugin mutations and refreshes in the UI", async () => {
+    const invokeMock = vi.mocked(invoke);
+    let releaseMutation: (() => void) | undefined;
+    const pendingMutation = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    invokeMock.mockImplementation(async (command) => {
+      if (command === "list_plugins") {
+        return ["one", "two"].map((name) => ({
+          id: `${name}@test`,
+          name,
+          version: "1.0.0",
+          sourceStatus: "available",
+          status: "disabled",
+          errors: [],
+          configSchema: null,
+          config: null,
+        }));
+      }
+      if (command === "list_marketplace_plugins") return [];
+      if (command === "set_plugin_enabled") return pendingMutation;
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(createElement(PluginSettings, { cwd: "/project" }));
+
+    const enableButtons = await screen.findAllByRole("button", { name: "启用" });
+    await user.click(enableButtons[0]);
+
+    await waitFor(() => {
+      expect(enableButtons.every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+      expect((screen.getByRole("button", { name: "刷新" }) as HTMLButtonElement).disabled)
+        .toBe(true);
+    });
+
+    releaseMutation?.();
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "刷新" }) as HTMLButtonElement).disabled)
+        .toBe(false);
+    });
+  });
 });

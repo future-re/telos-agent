@@ -3,55 +3,32 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
-
 use crate::integrations::plugin::marketplace::{
     copy_directory, reset_directory, run_command_bounded,
 };
 use crate::integrations::plugin::registry::lifecycle::PluginRegistry;
-use crate::integrations::plugin::registry::types::{LoadedPlugin, PluginEntry, PluginStatus};
+use crate::integrations::plugin::registry::types::{LoadedPlugin, PluginStatus};
 use crate::integrations::plugin::{
     MarketplaceEntry, MarketplaceRegistry, PluginError, PluginId, PluginSource,
 };
 
-#[cfg(test)]
-thread_local! {
-    static COMMIT_FAILURE_STEP: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
-}
-
-#[cfg(test)]
-pub(super) fn fail_commit_at(step: usize) {
-    COMMIT_FAILURE_STEP.set(Some(step));
-}
-
-fn maybe_fail_commit(_step: usize) -> Result<(), PluginError> {
-    #[cfg(test)]
-    if COMMIT_FAILURE_STEP.get() == Some(_step) {
-        COMMIT_FAILURE_STEP.set(None);
-        return Err(PluginError::Other(format!("injected plugin commit failure at step {_step}")));
-    }
-    Ok(())
-}
-
 impl PluginRegistry {
-    pub fn install(
+    pub(crate) fn install(
         &self,
         marketplaces: &MarketplaceRegistry,
         id: &PluginId,
     ) -> Result<(), PluginError> {
-        let _operation = self.operation_lock.lock().expect("plugin operation lock poisoned");
         if self.is_installed(id) {
             return Ok(());
         }
         self.install_or_upgrade(marketplaces, id, false)
     }
 
-    pub fn upgrade(
+    pub(crate) fn upgrade(
         &self,
         marketplaces: &MarketplaceRegistry,
         id: &PluginId,
     ) -> Result<(), PluginError> {
-        let _operation = self.operation_lock.lock().expect("plugin operation lock poisoned");
         let installed = self.get(id).ok_or_else(|| PluginError::PluginNotFound {
             plugin_id: id.to_string(),
             marketplace: id.marketplace.clone(),
@@ -62,8 +39,7 @@ impl PluginRegistry {
         self.install_or_upgrade(marketplaces, id, true)
     }
 
-    pub fn uninstall(&self, id: &PluginId) -> Result<(), PluginError> {
-        let _operation = self.operation_lock.lock().expect("plugin operation lock poisoned");
+    pub(crate) fn uninstall(&self, id: &PluginId) -> Result<(), PluginError> {
         self.uninstall_locked(id)
     }
 
@@ -196,7 +172,7 @@ impl PluginRegistry {
             }
         }
 
-        self.validate_planned_graph(marketplaces, &prepared, &change_ids)?;
+        self.validate_planned_graph(&prepared, &change_ids)?;
         for (id, candidate) in &prepared {
             if change_ids.contains(id) && self.is_installed(id) {
                 self.validate_config_for_manifest(id, &candidate.plugin.manifest)?;
@@ -234,12 +210,6 @@ impl PluginRegistry {
         stack.push(id.clone());
         for dependency in &candidate.plugin.manifest.dependencies {
             let dependency_id = dependency.resolve(&id.marketplace);
-            if !marketplaces.allows_dependency(&id.marketplace, &dependency_id.marketplace) {
-                return Err(PluginError::DependencyUnsatisfied {
-                    dependency: dependency_id.to_string(),
-                    reason: crate::integrations::plugin::DependencyReason::NotAllowed,
-                });
-            }
             requirements.push(VersionRequirement {
                 plugin: dependency_id.clone(),
                 version: dependency.version.clone(),
@@ -267,7 +237,6 @@ impl PluginRegistry {
 
     fn validate_planned_graph(
         &self,
-        marketplaces: &MarketplaceRegistry,
         prepared: &[(PluginId, PreparedPlugin)],
         change_ids: &HashSet<PluginId>,
     ) -> Result<(), PluginError> {
@@ -289,12 +258,6 @@ impl PluginRegistry {
         for (id, manifest) in &combined {
             for dependency in &manifest.dependencies {
                 let dependency_id = dependency.resolve(&id.marketplace);
-                if !marketplaces.allows_dependency(&id.marketplace, &dependency_id.marketplace) {
-                    return Err(PluginError::DependencyUnsatisfied {
-                        dependency: dependency_id.to_string(),
-                        reason: crate::integrations::plugin::DependencyReason::NotAllowed,
-                    });
-                }
                 let actual = combined.get(&dependency_id).ok_or_else(|| {
                     PluginError::DependencyUnsatisfied {
                         dependency: dependency_id.to_string(),
@@ -333,22 +296,12 @@ impl PluginRegistry {
             &entry.source,
             marketplaces.source_base(&id.marketplace).as_deref(),
             &source_staging,
-            entry.strict,
         )?;
         let prepared = staging_root.join("prepared");
         copy_directory(&source_root, &prepared)?;
         if !prepared.join("plugin.json").is_file() {
-            std::fs::write(
-                prepared.join("plugin.json"),
-                serde_json::to_vec_pretty(&serde_json::json!({
-                    "manifestVersion": 2,
-                    "name": entry.name,
-                    "version": entry.version,
-                    "description": entry.description,
-                }))?,
-            )?;
+            return Err(PluginError::ManifestNotFound { path: prepared.join("plugin.json") });
         }
-        apply_manifest_override(&prepared, entry.manifest_override.as_ref())?;
 
         let validation_dir = staging_root.join("validate").join(id.to_string());
         if let Some(parent) = validation_dir.parent() {
@@ -379,35 +332,23 @@ impl PluginRegistry {
             return Ok(());
         }
         std::fs::create_dir_all(self.installed_dir())?;
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let backup_root = self.plugins_root.join(".trash").join(format!("transaction-{nonce}"));
-        std::fs::create_dir_all(&backup_root)?;
-        let mut completed = Vec::<CommittedChange>::new();
-
-        for (index, (id, prepared)) in changes.iter_mut().enumerate() {
-            if let Err(error) = maybe_fail_commit(index) {
-                return Err(self.rollback_failure(&completed, error, Vec::new()));
-            }
+        for (id, prepared) in &mut changes {
             let target = self.installed_dir().join(id.to_string());
-            let backup = backup_root.join(id.to_string());
-            let previous = self.get(id);
-            if target.exists()
-                && let Err(error) = std::fs::rename(&target, &backup)
-            {
-                return Err(self.rollback_failure(&completed, error.into(), Vec::new()));
+            let backup = self.plugins_root.join(".trash").join(id.to_string());
+            if let Some(parent) = backup.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            if backup.exists() {
+                std::fs::remove_dir_all(&backup)?;
+            }
+            if target.exists() {
+                std::fs::rename(&target, &backup)?;
             }
             if let Err(error) = std::fs::rename(&prepared.directory, &target) {
-                let mut rollback_errors = Vec::new();
-                if backup.exists()
-                    && let Err(restore) = std::fs::rename(&backup, &target)
-                {
-                    rollback_errors
-                        .push(format!("restoring `{}` failed: {restore}", target.display()));
+                if backup.exists() {
+                    std::fs::rename(&backup, &target)?;
                 }
-                return Err(self.rollback_failure(&completed, error.into(), rollback_errors));
+                return Err(error.into());
             }
             prepared.plugin.path = target.clone();
             prepared.plugin.enabled = false;
@@ -422,59 +363,13 @@ impl PluginRegistry {
                 };
                 entry.load_errors.clear();
             }
-            completed.push(CommittedChange { id: id.clone(), target, backup, previous });
-        }
-
-        if let Err(error) = maybe_fail_commit(changes.len()).and_then(|_| self.save_state()) {
-            return Err(self.rollback_failure(&completed, error, Vec::new()));
-        }
-        if let Err(error) = std::fs::remove_dir_all(&backup_root) {
-            tracing::warn!(path = %backup_root.display(), %error, "failed to clean plugin transaction backup");
+            if backup.exists()
+                && let Err(error) = std::fs::remove_dir_all(&backup)
+            {
+                tracing::warn!(path = %backup.display(), %error, "failed to clean plugin backup");
+            }
         }
         Ok(())
-    }
-
-    fn rollback_failure(
-        &self,
-        completed: &[CommittedChange],
-        original: PluginError,
-        mut rollback_errors: Vec<String>,
-    ) -> PluginError {
-        if let Err(error) = self.rollback_committed(completed) {
-            rollback_errors.push(error.to_string());
-        }
-        if rollback_errors.is_empty() {
-            original
-        } else {
-            PluginError::Other(format!(
-                "plugin transaction failed: {original}; rollback also failed: {}",
-                rollback_errors.join("; ")
-            ))
-        }
-    }
-
-    fn rollback_committed(&self, completed: &[CommittedChange]) -> Result<(), PluginError> {
-        let mut errors = Vec::new();
-        for change in completed.iter().rev() {
-            if change.target.exists()
-                && let Err(error) = std::fs::remove_dir_all(&change.target)
-            {
-                errors.push(format!("removing `{}` failed: {error}", change.target.display()));
-            }
-            if change.backup.exists()
-                && let Err(error) = std::fs::rename(&change.backup, &change.target)
-            {
-                errors.push(format!("restoring `{}` failed: {error}", change.target.display()));
-            }
-            self.remove(&change.id);
-            if let Some(previous) = change.previous.clone() {
-                restore_entry(self, previous);
-            }
-        }
-        if let Err(error) = self.save_state() {
-            errors.push(format!("restoring plugin state failed: {error}"));
-        }
-        if errors.is_empty() { Ok(()) } else { Err(PluginError::Other(errors.join("; "))) }
     }
 }
 
@@ -516,13 +411,6 @@ fn validate_manifest_cycles(
         visit(id, manifests, &mut Vec::new(), &mut visited)?;
     }
     Ok(())
-}
-
-struct CommittedChange {
-    id: PluginId,
-    target: PathBuf,
-    backup: PathBuf,
-    previous: Option<PluginEntry>,
 }
 
 struct PreparedPlugin {
@@ -568,22 +456,10 @@ impl Drop for CleanupDirectory {
     }
 }
 
-pub(super) fn restore_entry(registry: &PluginRegistry, entry: PluginEntry) {
-    let id = entry.plugin.id.clone();
-    registry.register(entry.plugin);
-    if let Some(restored) =
-        registry.plugins.write().expect("plugin registry lock poisoned").get_mut(&id)
-    {
-        restored.status = entry.status;
-        restored.load_errors = entry.load_errors;
-    }
-}
-
 fn materialize_source(
     source: &PluginSource,
     marketplace_base: Option<&Path>,
     staging: &Path,
-    strict: bool,
 ) -> Result<PathBuf, PluginError> {
     match source {
         PluginSource::Local { path } => {
@@ -606,7 +482,7 @@ fn materialize_source(
                     )));
                 }
             }
-            if strict && !path.join("plugin.json").is_file() {
+            if !path.join("plugin.json").is_file() {
                 return Err(PluginError::ManifestNotFound { path: path.join("plugin.json") });
             }
             Ok(path)
@@ -617,43 +493,7 @@ fn materialize_source(
             sha.as_deref(),
             path.as_deref(),
             staging,
-            strict,
         ),
-        PluginSource::Git { url, ref_, sha, path } => {
-            materialize_git(url, ref_.as_deref(), sha.as_deref(), path.as_deref(), staging, strict)
-        }
-        PluginSource::Npm { package, version, registry } => {
-            validate_package_spec(package, "npm")?;
-            let specification = version
-                .as_ref()
-                .map(|version| format!("{package}@{version}"))
-                .unwrap_or_else(|| package.clone());
-            let mut command = std::process::Command::new("npm");
-            command.args(["install", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix"]);
-            command.arg(staging).arg(&specification);
-            if let Some(registry) = registry {
-                command.arg("--registry").arg(registry);
-            }
-            run_install_command(command, "npm", package)?;
-            let root = staging.join("node_modules").join(package);
-            if strict { find_plugin_root(&root) } else { Ok(root) }
-        }
-        PluginSource::Pip { package, version, registry } => {
-            validate_package_spec(package, "pip")?;
-            let specification = version
-                .as_ref()
-                .map(|version| format!("{package}=={version}"))
-                .unwrap_or_else(|| package.clone());
-            let target = staging.join("package");
-            let mut command = pip_command();
-            command.args(["-m", "pip", "install", "--disable-pip-version-check", "--target"]);
-            command.arg(&target).arg(&specification);
-            if let Some(registry) = registry {
-                command.arg("--index-url").arg(registry);
-            }
-            run_install_command(command, "pip", package)?;
-            if strict { find_plugin_root(&target) } else { Ok(target) }
-        }
     }
 }
 
@@ -663,7 +503,6 @@ fn materialize_git(
     sha: Option<&str>,
     subpath: Option<&str>,
     staging: &Path,
-    strict: bool,
 ) -> Result<PathBuf, PluginError> {
     let checkout = staging.join("repository");
     let mut clone = std::process::Command::new("git");
@@ -696,7 +535,11 @@ fn materialize_git(
     } else {
         checkout
     };
-    if strict { find_plugin_root(&root) } else { Ok(root) }
+    if root.join("plugin.json").is_file() {
+        Ok(root)
+    } else {
+        Err(PluginError::ManifestNotFound { path: root.join("plugin.json") })
+    }
 }
 
 fn safe_relative_path(path: &str) -> Result<&Path, PluginError> {
@@ -716,30 +559,6 @@ fn safe_relative_path(path: &str) -> Result<&Path, PluginError> {
     Ok(path)
 }
 
-fn validate_package_spec(package: &str, manager: &str) -> Result<(), PluginError> {
-    if package.trim().is_empty()
-        || package.starts_with('-')
-        || package.contains("..")
-        || package.contains('\\')
-    {
-        return Err(PluginError::Other(format!("unsafe {manager} package name `{package}`")));
-    }
-    Ok(())
-}
-
-fn pip_command() -> std::process::Command {
-    #[cfg(windows)]
-    {
-        let mut command = std::process::Command::new("py");
-        command.arg("-3");
-        command
-    }
-    #[cfg(not(windows))]
-    {
-        std::process::Command::new("python3")
-    }
-}
-
 fn run_git(mut command: std::process::Command, url: &str) -> Result<(), PluginError> {
     isolate_install_environment(&mut command);
     let (status, stderr) = run_command_bounded(&mut command).map_err(|error| {
@@ -752,79 +571,6 @@ fn run_git(mut command: std::process::Command, url: &str) -> Result<(), PluginEr
     }
 }
 
-fn run_install_command(
-    mut command: std::process::Command,
-    manager: &str,
-    package: &str,
-) -> Result<(), PluginError> {
-    isolate_install_environment(&mut command);
-    let build_error = |reason: String| match manager {
-        "npm" => PluginError::NpmInstallFailed { package: package.into(), reason },
-        "pip" => PluginError::PipInstallFailed { package: package.into(), reason },
-        _ => PluginError::Other(format!("{manager} install failed for {package}: {reason}")),
-    };
-    let (status, stderr) =
-        run_command_bounded(&mut command).map_err(|error| build_error(error.to_string()))?;
-    if status.success() { Ok(()) } else { Err(build_error(stderr)) }
-}
-
 fn isolate_install_environment(command: &mut std::process::Command) {
     command.env_clear().envs(crate::config::platform_base_env());
-}
-
-fn find_plugin_root(root: &Path) -> Result<PathBuf, PluginError> {
-    if root.join("plugin.json").is_file() {
-        return Ok(root.to_path_buf());
-    }
-    let matches = walk_plugin_manifests(root, 4)?;
-    if matches.len() == 1 {
-        Ok(matches[0].parent().expect("manifest has parent").to_path_buf())
-    } else {
-        Err(PluginError::Other(format!(
-            "expected exactly one plugin.json under {}, found {}",
-            root.display(),
-            matches.len()
-        )))
-    }
-}
-
-fn walk_plugin_manifests(root: &Path, depth: usize) -> Result<Vec<PathBuf>, PluginError> {
-    if depth == 0 || !root.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut matches = Vec::new();
-    for entry in std::fs::read_dir(root)? {
-        let entry = entry?;
-        if entry.file_type()?.is_symlink() {
-            continue;
-        }
-        if entry.file_type()?.is_dir() {
-            matches.extend(walk_plugin_manifests(&entry.path(), depth - 1)?);
-        } else if entry.file_name() == "plugin.json" {
-            matches.push(entry.path());
-        }
-    }
-    Ok(matches)
-}
-
-fn apply_manifest_override(root: &Path, override_: Option<&Value>) -> Result<(), PluginError> {
-    let Some(override_) = override_ else {
-        return Ok(());
-    };
-    let path = root.join("plugin.json");
-    let mut manifest: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
-    merge_json(&mut manifest, override_);
-    std::fs::write(path, serde_json::to_vec_pretty(&manifest)?)?;
-    Ok(())
-}
-
-fn merge_json(target: &mut Value, override_: &Value) {
-    match (target, override_) {
-        (Value::Object(target), Value::Object(override_)) => {
-            for (key, value) in override_ {
-                merge_json(target.entry(key).or_insert(Value::Null), value);
-            }
-        }
-        (target, override_) => *target = override_.clone(),
-    }
 }

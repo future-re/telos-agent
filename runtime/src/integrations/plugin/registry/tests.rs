@@ -11,7 +11,7 @@ fn make_plugin_dir(dir: &Path, name: &str, marketplace: &str) -> PathBuf {
     let plugin_dir = dir.join("installed").join(format!("{name}@{marketplace}"));
     std::fs::create_dir_all(&plugin_dir).unwrap();
     let manifest = serde_json::json!({
-        "manifestVersion": 2,
+        "manifestVersion": 3,
         "name": name,
         "version": "1.0.0",
         "description": "A test plugin"
@@ -22,6 +22,24 @@ fn make_plugin_dir(dir: &Path, name: &str, marketplace: &str) -> PathBuf {
     )
     .unwrap();
     plugin_dir
+}
+
+fn local_marketplace(
+    root: &Path,
+    name: &str,
+    plugins: Vec<crate::MarketplaceEntry>,
+) -> crate::MarketplaceRegistry {
+    let catalog = root.join("catalogs").join(name);
+    std::fs::create_dir_all(&catalog).unwrap();
+    std::fs::write(
+        catalog.join("marketplace.json"),
+        serde_json::to_vec_pretty(&crate::Marketplace { name: name.into(), owner: None, plugins })
+            .unwrap(),
+    )
+    .unwrap();
+    let mut marketplaces = crate::MarketplaceRegistry::new(root.join("cache"));
+    marketplaces.add_named(crate::MarketplaceSource::Local { path: catalog }, None).unwrap();
+    marketplaces
 }
 
 #[test]
@@ -35,7 +53,7 @@ fn register_and_get_plugin() {
         manifest: PluginManifest {
             name: "test".into(),
             ..serde_json::from_value(serde_json::json!({
-                "manifestVersion": 2,
+                "manifestVersion": 3,
                 "name": "test",
                 "version": "1.0.0"
             }))
@@ -65,7 +83,7 @@ fn enable_disable_lifecycle() {
     let plugin = LoadedPlugin {
         id: id.clone(),
         manifest: serde_json::from_value(serde_json::json!({
-            "manifestVersion": 2,
+            "manifestVersion": 3,
             "name": "t",
             "version": "1.0.0"
         }))
@@ -116,7 +134,7 @@ fn enable_requires_complete_plugin_configuration() {
     std::fs::write(
         plugin_dir.join("plugin.json"),
         serde_json::to_vec_pretty(&serde_json::json!({
-            "manifestVersion": 2,
+            "manifestVersion": 3,
             "name": "configured",
             "version": "1.0.0",
             "userConfig": {
@@ -177,7 +195,8 @@ fn discovery_rejects_removed_hooks_field() {
         .unwrap();
 
     let registry = PluginRegistry::new(tmp.path());
-    assert!(registry.discover_installed().unwrap().is_empty());
+    let error = registry.discover_installed().unwrap_err();
+    assert!(error.to_string().contains("use `policies`"));
     assert!(registry.is_empty());
 }
 
@@ -202,8 +221,8 @@ fn save_and_load_state() {
     registry2.discover_installed().unwrap();
     registry2.load_state().unwrap();
 
-    assert_eq!(registry2.get(&id1).unwrap().status, PluginStatus::Degraded);
-    assert_eq!(registry2.get(&id1).unwrap().load_errors[0].to_string(), "component failed");
+    assert_eq!(registry2.get(&id1).unwrap().status, PluginStatus::Enabled);
+    assert!(registry2.get(&id1).unwrap().load_errors.is_empty());
     assert_eq!(registry2.get(&id2).unwrap().status, PluginStatus::Disabled);
 }
 
@@ -247,7 +266,7 @@ fn apply_registers_plugin_tools_with_namespace() {
 
     // Write plugin.json
     let manifest = serde_json::json!({
-        "manifestVersion": 2,
+        "manifestVersion": 3,
         "name": "test-plugin",
         "version": "1.0.0",
         "tools": ["./tools/hello.json"]
@@ -317,7 +336,7 @@ async fn apply_registers_and_executes_command_policy() {
     permissions.set_mode(0o700);
     std::fs::set_permissions(&script, permissions).unwrap();
     let manifest = serde_json::json!({
-        "manifestVersion": 2,
+        "manifestVersion": 3,
         "name": "policy-plugin",
         "version": "1.0.0",
         "policies": {
@@ -379,7 +398,7 @@ async fn apply_activates_output_styles_settings_and_lsp_servers() {
     std::fs::write(
         plugin_dir.join("plugin.json"),
         serde_json::to_string_pretty(&serde_json::json!({
-            "manifestVersion": 2,
+            "manifestVersion": 3,
             "name": "future-plugin",
             "version": "1.0.0",
             "outputStyles": ["style.json"],
@@ -426,7 +445,7 @@ fn apply_subagents_registers_plugin_agents_with_namespace() {
     std::fs::create_dir_all(plugin_dir.join("agents")).unwrap();
 
     let manifest = serde_json::json!({
-        "manifestVersion": 2,
+        "manifestVersion": 3,
         "name": "agent-plugin",
         "version": "1.0.0",
         "agents": ["./agents/auditor.md"]
@@ -470,7 +489,7 @@ fn apply_keeps_same_named_plugins_from_different_marketplaces_distinct() {
         std::fs::write(
             plugin_dir.join("plugin.json"),
             serde_json::to_vec_pretty(&serde_json::json!({
-                "manifestVersion": 2,
+                "manifestVersion": 3,
                 "name": "formatter",
                 "version": "1.0.0",
                 "tools": ["./tools/format.json"]
@@ -526,7 +545,7 @@ fn component_namespace_encoding_does_not_collapse_dots_and_underscores() {
 }
 
 #[test]
-fn transactional_local_install_resolves_dependencies_upgrades_and_uninstalls() {
+fn local_install_resolves_dependencies_upgrades_and_uninstalls() {
     let tmp = TempDir::new().unwrap();
     let sources = tmp.path().join("sources");
     for (name, dependencies) in [
@@ -538,7 +557,7 @@ fn transactional_local_install_resolves_dependencies_upgrades_and_uninstalls() {
         std::fs::write(
             root.join("plugin.json"),
             serde_json::to_vec_pretty(&serde_json::json!({
-                "manifestVersion": 2,
+                "manifestVersion": 3,
                 "name": name,
                 "version": "1.0.0",
                 "dependencies": dependencies
@@ -561,15 +580,9 @@ fn transactional_local_install_resolves_dependencies_upgrades_and_uninstalls() {
                 source: PluginSource::Local { path: sources.join(name) },
                 category: None,
                 tags: Vec::new(),
-                strict: true,
-                manifest_override: None,
             })
             .collect();
-        let mut marketplaces = crate::MarketplaceRegistry::new(tmp.path().join("cache"));
-        marketplaces
-            .add(crate::MarketplaceSource::Inline { name: "test".into(), plugins: entries })
-            .unwrap();
-        marketplaces
+        local_marketplace(tmp.path(), "test", entries)
     };
     let mut marketplaces = build_marketplace(semver::Version::new(1, 0, 0));
     let registry = PluginRegistry::new(tmp.path().join("plugins"));
@@ -619,7 +632,7 @@ fn install_rejects_catalog_and_manifest_version_mismatch() {
     std::fs::write(
         source.join("plugin.json"),
         serde_json::to_vec_pretty(&serde_json::json!({
-            "manifestVersion": 2,
+            "manifestVersion": 3,
             "name": "mismatch",
             "version": "2.0.0"
         }))
@@ -633,13 +646,8 @@ fn install_rejects_catalog_and_manifest_version_mismatch() {
         source: PluginSource::Local { path: source },
         category: None,
         tags: Vec::new(),
-        strict: true,
-        manifest_override: None,
     };
-    let mut marketplaces = crate::MarketplaceRegistry::new(tmp.path().join("cache"));
-    marketplaces
-        .add(crate::MarketplaceSource::Inline { name: "test".into(), plugins: vec![entry] })
-        .unwrap();
+    let marketplaces = local_marketplace(tmp.path(), "test", vec![entry]);
     let registry = PluginRegistry::new(tmp.path().join("plugins"));
 
     let error =
@@ -661,7 +669,7 @@ fn install_rejects_dependency_version_without_a_global_solution() {
         std::fs::write(
             source.join("plugin.json"),
             serde_json::to_vec_pretty(&serde_json::json!({
-                "manifestVersion": 2,
+                "manifestVersion": 3,
                 "name": name,
                 "version": "1.0.0",
                 "dependencies": dependencies
@@ -679,14 +687,9 @@ fn install_rejects_dependency_version_without_a_global_solution() {
             source: PluginSource::Local { path: sources.join(name) },
             category: None,
             tags: Vec::new(),
-            strict: true,
-            manifest_override: None,
         })
         .collect();
-    let mut marketplaces = crate::MarketplaceRegistry::new(tmp.path().join("cache"));
-    marketplaces
-        .add(crate::MarketplaceSource::Inline { name: "test".into(), plugins: entries })
-        .unwrap();
+    let marketplaces = local_marketplace(tmp.path(), "test", entries);
     let registry = PluginRegistry::new(tmp.path().join("plugins"));
 
     let error = registry.install(&marketplaces, &PluginId::parse("app@test").unwrap()).unwrap_err();
@@ -704,7 +707,7 @@ fn install_reuses_an_installed_dependency_that_satisfies_the_requirement() {
         std::fs::write(
             source.join("plugin.json"),
             serde_json::to_vec_pretty(&serde_json::json!({
-                "manifestVersion": 2,
+                "manifestVersion": 3,
                 "name": name,
                 "version": version,
                 "dependencies": dependencies
@@ -725,16 +728,8 @@ fn install_reuses_an_installed_dependency_that_satisfies_the_requirement() {
         source: PluginSource::Local { path: source },
         category: None,
         tags: Vec::new(),
-        strict: true,
-        manifest_override: None,
     };
-    let marketplace = |entries| {
-        let mut marketplaces = crate::MarketplaceRegistry::new(tmp.path().join("cache"));
-        marketplaces
-            .add(crate::MarketplaceSource::Inline { name: "test".into(), plugins: entries })
-            .unwrap();
-        marketplaces
-    };
+    let marketplace = |entries| local_marketplace(tmp.path(), "test", entries);
     let registry = PluginRegistry::new(tmp.path().join("plugins"));
     let base = PluginId::parse("base@test").unwrap();
     registry.install(&marketplace(vec![entry("base", "1.5.0", base_v1)]), &base).unwrap();
@@ -752,7 +747,7 @@ fn install_reuses_an_installed_dependency_that_satisfies_the_requirement() {
 }
 
 #[test]
-fn upgrade_atomically_moves_shared_dependency_to_the_solved_version() {
+fn upgrade_moves_shared_dependency_to_the_solved_version() {
     let tmp = TempDir::new().unwrap();
     let sources = tmp.path().join("sources");
     let write_sources = |version: &str, requirement: &str| {
@@ -767,7 +762,7 @@ fn upgrade_atomically_moves_shared_dependency_to_the_solved_version() {
             std::fs::write(
                 source.join("plugin.json"),
                 serde_json::to_vec_pretty(&serde_json::json!({
-                    "manifestVersion": 2,
+                    "manifestVersion": 3,
                     "name": name,
                     "version": version,
                     "dependencies": dependencies
@@ -787,15 +782,9 @@ fn upgrade_atomically_moves_shared_dependency_to_the_solved_version() {
                 source: PluginSource::Local { path: sources.join(name) },
                 category: None,
                 tags: Vec::new(),
-                strict: true,
-                manifest_override: None,
             })
             .collect();
-        let mut marketplaces = crate::MarketplaceRegistry::new(tmp.path().join("cache"));
-        marketplaces
-            .add(crate::MarketplaceSource::Inline { name: "test".into(), plugins: entries })
-            .unwrap();
-        marketplaces
+        local_marketplace(tmp.path(), "test", entries)
     };
     let registry = PluginRegistry::new(tmp.path().join("plugins"));
     let app = PluginId::parse("app@test").unwrap();
@@ -805,11 +794,6 @@ fn upgrade_atomically_moves_shared_dependency_to_the_solved_version() {
 
     write_sources("2.0.0", "^2");
     let updated = marketplace(semver::Version::new(2, 0, 0));
-    super::install::fail_commit_at(1);
-    assert!(registry.upgrade(&updated, &app).is_err());
-    assert_eq!(registry.get(&app).unwrap().plugin.manifest.version, semver::Version::new(1, 0, 0));
-    assert_eq!(registry.get(&base).unwrap().plugin.manifest.version, semver::Version::new(1, 0, 0));
-
     registry.upgrade(&updated, &app).unwrap();
 
     assert_eq!(registry.get(&app).unwrap().plugin.manifest.version, semver::Version::new(2, 0, 0));
@@ -825,7 +809,7 @@ fn upgrade_rejects_existing_configuration_incompatible_with_new_schema() {
         std::fs::write(
             source.join("plugin.json"),
             serde_json::to_vec_pretty(&serde_json::json!({
-                "manifestVersion": 2,
+                "manifestVersion": 3,
                 "name": "configured",
                 "version": version,
                 "userConfig": user_config
@@ -851,14 +835,8 @@ fn upgrade_rejects_existing_configuration_incompatible_with_new_schema() {
             source: PluginSource::Local { path: source.clone() },
             category: None,
             tags: Vec::new(),
-            strict: true,
-            manifest_override: None,
         };
-        let mut marketplaces = crate::MarketplaceRegistry::new(tmp.path().join("cache"));
-        marketplaces
-            .add(crate::MarketplaceSource::Inline { name: "test".into(), plugins: vec![entry] })
-            .unwrap();
-        marketplaces
+        local_marketplace(tmp.path(), "test", vec![entry])
     };
     write_manifest("1.0.0", schema("mode"));
     let registry = PluginRegistry::new(tmp.path().join("plugins"));
@@ -885,7 +863,7 @@ fn install_rejects_dependency_cycles_without_committing_plugins() {
         std::fs::write(
             root.join("plugin.json"),
             serde_json::to_vec_pretty(&serde_json::json!({
-                "manifestVersion": 2,
+                "manifestVersion": 3,
                 "name": name,
                 "version": "1.0.0",
                 "dependencies": [{"name": dependency, "version": "^1"}]
@@ -903,14 +881,9 @@ fn install_rejects_dependency_cycles_without_committing_plugins() {
             source: PluginSource::Local { path: sources.join(name) },
             category: None,
             tags: Vec::new(),
-            strict: true,
-            manifest_override: None,
         })
         .collect();
-    let mut marketplaces = crate::MarketplaceRegistry::new(tmp.path().join("cache"));
-    marketplaces
-        .add(crate::MarketplaceSource::Inline { name: "cycles".into(), plugins: entries })
-        .unwrap();
+    let marketplaces = local_marketplace(tmp.path(), "cycles", entries);
     let registry = PluginRegistry::new(tmp.path().join("plugins"));
 
     let error = registry.install(&marketplaces, &PluginId::parse("a@cycles").unwrap()).unwrap_err();
@@ -924,36 +897,4 @@ fn install_rejects_dependency_cycles_without_committing_plugins() {
             .map(|mut entries| entries.next().is_none())
             .unwrap_or(true)
     );
-}
-
-#[test]
-fn non_strict_marketplace_entry_can_synthesize_manifest() {
-    let tmp = TempDir::new().unwrap();
-    let source = tmp.path().join("manifestless");
-    std::fs::create_dir_all(&source).unwrap();
-    std::fs::write(source.join("instructions.md"), "Plugin instructions").unwrap();
-    let entry = crate::MarketplaceEntry {
-        name: "synthesized".into(),
-        description: Some("Entry-owned manifest".into()),
-        version: semver::Version::new(1, 0, 0),
-        source: PluginSource::Local { path: source },
-        category: None,
-        tags: Vec::new(),
-        strict: false,
-        manifest_override: Some(serde_json::json!({
-            "promptSections": ["./instructions.md"]
-        })),
-    };
-    let mut marketplaces = crate::MarketplaceRegistry::new(tmp.path().join("cache"));
-    marketplaces
-        .add(crate::MarketplaceSource::Inline { name: "entry-only".into(), plugins: vec![entry] })
-        .unwrap();
-    let registry = PluginRegistry::new(tmp.path().join("plugins"));
-    let id = PluginId::parse("synthesized@entry-only").unwrap();
-
-    registry.install(&marketplaces, &id).unwrap();
-
-    let installed = registry.get(&id).unwrap();
-    assert_eq!(installed.plugin.manifest.version, semver::Version::new(1, 0, 0));
-    assert_eq!(installed.plugin.resolved_prompt_sections.len(), 1);
 }

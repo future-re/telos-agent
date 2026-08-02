@@ -1,4 +1,4 @@
-export type FontChoice = "noto-sans" | "system" | "wenkai" | "serif";
+export type FontChoice = "noto-sans" | "system";
 export type ThemeChoice = "light" | "warm" | "ink" | "green";
 
 export interface AppearanceSettings {
@@ -20,8 +20,6 @@ export const fontOptions: Array<{
 }> = [
   { value: "noto-sans", label: "Noto Sans SC", description: "内嵌，清晰稳重" },
   { value: "system", label: "系统中文", description: "跟随系统 UI 字体" },
-  { value: "wenkai", label: "霞鹜文楷", description: "更轻松，适合阅读" },
-  { value: "serif", label: "Noto Serif SC", description: "衬线风格" },
 ];
 
 export const themeOptions: Array<{ value: ThemeChoice; label: string }> = [
@@ -75,7 +73,7 @@ function normalizeAppearance(value: unknown): AppearanceSettings {
 }
 
 function isFontChoice(value: unknown): value is FontChoice {
-  return ["noto-sans", "system", "wenkai", "serif"].includes(String(value));
+  return ["noto-sans", "system"].includes(String(value));
 }
 
 function isThemeChoice(value: unknown): value is ThemeChoice {

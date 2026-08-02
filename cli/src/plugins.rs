@@ -1,13 +1,9 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 
 use crate::cli::{PluginCommand, SharedOptions};
-use telos_agent::{
-    Marketplace, MarketplaceEntry, MarketplaceRegistry, MarketplaceSource, PluginId, PluginManager,
-    PluginManifest, PluginSource,
-};
+use telos_agent::{MarketplaceSource, PluginId, PluginManager};
 
 pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> {
     let cwd = options.cwd.clone().unwrap_or(std::env::current_dir()?);
@@ -67,37 +63,7 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
             println!("installed {id}");
         }
         PluginCommand::InstallLocal { path, marketplace } => {
-            let path = canonical_plugin_dir(&path)?;
-            let manifest = read_manifest(&path)?;
-            let id = PluginId { name: manifest.name.clone(), marketplace: marketplace.clone() };
-            let catalog_dir = manager.root().join("local-marketplaces").join(&marketplace);
-            std::fs::create_dir_all(&catalog_dir)?;
-            let catalog_path = catalog_dir.join("marketplace.json");
-            let mut catalog = if catalog_path.is_file() {
-                serde_json::from_slice::<Marketplace>(&std::fs::read(&catalog_path)?)?
-            } else {
-                Marketplace { name: marketplace.clone(), owner: None, plugins: Vec::new() }
-            };
-            let local_entry = MarketplaceEntry {
-                name: manifest.name,
-                description: manifest.description,
-                version: manifest.version,
-                source: PluginSource::Local { path },
-                category: None,
-                tags: Vec::new(),
-            };
-            catalog.plugins.retain(|entry| entry.name != local_entry.name);
-            catalog.plugins.push(local_entry);
-            std::fs::write(&catalog_path, serde_json::to_vec_pretty(&catalog)?)?;
-            if manager.marketplaces().get(&marketplace).is_some() {
-                manager.refresh_marketplace(&marketplace)?;
-            } else {
-                manager.add_marketplace(
-                    MarketplaceSource::Local { path: catalog_dir },
-                    Some(marketplace.clone()),
-                )?;
-            }
-            manager.install(&id)?;
+            let id = manager.install_local(path, marketplace)?;
             println!("installed {id}");
         }
         PluginCommand::Upgrade { id } => {
@@ -148,24 +114,14 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
         }
         PluginCommand::MarketplaceSearch { query } => {
             let query = query.to_lowercase();
-            let mut matches = marketplace_entries(manager.marketplaces(), None)?
-                .into_iter()
-                .filter(|(_, entry)| {
-                    entry.name.to_lowercase().contains(&query)
-                        || entry
-                            .description
-                            .as_deref()
-                            .is_some_and(|description| description.to_lowercase().contains(&query))
-                        || entry.tags.iter().any(|tag| tag.to_lowercase().contains(&query))
-                })
-                .collect::<Vec<_>>();
+            let mut matches = manager.marketplaces().search_entries(&query);
             matches.sort_by(|left, right| left.0.cmp(&right.0));
             for (id, entry) in matches {
                 println!("{id}\t{}\t{}", entry.version, entry.description.as_deref().unwrap_or(""));
             }
         }
         PluginCommand::MarketplaceListPlugins { name } => {
-            let mut entries = marketplace_entries(manager.marketplaces(), name.as_deref())?;
+            let mut entries = manager.marketplaces().entries(name.as_deref())?;
             entries.sort_by(|left, right| left.0.cmp(&right.0));
             for (id, entry) in entries {
                 println!("{id}\t{}\t{}", entry.version, entry.description.as_deref().unwrap_or(""));
@@ -187,45 +143,6 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
     Ok(())
 }
 
-fn marketplace_entries<'a>(
-    marketplaces: &'a MarketplaceRegistry,
-    selected: Option<&str>,
-) -> Result<Vec<(String, &'a MarketplaceEntry)>> {
-    if let Some(selected) = selected
-        && marketplaces.get(selected).is_none()
-    {
-        return Err(anyhow!("marketplace `{selected}` is not registered"));
-    }
-    let mut entries = Vec::new();
-    for marketplace in marketplaces.names() {
-        if selected.is_some_and(|selected| selected != marketplace) {
-            continue;
-        }
-        if let Some(catalog) = marketplaces.get(marketplace) {
-            entries.extend(
-                catalog
-                    .plugins
-                    .iter()
-                    .map(|entry| (format!("{}@{marketplace}", entry.name), entry)),
-            );
-        }
-    }
-    Ok(entries)
-}
-
 fn parse_id(value: &str) -> Result<PluginId> {
     PluginId::parse(value).ok_or_else(|| anyhow!("plugin id must use name@marketplace"))
-}
-
-fn canonical_plugin_dir(path: &Path) -> Result<PathBuf> {
-    let path = std::fs::canonicalize(path)?;
-    if !path.join("plugin.json").is_file() {
-        return Err(anyhow!("{} does not contain plugin.json", path.display()));
-    }
-    Ok(path)
-}
-
-fn read_manifest(path: &Path) -> Result<PluginManifest> {
-    serde_json::from_slice(&std::fs::read(path.join("plugin.json"))?)
-        .context("failed to parse plugin.json")
 }

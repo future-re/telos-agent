@@ -65,11 +65,6 @@ impl DependencyRef {
     pub fn resolve(&self, default_marketplace: &str) -> PluginId {
         PluginId { name: self.name.clone(), marketplace: default_marketplace.to_string() }
     }
-
-    /// Display the dependency as a string.
-    pub fn display(&self) -> String {
-        self.name.clone()
-    }
 }
 
 // --- Policy configuration ---
@@ -522,7 +517,6 @@ mod tests {
     fn parse_dependency_ref_default_marketplace() {
         let json = json!({"name": "my-dep", "version": "^1.2"});
         let dep: DependencyRef = serde_json::from_value(json).unwrap();
-        assert_eq!(dep.display(), "my-dep");
         let id = dep.resolve("my-marketplace");
         assert_eq!(id.to_string(), "my-dep@my-marketplace");
     }

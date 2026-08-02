@@ -14,7 +14,6 @@ use crate::integrations::plugin::{
 /// Owns the installed-plugin and marketplace views while holding the project
 /// plugin lock. Management callers should open one manager per operation.
 pub struct PluginManager {
-    root: PathBuf,
     registry: PluginRegistry,
     marketplaces: MarketplaceRegistry,
     _lock: File,
@@ -41,11 +40,7 @@ impl PluginManager {
         let mut marketplaces = MarketplaceRegistry::new(&root);
         marketplaces.load()?;
 
-        Ok(Self { root, registry, marketplaces, _lock: lock })
-    }
-
-    pub fn root(&self) -> &Path {
-        &self.root
+        Ok(Self { registry, marketplaces, _lock: lock })
     }
 
     pub fn registry(&self) -> &PluginRegistry {
@@ -54,10 +49,6 @@ impl PluginManager {
 
     pub fn marketplaces(&self) -> &MarketplaceRegistry {
         &self.marketplaces
-    }
-
-    pub fn marketplaces_mut(&mut self) -> &mut MarketplaceRegistry {
-        &mut self.marketplaces
     }
 
     pub fn enable(&self, id: &PluginId) -> Result<(), PluginError> {
@@ -85,6 +76,38 @@ impl PluginManager {
     pub fn install(&mut self, id: &PluginId) -> Result<(), PluginError> {
         self.registry.refresh_marketplace(&mut self.marketplaces, &id.marketplace)?;
         self.registry.install(&self.marketplaces, id)
+    }
+
+    pub fn install_local(
+        &mut self,
+        plugin_dir: impl AsRef<Path>,
+        marketplace: impl Into<String>,
+    ) -> Result<PluginId, PluginError> {
+        let plugin_dir = std::fs::canonicalize(plugin_dir)?;
+        if !plugin_dir.is_dir() {
+            return Err(PluginError::Other(format!(
+                "{} is not a plugin directory",
+                plugin_dir.display()
+            )));
+        }
+        let manifest = crate::integrations::plugin::registry::read_manifest_from_dir(&plugin_dir)?;
+        let marketplace = marketplace.into();
+        if !crate::integrations::plugin::is_valid_id_part(&marketplace) {
+            return Err(PluginError::Other(format!("invalid marketplace name `{marketplace}`")));
+        }
+        let catalog_dir =
+            self.marketplaces.upsert_local_plugin(&marketplace, &plugin_dir, &manifest)?;
+        if self.marketplaces.get(&marketplace).is_some() {
+            self.refresh_marketplace(&marketplace)?;
+        } else {
+            self.add_marketplace(
+                MarketplaceSource::Local { path: catalog_dir },
+                Some(marketplace.clone()),
+            )?;
+        }
+        let id = PluginId { name: manifest.name, marketplace };
+        self.install(&id)?;
+        Ok(id)
     }
 
     pub fn upgrade(&mut self, id: &PluginId) -> Result<(), PluginError> {
@@ -175,5 +198,42 @@ mod tests {
 
         assert!(error.to_string().contains("not migrated automatically"));
         assert!(legacy.exists());
+    }
+
+    #[test]
+    fn install_local_owns_catalog_creation_and_installation() {
+        let temp = tempfile::tempdir().unwrap();
+        let plugin_dir = temp.path().join("source");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("plugin.json"),
+            serde_json::json!({
+                "manifestVersion": 3,
+                "name": "local-plugin",
+                "version": "1.0.0"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let root = temp.path().join("plugins");
+        let mut manager = PluginManager::open(&root).unwrap();
+        let id = manager.install_local(&plugin_dir, "local").unwrap();
+
+        assert_eq!(id.to_string(), "local-plugin@local");
+        assert!(manager.registry().is_installed(&id));
+        assert!(root.join("local-marketplaces/local/marketplace.json").is_file());
+    }
+
+    #[test]
+    fn install_local_rejects_missing_manifest_before_catalog_write() {
+        let temp = tempfile::tempdir().unwrap();
+        let plugin_dir = temp.path().join("source");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let root = temp.path().join("plugins");
+        let mut manager = PluginManager::open(&root).unwrap();
+
+        assert!(manager.install_local(&plugin_dir, "local").is_err());
+        assert!(!root.join("local-marketplaces").exists());
     }
 }

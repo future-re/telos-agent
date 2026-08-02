@@ -5,7 +5,9 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::integrations::plugin::PluginError;
-use crate::integrations::plugin::manifest::{MarketplaceEntry, PluginAuthor};
+use crate::integrations::plugin::manifest::{
+    MarketplaceEntry, PluginAuthor, PluginManifest, PluginSource,
+};
 use crate::integrations::plugin::sources::MarketplaceSource;
 
 /// A curated collection of plugins fetched from a marketplace source.
@@ -120,6 +122,38 @@ impl MarketplaceRegistry {
         Ok(name)
     }
 
+    pub(crate) fn upsert_local_plugin(
+        &self,
+        marketplace: &str,
+        plugin_dir: &Path,
+        manifest: &PluginManifest,
+    ) -> Result<PathBuf, PluginError> {
+        if !crate::integrations::plugin::is_valid_id_part(marketplace) {
+            return Err(PluginError::Other(format!("invalid marketplace name `{marketplace}`")));
+        }
+        let catalog_dir = self.cache_root.join("local-marketplaces").join(marketplace);
+        std::fs::create_dir_all(&catalog_dir)?;
+        let catalog_path = catalog_dir.join("marketplace.json");
+        let mut catalog = if catalog_path.is_file() {
+            Self::load_manifest_from_dir(&catalog_dir)?
+        } else {
+            Marketplace { name: marketplace.to_string(), owner: None, plugins: Vec::new() }
+        };
+        let entry = MarketplaceEntry {
+            name: manifest.name.clone(),
+            description: manifest.description.clone(),
+            version: manifest.version.clone(),
+            source: PluginSource::Local { path: plugin_dir.to_path_buf() },
+            category: None,
+            tags: Vec::new(),
+        };
+        catalog.plugins.retain(|candidate| candidate.name != entry.name);
+        catalog.plugins.push(entry);
+        validate_marketplace(&catalog)?;
+        std::fs::write(&catalog_path, serde_json::to_vec_pretty(&catalog)?)?;
+        Ok(catalog_dir)
+    }
+
     /// Remove a marketplace and any Telos-owned cached data.
     pub(crate) fn remove_unchecked(&mut self, name: &str) -> Result<(), PluginError> {
         if !crate::integrations::plugin::is_valid_id_part(name) {
@@ -149,32 +183,49 @@ impl MarketplaceRegistry {
         self.marketplaces.keys().collect()
     }
 
-    /// Search across all marketplaces for plugins matching `query`
-    /// (case-insensitive substring match on name and description).
-    pub fn search(&self, query: &str) -> Vec<(&Marketplace, &MarketplaceEntry)> {
-        let query = query.to_lowercase();
-        let mut results = Vec::new();
-        for cached in self.marketplaces.values() {
-            for entry in &cached.manifest.plugins {
-                if entry.name.to_lowercase().contains(&query)
-                    || entry.description.as_ref().is_some_and(|d| d.to_lowercase().contains(&query))
-                {
-                    results.push((&cached.manifest, entry));
-                }
+    pub fn entries(
+        &self,
+        selected: Option<&str>,
+    ) -> Result<Vec<(String, &MarketplaceEntry)>, PluginError> {
+        if let Some(selected) = selected
+            && self.get(selected).is_none()
+        {
+            return Err(PluginError::MarketplaceNotFound {
+                marketplace: selected.to_string(),
+                available: self.marketplaces.keys().cloned().collect(),
+            });
+        }
+        let mut entries = Vec::new();
+        for marketplace in self.names() {
+            if selected.is_some_and(|selected| selected != marketplace) {
+                continue;
+            }
+            if let Some(catalog) = self.get(marketplace) {
+                entries.extend(
+                    catalog
+                        .plugins
+                        .iter()
+                        .map(|entry| (format!("{}@{marketplace}", entry.name), entry)),
+                );
             }
         }
-        results
+        Ok(entries)
     }
 
-    /// List all available plugins across all marketplaces.
-    pub fn list_all(&self) -> Vec<(&Marketplace, &MarketplaceEntry)> {
-        let mut results = Vec::new();
-        for cached in self.marketplaces.values() {
-            for entry in &cached.manifest.plugins {
-                results.push((&cached.manifest, entry));
-            }
-        }
-        results
+    pub fn search_entries(&self, query: &str) -> Vec<(String, &MarketplaceEntry)> {
+        let query = query.to_lowercase();
+        self.entries(None)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(_, entry)| {
+                entry.name.to_lowercase().contains(&query)
+                    || entry
+                        .description
+                        .as_ref()
+                        .is_some_and(|description| description.to_lowercase().contains(&query))
+                    || entry.tags.iter().any(|tag| tag.to_lowercase().contains(&query))
+            })
+            .collect()
     }
 
     pub fn plugin_entry(
@@ -589,27 +640,6 @@ mod tests {
     }
 
     #[test]
-    fn search_finds_matching_plugins() {
-        let tmp = TempDir::new().unwrap();
-        let mkt_dir = tmp.path().join("mkt");
-        make_marketplace_dir(&mkt_dir, "mkt");
-
-        let mut registry = MarketplaceRegistry::new(tmp.path());
-        registry.add_named(MarketplaceSource::Local { path: mkt_dir }, None).unwrap();
-
-        let results = registry.search("test");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].1.name, "test-plugin");
-
-        let results = registry.search("another");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].1.name, "another-plugin");
-
-        let results = registry.search("nonexistent");
-        assert!(results.is_empty());
-    }
-
-    #[test]
     fn remove_marketplace() {
         let tmp = TempDir::new().unwrap();
         let mut registry = MarketplaceRegistry::new(tmp.path());
@@ -653,7 +683,7 @@ mod tests {
         let mut registry2 = MarketplaceRegistry::new(tmp.path().join("cache"));
         registry2.load().unwrap();
         assert!(registry2.get("my-mkt").is_some());
-        assert!(registry2.list_all().is_empty());
+        assert!(registry2.get("my-mkt").unwrap().plugins.is_empty());
     }
 
     #[test]

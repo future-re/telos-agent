@@ -67,7 +67,7 @@ impl ResolvedPluginConfig {
 }
 
 #[derive(Clone)]
-pub struct PluginConfigStore {
+pub(crate) struct PluginConfigStore {
     path: PathBuf,
     values: HashMap<PluginId, HashMap<String, Value>>,
 }
@@ -84,15 +84,11 @@ impl std::fmt::Debug for PluginConfigStore {
 }
 
 impl PluginConfigStore {
-    pub fn new(path: impl Into<PathBuf>) -> Self {
+    pub(crate) fn new(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into(), values: HashMap::new() }
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub fn load(&mut self) -> Result<(), PluginError> {
+    pub(crate) fn load(&mut self) -> Result<(), PluginError> {
         if !self.path.exists() {
             return Ok(());
         }
@@ -113,7 +109,7 @@ impl PluginConfigStore {
         Ok(())
     }
 
-    pub fn save(&self) -> Result<(), PluginError> {
+    pub(crate) fn save(&self) -> Result<(), PluginError> {
         let plugins: HashMap<String, &HashMap<String, Value>> =
             self.values.iter().map(|(id, values)| (id.to_string(), values)).collect();
         crate::integrations::plugin::state::write_section(
@@ -123,7 +119,7 @@ impl PluginConfigStore {
         )
     }
 
-    pub fn set(
+    pub(crate) fn set(
         &mut self,
         id: &PluginId,
         manifest: &PluginManifest,
@@ -145,7 +141,7 @@ impl PluginConfigStore {
         Ok(())
     }
 
-    pub fn clear(&mut self, id: &PluginId) -> Result<(), PluginError> {
+    pub(crate) fn clear(&mut self, id: &PluginId) -> Result<(), PluginError> {
         let previous = self.values.remove(id);
         if let Err(error) = self.save() {
             if let Some(previous) = previous {
@@ -156,10 +152,6 @@ impl PluginConfigStore {
         Ok(())
     }
 
-    pub fn get(&self, id: &PluginId) -> Option<&HashMap<String, Value>> {
-        self.values.get(id)
-    }
-
     pub(crate) fn validate_for_manifest(
         &self,
         id: &PluginId,
@@ -168,7 +160,7 @@ impl PluginConfigStore {
         self.resolve(id, manifest).map(|_| ())
     }
 
-    pub fn resolve(
+    pub(crate) fn resolve(
         &self,
         id: &PluginId,
         manifest: &PluginManifest,

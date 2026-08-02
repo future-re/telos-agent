@@ -1,8 +1,9 @@
 //! Plugin registry lifecycle and query methods.
 
+use crate::integrations::plugin::ResolvedPluginConfig;
+use crate::integrations::plugin::config::PluginConfigStore;
 use crate::integrations::plugin::registry::types::{LoadedPlugin, PluginEntry, PluginStatus};
 use crate::integrations::plugin::{DependencyReason, PluginError, PluginId};
-use crate::integrations::plugin::{PluginConfigStore, ResolvedPluginConfig};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -26,16 +27,16 @@ impl PluginRegistry {
         }
     }
     /// Path where installed plugins live.
-    pub fn installed_dir(&self) -> PathBuf {
+    pub(crate) fn installed_dir(&self) -> PathBuf {
         self.plugins_root.join("installed")
     }
 
     /// Path to the state file.
-    pub fn state_path(&self) -> PathBuf {
+    pub(crate) fn state_path(&self) -> PathBuf {
         self.plugins_root.join("state.json")
     }
 
-    pub fn load_config(&self) -> Result<(), PluginError> {
+    pub(crate) fn load_config(&self) -> Result<(), PluginError> {
         self.config_store.write().expect("plugin config lock poisoned").load()
     }
 

@@ -22,7 +22,7 @@ pub mod tool_loader;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub use config::{PluginConfigStore, ResolvedPluginConfig};
+pub use config::ResolvedPluginConfig;
 pub use errors::{DependencyReason, PluginError};
 pub use lsp_tool::LspTool;
 pub use manager::PluginManager;

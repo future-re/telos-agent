@@ -6,6 +6,56 @@ use crate::integrations::plugin::registry::types::LoadedPlugin;
 use crate::integrations::plugin::{PluginError, PluginId, PluginSource};
 use std::path::{Path, PathBuf};
 
+pub(crate) fn read_manifest_from_dir(dir: &Path) -> Result<PluginManifest, PluginError> {
+    let manifest_path = dir.join("plugin.json");
+    let content =
+        std::fs::read_to_string(&manifest_path).map_err(|e| PluginError::ManifestParse {
+            path: manifest_path.clone(),
+            reason: format!("failed to read: {e}"),
+        })?;
+
+    let raw: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| PluginError::ManifestParse {
+            path: manifest_path.clone(),
+            reason: format!("invalid JSON: {e}"),
+        })?;
+    if raw.get("hooks").is_some() || raw.get("interceptors").is_some() {
+        return Err(PluginError::ManifestValidation {
+            errors: vec![
+                "the `hooks` and `interceptors` plugin fields were removed; use `policies`".into(),
+            ],
+        });
+    }
+    let manifest: PluginManifest = serde_json::from_value(raw).map_err(|e| {
+        PluginError::ManifestParse { path: manifest_path, reason: format!("invalid manifest: {e}") }
+    })?;
+
+    let mut validation_errors = Vec::new();
+    if manifest.name.trim().is_empty() {
+        validation_errors.push("name must not be empty".into());
+    } else if !crate::integrations::plugin::is_valid_id_part(&manifest.name) {
+        validation_errors.push(
+            "name may contain only ASCII letters, digits, dots, hyphens, and underscores".into(),
+        );
+    }
+    if let Some(policies) = &manifest.policies {
+        validation_errors.extend(policies.validate());
+    }
+    for (index, dependency) in manifest.dependencies.iter().enumerate() {
+        if !crate::integrations::plugin::is_valid_id_part(&dependency.name) {
+            validation_errors
+                .push(format!("dependencies[{index}].name is not a valid plugin name"));
+        }
+    }
+    validation_errors
+        .extend(crate::integrations::plugin::config::validate_manifest_config(&manifest));
+    if !validation_errors.is_empty() {
+        return Err(PluginError::ManifestValidation { errors: validation_errors });
+    }
+
+    Ok(manifest)
+}
+
 impl PluginRegistry {
     /// Scan the installed directory and load all plugins found there.
     ///
@@ -46,61 +96,7 @@ impl PluginRegistry {
     }
     /// Load a single plugin from a directory containing plugin.json.
     pub(crate) fn load_plugin_from_dir(&self, dir: &Path) -> Result<LoadedPlugin, PluginError> {
-        let manifest_path = dir.join("plugin.json");
-        let content =
-            std::fs::read_to_string(&manifest_path).map_err(|e| PluginError::ManifestParse {
-                path: manifest_path.clone(),
-                reason: format!("failed to read: {e}"),
-            })?;
-
-        let raw: serde_json::Value =
-            serde_json::from_str(&content).map_err(|e| PluginError::ManifestParse {
-                path: manifest_path.clone(),
-                reason: format!("invalid JSON: {e}"),
-            })?;
-        if raw.get("hooks").is_some() || raw.get("interceptors").is_some() {
-            return Err(PluginError::ManifestValidation {
-                errors: vec![
-                    "the `hooks` and `interceptors` plugin fields were removed; use `policies`"
-                        .into(),
-                ],
-            });
-        }
-        let manifest: PluginManifest =
-            serde_json::from_value(raw).map_err(|e| PluginError::ManifestParse {
-                path: manifest_path.clone(),
-                reason: format!("invalid manifest: {e}"),
-            })?;
-
-        let mut validation_errors = Vec::new();
-        if manifest.name.trim().is_empty() {
-            validation_errors.push("name must not be empty".into());
-        } else if !crate::integrations::plugin::is_valid_id_part(&manifest.name) {
-            validation_errors.push(
-                "name may contain only ASCII letters, digits, dots, hyphens, and underscores"
-                    .into(),
-            );
-        }
-        if manifest.manifest_version != 3 {
-            validation_errors.push(format!(
-                "unsupported manifestVersion {}; expected 3",
-                manifest.manifest_version
-            ));
-        }
-        if let Some(policies) = &manifest.policies {
-            validation_errors.extend(policies.validate());
-        }
-        for (index, dependency) in manifest.dependencies.iter().enumerate() {
-            if !crate::integrations::plugin::is_valid_id_part(&dependency.name) {
-                validation_errors
-                    .push(format!("dependencies[{index}].name is not a valid plugin name"));
-            }
-        }
-        validation_errors
-            .extend(crate::integrations::plugin::config::validate_manifest_config(&manifest));
-        if !validation_errors.is_empty() {
-            return Err(PluginError::ManifestValidation { errors: validation_errors });
-        }
+        let manifest = read_manifest_from_dir(dir)?;
 
         // Determine marketplace from the parent directory name
         // installed/<name>@<marketplace>/plugin.json

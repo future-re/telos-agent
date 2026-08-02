@@ -55,6 +55,7 @@ mod tests {
         std::fs::write(
             plugin_dir.join("plugin.json"),
             serde_json::to_string_pretty(&json!({
+                "manifestVersion": 2,
                 "name": "agent-plugin",
                 "version": "1.0.0",
                 "agents": ["./agents/auditor.md"]
@@ -104,6 +105,7 @@ You audit plugin behavior.
         std::fs::write(
             plugin_dir.join("plugin.json"),
             serde_json::to_string_pretty(&json!({
+                "manifestVersion": 2,
                 "name": "agent-plugin",
                 "version": "1.0.0",
                 "agents": ["./agents/auditor.md", "./agents/bad.md"]

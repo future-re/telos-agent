@@ -15,7 +15,9 @@ The legacy `hooks` and `interceptors` manifest fields are rejected. Use semantic
 
 ```json
 {
+  "manifestVersion": 2,
   "name": "guardrails",
+  "version": "1.0.0",
   "policies": {
     "sessionStart": [
       {
@@ -54,13 +56,17 @@ To reject an operation, return `{"decision":"reject","reason":"explanation"}`. P
 
 ### Manifest contract
 
-`plugin.json` is a strict, camel-case manifest. `manifestVersion` defaults to `1`; other versions and unknown fields are rejected. Versions use semver, component paths must remain under the plugin root, and installed directory names use `<name>@<marketplace>`.
+`plugin.json` is a strict, camel-case manifest. `manifestVersion` must be `2`; v1, omitted versions, and unknown fields are rejected. Plugin and marketplace entry versions use semver, must be present, and must match exactly. Component paths remain under the plugin root, and installed directory names use `<name>@<marketplace>`.
 
 ```json
 {
-  "manifestVersion": 1,
+  "manifestVersion": 2,
   "name": "typescript-assist",
   "version": "1.2.0",
+  "dependencies": [
+    { "name": "language-core", "version": "^2.1" },
+    { "name": "shared-rules", "marketplace": "official", "version": ">=1.4, <2" }
+  ],
   "tools": ["./tools/format.json"],
   "outputStyles": ["./styles/concise.md"],
   "lspServers": {
@@ -112,9 +118,13 @@ telos plugin uninstall formatter@my-marketplace
 telos plugin marketplace-remove my-marketplace
 ```
 
-Install and upgrade refresh the selected marketplace, validate the manifest and dependency graph, and only then switch directories. State writes and directory replacement are rollback-aware. Marketplace sources support local directories, inline catalogs, GitHub/git, direct JSON URLs, and npm catalogs; plugin entries support local, GitHub/git, npm, and pip sources. npm lifecycle scripts are disabled during installation. The desktop settings dialog lists registered marketplace entries and supports install, upgrade, disable, uninstall, schema inspection, and configuration with sensitive-value preservation.
+Install and upgrade refresh the selected marketplace, solve one global version per `name@marketplace`, validate existing configuration against replacement manifests, and only then switch all affected directories in one transaction. A catalog/plugin version mismatch or an unsatisfied semver range aborts the operation and preserves every previous version.
 
-Migration note: manifests using the removed `hooks` or `interceptors` fields must move those commands to `policies`; unknown or misspelled fields that were previously ignored now fail validation.
+When a refresh removes a catalog entry, installed copies are retained and reported as orphaned by default. With `forceRemoveDeletedPlugins: true`, only disabled plugins without outside dependents are removed; otherwise the refresh fails and preserves the previous catalog. A marketplace cannot be removed while any of its plugins remain installed.
+
+Marketplace sources support local directories, inline catalogs, GitHub/git, direct JSON URLs, and npm catalogs; plugin entries support local, GitHub/git, npm, and pip sources. npm lifecycle scripts are disabled during installation. Source declarations currently define the trust boundary: Git SHA pinning is optional and npm/pip checksums or signatures are not verified, so only register trusted marketplaces and pin immutable sources where possible. The desktop settings dialog lists registered marketplace entries and supports install, upgrade, disable, uninstall, schema inspection, and configuration with sensitive-value preservation.
+
+Migration note: manifest v1 is intentionally unsupported. Set `manifestVersion` to `2`, add a required semver `version`, convert every dependency string into the versioned object form above, and move removed `hooks` or `interceptors` commands to `policies`. Unknown or misspelled fields fail validation.
 
 ## Skills
 

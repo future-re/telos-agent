@@ -29,7 +29,9 @@ pub use manifest::{
     PluginManifest, PluginSource, PoliciesConfig, SessionPolicyDef, ToolPolicyDef,
     UserConfigOption,
 };
-pub use marketplace::{Marketplace, MarketplaceRegistry};
+pub use marketplace::{
+    Marketplace, MarketplaceRefreshReport, MarketplaceRegistry, PluginSourceStatus,
+};
 pub use registry::{LoadedPlugin, PluginEntry, PluginRegistry, PluginStatus};
 pub use sources::MarketplaceSource;
 pub use tool_loader::{CommandTool, ToolPermission, ToolSpec, load_tool_spec};

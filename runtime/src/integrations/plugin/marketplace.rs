@@ -16,8 +16,8 @@ pub struct Marketplace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<PluginAuthor>,
     pub plugins: Vec<MarketplaceEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub force_remove_deleted_plugins: Option<bool>,
+    #[serde(default)]
+    pub force_remove_deleted_plugins: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allow_cross_marketplace_deps_on: Option<Vec<String>>,
 }
@@ -37,6 +37,36 @@ struct CachedMarketplace {
 pub struct MarketplaceRegistry {
     marketplaces: HashMap<String, CachedMarketplace>,
     cache_root: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PluginSourceStatus {
+    Available,
+    RemovedFromMarketplace,
+    MarketplaceMissing,
+}
+
+impl PluginSourceStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::RemovedFromMarketplace => "removed-from-marketplace",
+            Self::MarketplaceMissing => "marketplace-missing",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MarketplaceRefreshReport {
+    pub removed: Vec<crate::integrations::plugin::PluginId>,
+    pub orphaned: Vec<crate::integrations::plugin::PluginId>,
+}
+
+pub(crate) struct MarketplaceSnapshot {
+    name: String,
+    cached: CachedMarketplace,
+    backup: Option<PathBuf>,
 }
 
 impl MarketplaceRegistry {
@@ -98,6 +128,11 @@ impl MarketplaceRegistry {
                 "invalid marketplace name `{name}`; use ASCII letters, digits, dots, hyphens, or underscores"
             )));
         }
+        if self.marketplaces.contains_key(&name) {
+            return Err(PluginError::Other(format!(
+                "marketplace `{name}` is already registered; refresh or remove it first"
+            )));
+        }
 
         let install_location = self.cache_root.join("marketplaces").join(&name);
 
@@ -116,7 +151,7 @@ impl MarketplaceRegistry {
                     name: name.clone(),
                     owner: None,
                     plugins: plugins.clone(),
-                    force_remove_deleted_plugins: None,
+                    force_remove_deleted_plugins: false,
                     allow_cross_marketplace_deps_on: None,
                 };
                 (manifest, 0)
@@ -127,7 +162,7 @@ impl MarketplaceRegistry {
                     name: name.clone(),
                     owner: None,
                     plugins: Vec::new(),
-                    force_remove_deleted_plugins: None,
+                    force_remove_deleted_plugins: false,
                     allow_cross_marketplace_deps_on: None,
                 };
                 (manifest, 0)
@@ -144,7 +179,7 @@ impl MarketplaceRegistry {
     }
 
     /// Remove a marketplace and any Telos-owned cached data.
-    pub fn remove(&mut self, name: &str) -> Result<(), PluginError> {
+    pub(crate) fn remove_unchecked(&mut self, name: &str) -> Result<(), PluginError> {
         if !crate::integrations::plugin::is_valid_id_part(name) {
             return Err(PluginError::Other(format!("invalid marketplace name `{name}`")));
         }
@@ -227,6 +262,16 @@ impl MarketplaceRegistry {
                 .is_some_and(|allowed| allowed.iter().any(|name| name == dependency))
     }
 
+    pub fn source_status(&self, id: &crate::integrations::plugin::PluginId) -> PluginSourceStatus {
+        match self.marketplaces.get(&id.marketplace) {
+            None => PluginSourceStatus::MarketplaceMissing,
+            Some(cached) if cached.manifest.plugins.iter().any(|entry| entry.name == id.name) => {
+                PluginSourceStatus::Available
+            }
+            Some(_) => PluginSourceStatus::RemovedFromMarketplace,
+        }
+    }
+
     /// Save known marketplaces metadata to `known_marketplaces.json`.
     pub fn save(&self) -> Result<(), PluginError> {
         let path = self.cache_root.join("known_marketplaces.json");
@@ -239,6 +284,7 @@ impl MarketplaceRegistry {
             .map(|(name, cached)| {
                 let entry = serde_json::json!({
                     "source": cached.source,
+                    "manifest": cached.manifest,
                     "installLocation": cached.install_location,
                     "lastUpdated": cached.last_updated,
                 });
@@ -279,21 +325,28 @@ impl MarketplaceRegistry {
                     .unwrap_or_else(|| self.cache_root.join("marketplaces").join(name));
                 let last_updated = entry.get("lastUpdated").and_then(|v| v.as_u64()).unwrap_or(0);
 
-                // For disk-backed sources, try to load the manifest
-                let manifest = match &source {
+                // Prefer the last catalog that completed coordinated refresh. This prevents
+                // local source edits from bypassing deletion and dependency reconciliation
+                // when a process restarts.
+                let persisted_manifest = entry
+                    .get("manifest")
+                    .cloned()
+                    .and_then(|value| serde_json::from_value::<Marketplace>(value).ok())
+                    .filter(|manifest| validate_marketplace(manifest).is_ok());
+                let manifest = persisted_manifest.unwrap_or_else(|| match &source {
                     MarketplaceSource::Local { path } => Self::load_manifest_from_dir(path)
                         .unwrap_or_else(|_| Marketplace {
                             name: name.clone(),
                             owner: None,
                             plugins: Vec::new(),
-                            force_remove_deleted_plugins: None,
+                            force_remove_deleted_plugins: false,
                             allow_cross_marketplace_deps_on: None,
                         }),
                     MarketplaceSource::Inline { name: inline_name, plugins } => Marketplace {
                         name: inline_name.clone(),
                         owner: None,
                         plugins: plugins.clone(),
-                        force_remove_deleted_plugins: None,
+                        force_remove_deleted_plugins: false,
                         allow_cross_marketplace_deps_on: None,
                     },
                     _ => Self::load_manifest_from_dir(&install_location).unwrap_or_else(|_| {
@@ -301,11 +354,11 @@ impl MarketplaceRegistry {
                             name: name.clone(),
                             owner: None,
                             plugins: Vec::new(),
-                            force_remove_deleted_plugins: None,
+                            force_remove_deleted_plugins: false,
                             allow_cross_marketplace_deps_on: None,
                         }
                     }),
-                };
+                });
 
                 self.marketplaces.insert(
                     name.clone(),
@@ -332,7 +385,7 @@ impl MarketplaceRegistry {
     }
 
     /// Refresh a marketplace from its declared source and atomically replace its cache.
-    pub fn refresh(&mut self, name: &str) -> Result<(), PluginError> {
+    pub(crate) fn refresh_unchecked(&mut self, name: &str) -> Result<(), PluginError> {
         let cached =
             self.marketplaces.get(name).ok_or_else(|| PluginError::MarketplaceNotFound {
                 marketplace: name.to_string(),
@@ -366,6 +419,48 @@ impl MarketplaceRegistry {
             }
             MarketplaceSource::Url { url } => self.refresh_url(name, url),
             MarketplaceSource::Npm { package } => self.refresh_npm(name, package),
+        }
+    }
+
+    pub(crate) fn snapshot(&self, name: &str) -> Result<MarketplaceSnapshot, PluginError> {
+        let cached = self.marketplaces.get(name).cloned().ok_or_else(|| {
+            PluginError::MarketplaceNotFound {
+                marketplace: name.to_string(),
+                available: self.marketplaces.keys().cloned().collect(),
+            }
+        })?;
+        let backup = if cached.install_location.exists()
+            && !matches!(
+                cached.source,
+                MarketplaceSource::Local { .. } | MarketplaceSource::Inline { .. }
+            ) {
+            let backup = self.staging_dir(&format!("{name}-snapshot"));
+            reset_directory(&backup)?;
+            copy_directory(&cached.install_location, &backup)?;
+            Some(backup)
+        } else {
+            None
+        };
+        Ok(MarketplaceSnapshot { name: name.to_string(), cached, backup })
+    }
+
+    pub(crate) fn restore_snapshot(
+        &mut self,
+        mut snapshot: MarketplaceSnapshot,
+    ) -> Result<(), PluginError> {
+        if let Some(backup) = snapshot.backup.take() {
+            replace_directory(&backup, &snapshot.cached.install_location)?;
+        }
+        self.marketplaces.insert(snapshot.name, snapshot.cached);
+        Ok(())
+    }
+
+    pub(crate) fn finish_snapshot(&self, snapshot: MarketplaceSnapshot) {
+        if let Some(backup) = snapshot.backup
+            && backup.exists()
+            && let Err(error) = std::fs::remove_dir_all(&backup)
+        {
+            tracing::warn!(path = %backup.display(), %error, "failed to clean marketplace snapshot");
         }
     }
 
@@ -537,11 +632,6 @@ fn validate_marketplace(manifest: &Marketplace) -> Result<(), PluginError> {
         if !names.insert(&entry.name) {
             errors.push(format!("duplicate plugin entry `{}`", entry.name));
         }
-        if let Some(version) = &entry.version
-            && let Err(error) = semver::Version::parse(version)
-        {
-            errors.push(format!("plugin entry `{}` has invalid version: {error}", entry.name));
-        }
     }
     if let Some(allowed) = &manifest.allow_cross_marketplace_deps_on {
         for marketplace in allowed {
@@ -711,6 +801,7 @@ mod tests {
             "plugins": [
                 {
                     "name": "test-plugin",
+                    "version": "1.0.0",
                     "description": "A test plugin",
                     "source": {"type": "local", "path": "./test-plugin"},
                     "category": "testing",
@@ -718,6 +809,7 @@ mod tests {
                 },
                 {
                     "name": "another-plugin",
+                    "version": "1.0.0",
                     "description": "Another one",
                     "source": {"type": "github", "repo": "org/repo"}
                 }
@@ -755,7 +847,7 @@ mod tests {
                 plugins: vec![MarketplaceEntry {
                     name: "my-plugin".into(),
                     description: Some("desc".into()),
-                    version: None,
+                    version: semver::Version::new(1, 0, 0),
                     source: crate::integrations::plugin::manifest::PluginSource::Local {
                         path: "/tmp/p".into(),
                     },
@@ -800,7 +892,7 @@ mod tests {
         std::fs::create_dir_all(&cached).unwrap();
         std::fs::write(cached.join("marketplace.json"), "{}").unwrap();
         assert!(registry.names().contains(&&"test".to_string()));
-        registry.remove("test").unwrap();
+        registry.remove_unchecked("test").unwrap();
         assert!(!registry.names().contains(&&"test".to_string()));
         assert!(!cached.exists());
     }
@@ -812,8 +904,18 @@ mod tests {
         make_marketplace_dir(&mkt_dir, "my-mkt");
 
         let mut registry = MarketplaceRegistry::new(tmp.path().join("cache"));
-        registry.add(MarketplaceSource::Local { path: mkt_dir }).unwrap();
+        registry.add(MarketplaceSource::Local { path: mkt_dir.clone() }).unwrap();
         registry.save().unwrap();
+
+        std::fs::write(
+            mkt_dir.join("marketplace.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "name": "my-mkt",
+                "plugins": []
+            }))
+            .unwrap(),
+        )
+        .unwrap();
 
         let mut registry2 = MarketplaceRegistry::new(tmp.path().join("cache"));
         registry2.load().unwrap();
@@ -837,6 +939,7 @@ mod tests {
                 "name": name,
                 "plugins": [{
                     "name": "cached-plugin",
+                    "version": "1.0.0",
                     "source": {"type": "local", "path": "./cached-plugin"}
                 }]
             }))
@@ -844,6 +947,11 @@ mod tests {
         )
         .unwrap();
         registry.save().unwrap();
+        let known_path = cache.join("known_marketplaces.json");
+        let mut known: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&known_path).unwrap()).unwrap();
+        known["marketplaces"][&name].as_object_mut().unwrap().remove("manifest");
+        std::fs::write(&known_path, serde_json::to_vec_pretty(&known).unwrap()).unwrap();
 
         let mut loaded = MarketplaceRegistry::new(cache);
         loaded.load().unwrap();

@@ -56,7 +56,24 @@ pub enum PluginError {
     DependencyUnsatisfied { dependency: String, reason: DependencyReason },
     #[error("circular dependency detected: {cycle:?}")]
     CircularDependency { cycle: Vec<PluginId> },
-    #[error("plugin '{dependency}' is required by enabled plugins: {dependents:?}")]
+    #[error(
+        "plugin '{plugin}' version {actual} does not satisfy {required} required by {required_by}"
+    )]
+    DependencyVersionConflict {
+        plugin: Box<PluginId>,
+        required: Box<semver::VersionReq>,
+        actual: Box<semver::Version>,
+        required_by: Box<PluginId>,
+    },
+    #[error(
+        "marketplace entry '{plugin}' declares version {declared}, but plugin.json declares {actual}"
+    )]
+    VersionMismatch {
+        plugin: Box<PluginId>,
+        declared: Box<semver::Version>,
+        actual: Box<semver::Version>,
+    },
+    #[error("plugin '{dependency}' is required by plugins: {dependents:?}")]
     DependencyRequiredBy { dependency: PluginId, dependents: Vec<PluginId> },
 
     // --- Lifecycle ---
@@ -68,6 +85,10 @@ pub enum PluginError {
     ComponentLoadFailed(PluginId, String),
     #[error("plugin '{id}' is degraded — {loaded}/{total} components loaded")]
     Degraded { id: PluginId, loaded: usize, total: usize },
+    #[error("marketplace '{marketplace}' still has installed plugins: {plugins:?}")]
+    MarketplaceInUse { marketplace: String, plugins: Vec<PluginId> },
+    #[error("marketplace refresh cannot safely remove plugins: {plugins:?}")]
+    MarketplaceRefreshBlocked { plugins: Vec<PluginId> },
 
     // --- User config ---
     #[error("user configuration required for plugin '{id}'")]

@@ -23,10 +23,11 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
             entries.sort_by_key(|entry| entry.plugin.id.to_string());
             for entry in entries {
                 println!(
-                    "{}\t{:?}\t{}",
+                    "{}\t{:?}\t{}\t{}",
                     entry.plugin.id,
                     entry.status,
-                    entry.plugin.manifest.version.as_deref().unwrap_or("unversioned")
+                    entry.plugin.manifest.version,
+                    marketplaces.source_status(&entry.plugin.id).as_str()
                 );
                 for error in entry.load_errors {
                     println!("  error: {error}");
@@ -40,11 +41,9 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
             let config = registry.resolved_config(&id);
             println!("id: {}", entry.plugin.id);
             println!("status: {:?}", entry.status);
-            println!(
-                "version: {}",
-                entry.plugin.manifest.version.as_deref().unwrap_or("unversioned")
-            );
+            println!("version: {}", entry.plugin.manifest.version);
             println!("path: {}", entry.plugin.path.display());
+            println!("source: {}", marketplaces.source_status(&id).as_str());
             match config {
                 Ok(config) => {
                     println!("config: {}", serde_json::to_string_pretty(&config.redacted_values())?)
@@ -66,7 +65,7 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
         }
         PluginCommand::Install { id } => {
             let id = parse_id(&id)?;
-            refresh_marketplace(&mut marketplaces, &id)?;
+            refresh_marketplace(&registry, &mut marketplaces, &id)?;
             registry.install(&marketplaces, &id)?;
             println!("installed {id}");
         }
@@ -84,7 +83,7 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
                     name: marketplace.clone(),
                     owner: None,
                     plugins: Vec::new(),
-                    force_remove_deleted_plugins: None,
+                    force_remove_deleted_plugins: false,
                     allow_cross_marketplace_deps_on: None,
                 }
             };
@@ -101,14 +100,18 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
             catalog.plugins.retain(|entry| entry.name != local_entry.name);
             catalog.plugins.push(local_entry);
             std::fs::write(&catalog_path, serde_json::to_vec_pretty(&catalog)?)?;
-            marketplaces.add(MarketplaceSource::Local { path: catalog_dir })?;
-            marketplaces.save()?;
+            if marketplaces.get(&marketplace).is_some() {
+                registry.refresh_marketplace(&mut marketplaces, &marketplace)?;
+            } else {
+                marketplaces.add(MarketplaceSource::Local { path: catalog_dir })?;
+                marketplaces.save()?;
+            }
             registry.install(&marketplaces, &id)?;
             println!("installed {id}");
         }
         PluginCommand::Upgrade { id } => {
             let id = parse_id(&id)?;
-            refresh_marketplace(&mut marketplaces, &id)?;
+            refresh_marketplace(&registry, &mut marketplaces, &id)?;
             registry.upgrade(&marketplaces, &id)?;
             println!("upgraded {id}");
         }
@@ -137,37 +140,37 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
         }
         PluginCommand::MarketplaceAddUrl { url, name } => {
             let name = marketplaces.add_named(MarketplaceSource::Url { url }, name)?;
-            marketplaces.refresh(&name)?;
-            marketplaces.save()?;
+            registry.refresh_marketplace(&mut marketplaces, &name)?;
             println!("added marketplace {name}");
         }
         PluginCommand::MarketplaceAddGithub { repo, ref_, path, name } => {
             let name =
                 marketplaces.add_named(MarketplaceSource::GitHub { repo, ref_, path }, name)?;
-            marketplaces.refresh(&name)?;
-            marketplaces.save()?;
+            registry.refresh_marketplace(&mut marketplaces, &name)?;
             println!("added marketplace {name}");
         }
         PluginCommand::MarketplaceAddGit { url, ref_, path, name } => {
             let name = marketplaces.add_named(MarketplaceSource::Git { url, ref_, path }, name)?;
-            marketplaces.refresh(&name)?;
-            marketplaces.save()?;
+            registry.refresh_marketplace(&mut marketplaces, &name)?;
             println!("added marketplace {name}");
         }
         PluginCommand::MarketplaceAddNpm { package, name } => {
             let name = marketplaces.add_named(MarketplaceSource::Npm { package }, name)?;
-            marketplaces.refresh(&name)?;
-            marketplaces.save()?;
+            registry.refresh_marketplace(&mut marketplaces, &name)?;
             println!("added marketplace {name}");
         }
         PluginCommand::MarketplaceRefresh { name } => {
-            marketplaces.refresh(&name)?;
-            marketplaces.save()?;
+            let report = registry.refresh_marketplace(&mut marketplaces, &name)?;
+            for id in report.removed {
+                println!("removed deleted plugin {id}");
+            }
+            for id in report.orphaned {
+                println!("retained orphaned plugin {id}");
+            }
             println!("refreshed marketplace {name}");
         }
         PluginCommand::MarketplaceRemove { name } => {
-            marketplaces.remove(&name)?;
-            marketplaces.save()?;
+            registry.remove_marketplace(&mut marketplaces, &name)?;
             println!("removed marketplace {name}");
         }
         PluginCommand::MarketplaceSearch { query } => {
@@ -185,22 +188,14 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
                 .collect::<Vec<_>>();
             matches.sort_by(|left, right| left.0.cmp(&right.0));
             for (id, entry) in matches {
-                println!(
-                    "{id}\t{}\t{}",
-                    entry.version.as_deref().unwrap_or("unversioned"),
-                    entry.description.as_deref().unwrap_or("")
-                );
+                println!("{id}\t{}\t{}", entry.version, entry.description.as_deref().unwrap_or(""));
             }
         }
         PluginCommand::MarketplaceListPlugins { name } => {
             let mut entries = marketplace_entries(&marketplaces, name.as_deref())?;
             entries.sort_by(|left, right| left.0.cmp(&right.0));
             for (id, entry) in entries {
-                println!(
-                    "{id}\t{}\t{}",
-                    entry.version.as_deref().unwrap_or("unversioned"),
-                    entry.description.as_deref().unwrap_or("")
-                );
+                println!("{id}\t{}\t{}", entry.version, entry.description.as_deref().unwrap_or(""));
             }
         }
         PluginCommand::MarketplaceList => {
@@ -227,9 +222,12 @@ fn load_registry(root: &Path) -> Result<PluginRegistry> {
     Ok(registry)
 }
 
-fn refresh_marketplace(marketplaces: &mut MarketplaceRegistry, id: &PluginId) -> Result<()> {
-    marketplaces.refresh(&id.marketplace)?;
-    marketplaces.save()?;
+fn refresh_marketplace(
+    registry: &PluginRegistry,
+    marketplaces: &mut MarketplaceRegistry,
+    id: &PluginId,
+) -> Result<()> {
+    registry.refresh_marketplace(marketplaces, &id.marketplace)?;
     Ok(())
 }
 

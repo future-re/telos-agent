@@ -177,6 +177,21 @@ impl PluginConfigStore {
         self.values.get(id)
     }
 
+    pub(crate) fn validate_for_manifest(
+        &self,
+        id: &PluginId,
+        manifest: &PluginManifest,
+    ) -> Result<(), PluginError> {
+        self.resolve(id, manifest).map(|_| ())
+    }
+
+    pub(crate) fn remove_many(&mut self, ids: &[PluginId]) -> Result<(), PluginError> {
+        for id in ids {
+            self.values.remove(id);
+        }
+        self.save()
+    }
+
     pub fn resolve(
         &self,
         id: &PluginId,
@@ -411,7 +426,9 @@ mod tests {
 
     fn manifest() -> PluginManifest {
         serde_json::from_value(json!({
+            "manifestVersion": 2,
             "name": "configured",
+            "version": "1.0.0",
             "settings": {"mode": "safe"},
             "userConfig": {
                 "token": {
@@ -482,7 +499,9 @@ mod tests {
     #[test]
     fn rejects_reserved_and_colliding_environment_keys() {
         let reserved: PluginManifest = serde_json::from_value(json!({
+            "manifestVersion": 2,
             "name": "reserved",
+            "version": "1.0.0",
             "settings": {"config": "bad"}
         }))
         .unwrap();
@@ -493,7 +512,9 @@ mod tests {
         );
 
         let colliding: PluginManifest = serde_json::from_value(json!({
+            "manifestVersion": 2,
             "name": "colliding",
+            "version": "1.0.0",
             "settings": {"foo-bar": 1, "foo_bar": 2}
         }))
         .unwrap();

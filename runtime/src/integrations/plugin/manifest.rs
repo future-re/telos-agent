@@ -50,20 +50,15 @@ pub enum ConfigOptionType {
     File,
 }
 
-/// A dependency reference. Bare "name" resolves against the declaring plugin's
-/// marketplace. "name@marketplace" is fully qualified.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum DependencyRef {
-    Bare(String),
-    Qualified(QualifiedDependencyRef),
-}
-
+/// A versioned dependency reference. Omitting `marketplace` resolves against
+/// the declaring plugin's marketplace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct QualifiedDependencyRef {
+pub struct DependencyRef {
     pub name: String,
-    pub marketplace: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub marketplace: Option<String>,
+    pub version: semver::VersionReq,
 }
 
 impl DependencyRef {
@@ -71,25 +66,20 @@ impl DependencyRef {
     ///
     /// Bare names use `default_marketplace`; qualified names use their own.
     pub fn resolve(&self, default_marketplace: &str) -> PluginId {
-        match self {
-            DependencyRef::Bare(name) => {
-                PluginId { name: name.clone(), marketplace: default_marketplace.to_string() }
-            }
-            DependencyRef::Qualified(dependency) => PluginId {
-                name: dependency.name.clone(),
-                marketplace: dependency.marketplace.clone(),
-            },
+        PluginId {
+            name: self.name.clone(),
+            marketplace: self
+                .marketplace
+                .clone()
+                .unwrap_or_else(|| default_marketplace.to_string()),
         }
     }
 
     /// Display the dependency as a string.
     pub fn display(&self) -> String {
-        match self {
-            DependencyRef::Bare(name) => name.clone(),
-            DependencyRef::Qualified(dependency) => {
-                format!("{}@{}", dependency.name, dependency.marketplace)
-            }
-        }
+        self.marketplace
+            .as_ref()
+            .map_or_else(|| self.name.clone(), |marketplace| format!("{}@{marketplace}", self.name))
     }
 }
 
@@ -280,12 +270,11 @@ pub enum LspServersConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PluginManifest {
-    #[serde(default = "default_manifest_version")]
+    #[serde(deserialize_with = "deserialize_manifest_version")]
     pub manifest_version: u32,
     #[serde(default)]
     pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
+    pub version: semver::Version,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -326,8 +315,16 @@ pub struct PluginManifest {
     pub user_config: Option<HashMap<String, UserConfigOption>>,
 }
 
-fn default_manifest_version() -> u32 {
-    1
+fn deserialize_manifest_version<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let version = u32::deserialize(deserializer)?;
+    if version == 2 {
+        Ok(version)
+    } else {
+        Err(serde::de::Error::custom(format!("unsupported manifestVersion {version}; expected 2")))
+    }
 }
 
 /// A partial manifest — marketplace entries can override fields.
@@ -342,8 +339,7 @@ pub struct MarketplaceEntry {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
+    pub version: semver::Version,
     pub source: PluginSource,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
@@ -417,29 +413,60 @@ mod tests {
     #[test]
     fn parse_minimal_manifest() {
         let json = json!({
+            "manifestVersion": 2,
             "name": "my-plugin",
             "version": "1.0.0",
             "description": "A test plugin"
         });
         let manifest: PluginManifest = serde_json::from_value(json).unwrap();
         assert_eq!(manifest.name, "my-plugin");
-        assert_eq!(manifest.version.as_deref(), Some("1.0.0"));
+        assert_eq!(manifest.version, semver::Version::new(1, 0, 0));
         assert!(manifest.tools.is_none());
         assert!(manifest.policies.is_none());
         assert!(manifest.dependencies.is_empty());
     }
 
     #[test]
+    fn manifest_v2_requires_versioned_object_dependencies() {
+        let v1 = serde_json::from_value::<PluginManifest>(json!({
+            "manifestVersion": 1,
+            "name": "legacy",
+            "version": "1.0.0"
+        }));
+        assert!(v1.is_err());
+
+        let string_dependency = serde_json::from_value::<PluginManifest>(json!({
+            "manifestVersion": 2,
+            "name": "modern",
+            "version": "1.0.0",
+            "dependencies": ["legacy"]
+        }));
+        assert!(string_dependency.is_err());
+
+        let missing_version = serde_json::from_value::<PluginManifest>(json!({
+            "manifestVersion": 2,
+            "name": "modern",
+            "version": "1.0.0",
+            "dependencies": [{"name": "dep"}]
+        }));
+        assert!(missing_version.is_err());
+    }
+
+    #[test]
     fn rejects_unknown_nested_manifest_fields() {
         let author_error = serde_json::from_value::<PluginManifest>(json!({
+            "manifestVersion": 2,
             "name": "strict",
+            "version": "1.0.0",
             "author": {"name": "Alice", "emali": "typo@example.com"}
         }))
         .unwrap_err();
         assert!(author_error.to_string().contains("unknown field"));
 
         let policy_error = serde_json::from_value::<PluginManifest>(json!({
+            "manifestVersion": 2,
             "name": "strict",
+            "version": "1.0.0",
             "policies": {
                 "turnStart": [{"command": "echo", "argz": []}]
             }
@@ -448,16 +475,19 @@ mod tests {
         assert!(policy_error.to_string().contains("unknown field"));
 
         let dependency_error = serde_json::from_value::<PluginManifest>(json!({
+            "manifestVersion": 2,
             "name": "strict",
-            "dependencies": [{"name": "dep", "marketplace": "mkt", "marketpalce": "typo"}]
+            "version": "1.0.0",
+            "dependencies": [{"name": "dep", "marketplace": "mkt", "version": "^1", "marketpalce": "typo"}]
         }))
         .unwrap_err();
-        assert!(dependency_error.to_string().contains("did not match"));
+        assert!(dependency_error.to_string().contains("unknown field"));
     }
 
     #[test]
     fn parse_full_manifest() {
         let json = json!({
+            "manifestVersion": 2,
             "name": "full-plugin",
             "version": "2.1.0",
             "description": "Has everything",
@@ -471,8 +501,8 @@ mod tests {
             "license": "MIT",
             "keywords": ["testing", "example"],
             "dependencies": [
-                "required-dep",
-                {"name": "other", "marketplace": "community"}
+                {"name": "required-dep", "version": "^1"},
+                {"name": "other", "marketplace": "community", "version": ">=2, <3"}
             ],
             "tools": ["./tools/my_tool.json"],
             "policies": {
@@ -507,7 +537,7 @@ mod tests {
 
         let manifest: PluginManifest = serde_json::from_value(json).unwrap();
         assert_eq!(manifest.name, "full-plugin");
-        assert_eq!(manifest.version.unwrap(), "2.1.0");
+        assert_eq!(manifest.version, semver::Version::new(2, 1, 0));
         assert!(manifest.author.is_some());
         let author = manifest.author.unwrap();
         assert_eq!(author.name, "Alice");
@@ -535,8 +565,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_dependency_ref_bare() {
-        let json = json!("my-dep");
+    fn parse_dependency_ref_default_marketplace() {
+        let json = json!({"name": "my-dep", "version": "^1.2"});
         let dep: DependencyRef = serde_json::from_value(json).unwrap();
         assert_eq!(dep.display(), "my-dep");
         let id = dep.resolve("my-marketplace");
@@ -585,7 +615,7 @@ mod tests {
 
     #[test]
     fn parse_dependency_ref_qualified() {
-        let json = json!({"name": "dep", "marketplace": "other-mkt"});
+        let json = json!({"name": "dep", "marketplace": "other-mkt", "version": "=2.0.0"});
         let dep: DependencyRef = serde_json::from_value(json).unwrap();
         assert_eq!(dep.display(), "dep@other-mkt");
         let id = dep.resolve("my-marketplace");

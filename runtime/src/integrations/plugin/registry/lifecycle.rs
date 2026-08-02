@@ -80,6 +80,17 @@ impl PluginRegistry {
             .clone();
         self.config_store.read().expect("plugin config lock poisoned").resolve(id, &manifest)
     }
+
+    pub(crate) fn validate_config_for_manifest(
+        &self,
+        id: &PluginId,
+        manifest: &crate::integrations::plugin::PluginManifest,
+    ) -> Result<(), PluginError> {
+        self.config_store
+            .read()
+            .expect("plugin config lock poisoned")
+            .validate_for_manifest(id, manifest)
+    }
     /// Register a loaded plugin without enabling it.
     ///
     /// If a plugin with the same ID already exists, it is replaced
@@ -245,6 +256,14 @@ impl PluginRegistry {
                         reason: DependencyReason::NotFound,
                     }
                 })?;
+                if !dependency.version.matches(&dependency_entry.plugin.manifest.version) {
+                    return Err(PluginError::DependencyVersionConflict {
+                        plugin: Box::new(dependency_id.clone()),
+                        required: Box::new(dependency.version.clone()),
+                        actual: Box::new(dependency_entry.plugin.manifest.version.clone()),
+                        required_by: Box::new(id.clone()),
+                    });
+                }
                 visit(&dependency_id, plugins, stack, visited)?;
                 if !matches!(
                     dependency_entry.status,

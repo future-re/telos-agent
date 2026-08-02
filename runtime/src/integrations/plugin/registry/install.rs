@@ -1,5 +1,6 @@
 //! Transactional plugin installation, upgrade, and uninstall operations.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -8,10 +9,29 @@ use crate::integrations::plugin::marketplace::{
     copy_directory, reset_directory, run_command_bounded,
 };
 use crate::integrations::plugin::registry::lifecycle::PluginRegistry;
-use crate::integrations::plugin::registry::types::{LoadedPlugin, PluginEntry};
+use crate::integrations::plugin::registry::types::{LoadedPlugin, PluginEntry, PluginStatus};
 use crate::integrations::plugin::{
     MarketplaceEntry, MarketplaceRegistry, PluginError, PluginId, PluginSource,
 };
+
+#[cfg(test)]
+thread_local! {
+    static COMMIT_FAILURE_STEP: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+pub(super) fn fail_commit_at(step: usize) {
+    COMMIT_FAILURE_STEP.set(Some(step));
+}
+
+fn maybe_fail_commit(_step: usize) -> Result<(), PluginError> {
+    #[cfg(test)]
+    if COMMIT_FAILURE_STEP.get() == Some(_step) {
+        COMMIT_FAILURE_STEP.set(None);
+        return Err(PluginError::Other(format!("injected plugin commit failure at step {_step}")));
+    }
+    Ok(())
+}
 
 impl PluginRegistry {
     pub fn install(
@@ -20,12 +40,10 @@ impl PluginRegistry {
         id: &PluginId,
     ) -> Result<(), PluginError> {
         let _operation = self.operation_lock.lock().expect("plugin operation lock poisoned");
-        let mut installed = Vec::new();
-        let result = self.install_recursive(marketplaces, id, &mut Vec::new(), &mut installed);
-        if result.is_err() {
-            self.rollback_install_batch(&installed);
+        if self.is_installed(id) {
+            return Ok(());
         }
-        result
+        self.install_or_upgrade(marketplaces, id, false)
     }
 
     pub fn upgrade(
@@ -40,46 +58,7 @@ impl PluginRegistry {
                 marketplace: id.marketplace.clone(),
             });
         }
-        let preserve_enabled = self.get(id).is_some_and(|entry| entry.plugin.enabled);
-        let entry = marketplaces.plugin_entry(id).ok_or_else(|| PluginError::PluginNotFound {
-            plugin_id: id.to_string(),
-            marketplace: id.marketplace.clone(),
-        })?;
-        let prepared = self.prepare_entry(marketplaces, id, &entry)?;
-        let mut installed = Vec::new();
-        for dependency in manifest_dependencies(&prepared.plugin, &id.marketplace) {
-            if !marketplaces.allows_dependency(&id.marketplace, &dependency.marketplace) {
-                prepared.cleanup();
-                return Err(PluginError::DependencyUnsatisfied {
-                    dependency: dependency.to_string(),
-                    reason: crate::integrations::plugin::DependencyReason::NotAllowed,
-                });
-            }
-            if let Err(error) = self.install_recursive(
-                marketplaces,
-                &dependency,
-                &mut vec![id.clone()],
-                &mut installed,
-            ) {
-                prepared.cleanup();
-                self.rollback_install_batch(&installed);
-                return Err(error);
-            }
-        }
-        if preserve_enabled {
-            for dependency in &installed {
-                if let Err(error) = self.enable(dependency) {
-                    prepared.cleanup();
-                    self.rollback_install_batch(&installed);
-                    return Err(error);
-                }
-            }
-        }
-        let result = self.commit_prepared(id, prepared);
-        if result.is_err() {
-            self.rollback_install_batch(&installed);
-        }
-        result
+        self.install_or_upgrade(marketplaces, id, true)
     }
 
     pub fn uninstall(&self, id: &PluginId) -> Result<(), PluginError> {
@@ -149,44 +128,168 @@ impl PluginRegistry {
         Ok(())
     }
 
-    fn install_recursive(
+    fn install_or_upgrade(
+        &self,
+        marketplaces: &MarketplaceRegistry,
+        root: &PluginId,
+        upgrading: bool,
+    ) -> Result<(), PluginError> {
+        let mut prepared = Vec::new();
+        let mut seen = HashSet::new();
+        let mut stack = Vec::new();
+        let mut requirements = Vec::new();
+        self.prepare_closure(
+            marketplaces,
+            root,
+            &mut seen,
+            &mut stack,
+            &mut requirements,
+            &mut prepared,
+        )?;
+
+        let candidate_versions = prepared
+            .iter()
+            .map(|(id, plugin)| (id.clone(), plugin.plugin.manifest.version.clone()))
+            .collect::<HashMap<_, _>>();
+        for requirement in &requirements {
+            let actual = candidate_versions.get(&requirement.plugin).ok_or_else(|| {
+                PluginError::DependencyUnsatisfied {
+                    dependency: requirement.plugin.to_string(),
+                    reason: crate::integrations::plugin::DependencyReason::NotFound,
+                }
+            })?;
+            if !requirement.version.matches(actual) {
+                return Err(PluginError::DependencyVersionConflict {
+                    plugin: Box::new(requirement.plugin.clone()),
+                    required: Box::new(requirement.version.clone()),
+                    actual: Box::new(actual.clone()),
+                    required_by: Box::new(requirement.required_by.clone()),
+                });
+            }
+        }
+
+        let change_ids = prepared
+            .iter()
+            .filter_map(|(id, candidate)| {
+                let installed = self.get(id);
+                let changed = installed.as_ref().is_none_or(|entry| {
+                    entry.plugin.manifest.version != candidate.plugin.manifest.version
+                });
+                (changed || (upgrading && id == root)).then_some(id.clone())
+            })
+            .collect::<HashSet<_>>();
+
+        self.validate_planned_graph(marketplaces, &prepared, &change_ids)?;
+        let root_was_enabled = self.get(root).is_some_and(|entry| entry.plugin.enabled);
+        for (id, candidate) in &prepared {
+            if change_ids.contains(id) && (self.is_installed(id) || root_was_enabled) {
+                self.validate_config_for_manifest(id, &candidate.plugin.manifest)?;
+            }
+        }
+
+        let changes =
+            prepared.into_iter().filter(|(id, _)| change_ids.contains(id)).collect::<Vec<_>>();
+        self.commit_prepared_batch(changes, root_was_enabled)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_closure(
         &self,
         marketplaces: &MarketplaceRegistry,
         id: &PluginId,
+        seen: &mut HashSet<PluginId>,
         stack: &mut Vec<PluginId>,
-        installed: &mut Vec<PluginId>,
+        requirements: &mut Vec<VersionRequirement>,
+        prepared: &mut Vec<(PluginId, PreparedPlugin)>,
     ) -> Result<(), PluginError> {
+        if seen.contains(id) {
+            return Ok(());
+        }
         if let Some(index) = stack.iter().position(|candidate| candidate == id) {
             let mut cycle = stack[index..].to_vec();
             cycle.push(id.clone());
             return Err(PluginError::CircularDependency { cycle });
         }
-        if installed.contains(id) || self.is_installed(id) {
-            return Ok(());
-        }
         let entry = marketplaces.plugin_entry(id).ok_or_else(|| PluginError::PluginNotFound {
             plugin_id: id.to_string(),
             marketplace: id.marketplace.clone(),
         })?;
-        let prepared = self.prepare_entry(marketplaces, id, &entry)?;
+        let candidate = self.prepare_entry(marketplaces, id, &entry)?;
         stack.push(id.clone());
-        for dependency in manifest_dependencies(&prepared.plugin, &id.marketplace) {
-            if !marketplaces.allows_dependency(&id.marketplace, &dependency.marketplace) {
-                prepared.cleanup();
+        for dependency in &candidate.plugin.manifest.dependencies {
+            let dependency_id = dependency.resolve(&id.marketplace);
+            if !marketplaces.allows_dependency(&id.marketplace, &dependency_id.marketplace) {
                 return Err(PluginError::DependencyUnsatisfied {
-                    dependency: dependency.to_string(),
+                    dependency: dependency_id.to_string(),
                     reason: crate::integrations::plugin::DependencyReason::NotAllowed,
                 });
             }
-            if let Err(error) = self.install_recursive(marketplaces, &dependency, stack, installed)
-            {
-                prepared.cleanup();
-                return Err(error);
+            requirements.push(VersionRequirement {
+                plugin: dependency_id.clone(),
+                version: dependency.version.clone(),
+                required_by: id.clone(),
+            });
+            self.prepare_closure(
+                marketplaces,
+                &dependency_id,
+                seen,
+                stack,
+                requirements,
+                prepared,
+            )?;
+        }
+        stack.pop();
+        seen.insert(id.clone());
+        prepared.push((id.clone(), candidate));
+        Ok(())
+    }
+
+    fn validate_planned_graph(
+        &self,
+        marketplaces: &MarketplaceRegistry,
+        prepared: &[(PluginId, PreparedPlugin)],
+        change_ids: &HashSet<PluginId>,
+    ) -> Result<(), PluginError> {
+        let candidates = prepared
+            .iter()
+            .map(|(id, candidate)| (id.clone(), candidate.plugin.manifest.clone()))
+            .collect::<HashMap<_, _>>();
+        let installed = self
+            .list_all()
+            .into_iter()
+            .map(|entry| (entry.plugin.id.clone(), entry.plugin.manifest))
+            .collect::<HashMap<_, _>>();
+        let mut combined = installed.clone();
+        for id in change_ids {
+            if let Some(manifest) = candidates.get(id) {
+                combined.insert(id.clone(), manifest.clone());
             }
         }
-        self.commit_prepared(id, prepared)?;
-        stack.pop();
-        installed.push(id.clone());
+        for (id, manifest) in &combined {
+            for dependency in &manifest.dependencies {
+                let dependency_id = dependency.resolve(&id.marketplace);
+                if !marketplaces.allows_dependency(&id.marketplace, &dependency_id.marketplace) {
+                    return Err(PluginError::DependencyUnsatisfied {
+                        dependency: dependency_id.to_string(),
+                        reason: crate::integrations::plugin::DependencyReason::NotAllowed,
+                    });
+                }
+                let actual = combined.get(&dependency_id).ok_or_else(|| {
+                    PluginError::DependencyUnsatisfied {
+                        dependency: dependency_id.to_string(),
+                        reason: crate::integrations::plugin::DependencyReason::NotFound,
+                    }
+                })?;
+                if !dependency.version.matches(&actual.version) {
+                    return Err(PluginError::DependencyVersionConflict {
+                        plugin: Box::new(dependency_id),
+                        required: Box::new(dependency.version.clone()),
+                        actual: Box::new(actual.version.clone()),
+                        required_by: Box::new(id.clone()),
+                    });
+                }
+            }
+        }
         Ok(())
     }
 
@@ -217,7 +320,7 @@ impl PluginRegistry {
             std::fs::write(
                 prepared.join("plugin.json"),
                 serde_json::to_vec_pretty(&serde_json::json!({
-                    "manifestVersion": 1,
+                    "manifestVersion": 2,
                     "name": entry.name,
                     "version": entry.version,
                     "description": entry.description,
@@ -235,78 +338,111 @@ impl PluginRegistry {
         }
         std::fs::rename(&prepared, &validation_dir)?;
         let mut plugin = self.load_plugin_from_dir(&validation_dir)?;
+        if plugin.manifest.version != entry.version {
+            return Err(PluginError::VersionMismatch {
+                plugin: Box::new(id.clone()),
+                declared: Box::new(entry.version.clone()),
+                actual: Box::new(plugin.manifest.version.clone()),
+            });
+        }
         plugin.source = entry.source.clone();
         cleanup.disarm();
         Ok(PreparedPlugin { plugin, directory: validation_dir, staging_root })
     }
 
-    fn commit_prepared(
+    fn commit_prepared_batch(
         &self,
-        id: &PluginId,
-        mut prepared: PreparedPlugin,
+        mut changes: Vec<(PluginId, PreparedPlugin)>,
+        enable_new: bool,
     ) -> Result<(), PluginError> {
-        let target = self.installed_dir().join(id.to_string());
+        if changes.is_empty() {
+            return Ok(());
+        }
         std::fs::create_dir_all(self.installed_dir())?;
-        let previous = self.get(id);
-        let previous_status = previous.as_ref().map(|entry| entry.status.clone());
-        let previous_errors = previous.as_ref().map(|entry| entry.load_errors.clone());
-        let backup = self.plugins_root.join(".trash").join(format!("{}-upgrade", id));
-        if backup.exists() {
-            std::fs::remove_dir_all(&backup)?;
-        }
-        if target.exists() {
-            std::fs::create_dir_all(backup.parent().expect("backup has parent"))?;
-            std::fs::rename(&target, &backup)?;
-        }
-        if let Err(error) = std::fs::rename(&prepared.directory, &target) {
-            if backup.exists() {
-                let _ = std::fs::rename(&backup, &target);
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let backup_root = self.plugins_root.join(".trash").join(format!("transaction-{nonce}"));
+        std::fs::create_dir_all(&backup_root)?;
+        let mut completed = Vec::<CommittedChange>::new();
+
+        for (index, (id, prepared)) in changes.iter_mut().enumerate() {
+            if let Err(error) = maybe_fail_commit(index) {
+                self.rollback_committed(&completed);
+                return Err(error);
             }
-            return Err(error.into());
-        }
-        prepared.plugin.path = target.clone();
-        prepared.plugin.enabled = previous.as_ref().is_some_and(|entry| entry.plugin.enabled);
-        self.register(prepared.plugin.clone());
-        if let Some(status) = previous_status
-            && let Some(entry) =
+            let target = self.installed_dir().join(id.to_string());
+            let backup = backup_root.join(id.to_string());
+            let previous = self.get(id);
+            if target.exists()
+                && let Err(error) = std::fs::rename(&target, &backup)
+            {
+                self.rollback_committed(&completed);
+                return Err(error.into());
+            }
+            if let Err(error) = std::fs::rename(&prepared.directory, &target) {
+                if backup.exists() {
+                    let _ = std::fs::rename(&backup, &target);
+                }
+                self.rollback_committed(&completed);
+                return Err(error.into());
+            }
+            let was_enabled = previous.as_ref().is_some_and(|entry| entry.plugin.enabled);
+            prepared.plugin.path = target.clone();
+            prepared.plugin.enabled = was_enabled || (previous.is_none() && enable_new);
+            self.register(prepared.plugin.clone());
+            if let Some(entry) =
                 self.plugins.write().expect("plugin registry lock poisoned").get_mut(id)
-        {
-            entry.status = status;
-            entry.load_errors = previous_errors.unwrap_or_default();
+            {
+                entry.status = if entry.plugin.enabled {
+                    PluginStatus::Enabled
+                } else {
+                    PluginStatus::Disabled
+                };
+                entry.load_errors.clear();
+            }
+            completed.push(CommittedChange { id: id.clone(), target, backup, previous });
         }
-        if let Err(error) = self.save_state() {
-            let _ = std::fs::remove_dir_all(&target);
-            if backup.exists() {
-                let _ = std::fs::rename(&backup, &target);
-            }
-            self.remove(id);
-            if let Some(previous) = previous {
-                restore_entry(self, previous);
-            }
+
+        if let Err(error) = maybe_fail_commit(changes.len()).and_then(|_| self.save_state()) {
+            self.rollback_committed(&completed);
             return Err(error);
         }
-        if backup.exists()
-            && let Err(error) = std::fs::remove_dir_all(&backup)
-        {
-            tracing::warn!(path = %backup.display(), %error, "failed to clean plugin upgrade backup");
+        if let Err(error) = std::fs::remove_dir_all(&backup_root) {
+            tracing::warn!(path = %backup_root.display(), %error, "failed to clean plugin transaction backup");
         }
-        prepared.cleanup();
         Ok(())
     }
 
-    fn rollback_install_batch(&self, installed: &[PluginId]) {
-        for id in installed.iter().rev() {
-            if let Some(entry) = self.remove(id) {
-                if let Err(error) = std::fs::remove_dir_all(&entry.plugin.path) {
-                    tracing::warn!(plugin = %id, %error, "failed to roll back installed plugin directory");
-                    self.register(entry.plugin);
-                    continue;
-                }
-                let _ = self.clear_config(id);
+    fn rollback_committed(&self, completed: &[CommittedChange]) {
+        for change in completed.iter().rev() {
+            if change.target.exists() {
+                let _ = std::fs::remove_dir_all(&change.target);
+            }
+            if change.backup.exists() {
+                let _ = std::fs::rename(&change.backup, &change.target);
+            }
+            self.remove(&change.id);
+            if let Some(previous) = change.previous.clone() {
+                restore_entry(self, previous);
             }
         }
         let _ = self.save_state();
     }
+}
+
+struct VersionRequirement {
+    plugin: PluginId,
+    version: semver::VersionReq,
+    required_by: PluginId,
+}
+
+struct CommittedChange {
+    id: PluginId,
+    target: PathBuf,
+    backup: PathBuf,
+    previous: Option<PluginEntry>,
 }
 
 struct PreparedPlugin {
@@ -352,11 +488,7 @@ impl Drop for CleanupDirectory {
     }
 }
 
-fn manifest_dependencies(plugin: &LoadedPlugin, marketplace: &str) -> Vec<PluginId> {
-    plugin.manifest.dependencies.iter().map(|dependency| dependency.resolve(marketplace)).collect()
-}
-
-fn restore_entry(registry: &PluginRegistry, entry: PluginEntry) {
+pub(super) fn restore_entry(registry: &PluginRegistry, entry: PluginEntry) {
     let id = entry.plugin.id.clone();
     registry.register(entry.plugin);
     if let Some(restored) =

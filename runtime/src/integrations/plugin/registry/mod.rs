@@ -7,6 +7,7 @@ mod apply;
 mod discovery;
 mod install;
 mod lifecycle;
+mod marketplace_ops;
 mod persistence;
 #[cfg(test)]
 mod tests;

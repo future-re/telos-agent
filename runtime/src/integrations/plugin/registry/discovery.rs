@@ -87,19 +87,27 @@ impl PluginRegistry {
                     .into(),
             );
         }
-        if manifest.manifest_version != 1 {
+        if manifest.manifest_version != 2 {
             validation_errors.push(format!(
-                "unsupported manifestVersion {}; expected 1",
+                "unsupported manifestVersion {}; expected 2",
                 manifest.manifest_version
             ));
         }
-        if let Some(version) = &manifest.version
-            && let Err(error) = semver::Version::parse(version)
-        {
-            validation_errors.push(format!("version must be valid semver: {error}"));
-        }
         if let Some(policies) = &manifest.policies {
             validation_errors.extend(policies.validate());
+        }
+        for (index, dependency) in manifest.dependencies.iter().enumerate() {
+            if !crate::integrations::plugin::is_valid_id_part(&dependency.name) {
+                validation_errors
+                    .push(format!("dependencies[{index}].name is not a valid plugin name"));
+            }
+            if dependency.marketplace.as_ref().is_some_and(|marketplace| {
+                !crate::integrations::plugin::is_valid_id_part(marketplace)
+            }) {
+                validation_errors.push(format!(
+                    "dependencies[{index}].marketplace is not a valid marketplace name"
+                ));
+            }
         }
         validation_errors
             .extend(crate::integrations::plugin::config::validate_manifest_config(&manifest));

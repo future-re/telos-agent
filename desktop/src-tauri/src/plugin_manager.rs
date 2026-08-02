@@ -13,7 +13,8 @@ pub struct DesktopPluginInfo {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
-    pub version: Option<String>,
+    pub version: String,
+    pub source_status: String,
     pub status: String,
     pub errors: Vec<String>,
     pub config_schema: Value,
@@ -26,12 +27,14 @@ pub struct DesktopMarketplacePlugin {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
-    pub version: Option<String>,
+    pub version: String,
     pub installed: bool,
 }
 
 pub fn list_plugins(cwd: Option<PathBuf>) -> Result<Vec<DesktopPluginInfo>, String> {
-    let registry = plugin_registry(cwd)?;
+    let root = plugins_root(cwd)?;
+    let registry = load_plugin_registry(&root)?;
+    let marketplaces = load_marketplaces(&root)?;
     let mut plugins = registry
         .list_all()
         .into_iter()
@@ -44,7 +47,8 @@ pub fn list_plugins(cwd: Option<PathBuf>) -> Result<Vec<DesktopPluginInfo>, Stri
                 id: entry.plugin.id.to_string(),
                 name: entry.plugin.manifest.name,
                 description: entry.plugin.manifest.description,
-                version: entry.plugin.manifest.version,
+                version: entry.plugin.manifest.version.to_string(),
+                source_status: marketplaces.source_status(&entry.plugin.id).as_str().to_string(),
                 status: format!("{:?}", entry.status).to_lowercase(),
                 errors: entry.load_errors.into_iter().map(|error| error.to_string()).collect(),
                 config_schema: serde_json::to_value(entry.plugin.manifest.user_config)
@@ -100,7 +104,7 @@ pub fn list_marketplace_plugins(
                     id: id.to_string(),
                     name: entry.name.clone(),
                     description: entry.description.clone(),
-                    version: entry.version.clone(),
+                    version: entry.version.to_string(),
                     installed: registry.is_installed(&id),
                 }
             }));
@@ -115,8 +119,9 @@ pub fn install_plugin(cwd: Option<PathBuf>, id: &str) -> Result<(), String> {
     let registry = load_plugin_registry(&root)?;
     let mut marketplaces = load_marketplaces(&root)?;
     let id = parse_plugin_id(id)?;
-    marketplaces.refresh(&id.marketplace).map_err(|error| error.to_string())?;
-    marketplaces.save().map_err(|error| error.to_string())?;
+    registry
+        .refresh_marketplace(&mut marketplaces, &id.marketplace)
+        .map_err(|error| error.to_string())?;
     registry.install(&marketplaces, &id).map_err(|error| error.to_string())
 }
 
@@ -125,8 +130,9 @@ pub fn upgrade_plugin(cwd: Option<PathBuf>, id: &str) -> Result<(), String> {
     let registry = load_plugin_registry(&root)?;
     let mut marketplaces = load_marketplaces(&root)?;
     let id = parse_plugin_id(id)?;
-    marketplaces.refresh(&id.marketplace).map_err(|error| error.to_string())?;
-    marketplaces.save().map_err(|error| error.to_string())?;
+    registry
+        .refresh_marketplace(&mut marketplaces, &id.marketplace)
+        .map_err(|error| error.to_string())?;
     registry.upgrade(&marketplaces, &id).map_err(|error| error.to_string())
 }
 
@@ -185,6 +191,7 @@ mod tests {
         std::fs::write(
             plugin.join("plugin.json"),
             serde_json::to_vec_pretty(&serde_json::json!({
+                "manifestVersion": 2,
                 "name": "configurable",
                 "version": "1.0.0",
                 "userConfig": {
@@ -227,6 +234,7 @@ mod tests {
         std::fs::write(
             source.join("plugin.json"),
             serde_json::to_vec_pretty(&serde_json::json!({
+                "manifestVersion": 2,
                 "name": "managed",
                 "version": "1.0.0"
             }))
@@ -243,14 +251,14 @@ mod tests {
                 plugins: vec![MarketplaceEntry {
                     name: "managed".into(),
                     description: None,
-                    version: Some("1.0.0".into()),
+                    version: "1.0.0".parse().unwrap(),
                     source: PluginSource::Local { path: source },
                     category: None,
                     tags: Vec::new(),
                     strict: true,
                     manifest_override: None,
                 }],
-                force_remove_deleted_plugins: None,
+                force_remove_deleted_plugins: false,
                 allow_cross_marketplace_deps_on: None,
             })
             .unwrap(),

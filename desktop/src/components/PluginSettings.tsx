@@ -9,6 +9,7 @@ interface DesktopPluginInfo {
   name: string;
   description?: string;
   version?: string;
+  sourceStatus: "available" | "removed-from-marketplace" | "marketplace-missing";
   status: "enabled" | "disabled" | "degraded" | "error";
   errors: string[];
   configSchema: Record<string, unknown> | null;
@@ -105,12 +106,12 @@ export function PluginSettings({ cwd }: { cwd: string }) {
       )}
       {plugins.length === 0 ? (
         <div className="rounded-md border border-dashed px-3 py-5 text-center text-sm text-muted-foreground">
-          当前项目没有已安装插件。可使用 CLI 的 <code>telos plugin install</code> 安装。
+          当前项目没有已安装插件。可从下方已注册的 marketplace 安装，或使用 CLI 添加来源。
         </div>
       ) : (
         <div className="grid max-h-[430px] gap-2 overflow-y-auto pr-1">
           {plugins.map((plugin) => {
-            const active = plugin.status !== "disabled";
+            const active = plugin.status === "enabled" || plugin.status === "degraded";
             return (
               <article key={plugin.id} className="rounded-md border bg-background p-3">
                 <div className="flex items-start justify-between gap-3">
@@ -134,6 +135,11 @@ export function PluginSettings({ cwd }: { cwd: string }) {
                 <div className="mt-2 text-xs">
                   状态：<span className="font-medium">{plugin.status}</span>
                 </div>
+                {plugin.sourceStatus !== "available" && (
+                  <p className="mt-1 text-xs text-amber-600">
+                    来源：{plugin.sourceStatus === "removed-from-marketplace" ? "已从 marketplace 删除" : "marketplace 已移除"}
+                  </p>
+                )}
                 <div className="mt-2 flex gap-2">
                   <Button type="button" size="sm" variant="outline" disabled={busy === plugin.id} onClick={() => void mutate(plugin.id, "upgrade_plugin")}>升级</Button>
                   <Button type="button" size="sm" variant="outline" disabled={busy === plugin.id || active} title={active ? "请先停用插件" : undefined} onClick={() => void mutate(plugin.id, "uninstall_plugin")}>卸载</Button>

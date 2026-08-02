@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Plugin manifests now require `manifestVersion: 2`, a semver version, versioned dependency objects, and an exact match with marketplace entry versions; v1 is intentionally rejected.
-- Plugin install and upgrade now solve a global single-version dependency graph and atomically roll back every affected plugin when validation or commit fails.
-- Marketplace refresh safely reconciles deleted entries, reports retained orphaned plugins, and blocks marketplace removal while plugins remain installed.
+- Plugin install and upgrade now reuse satisfying installed dependencies, replace catalog versions only when required, reject replacement of active plugins, and roll back every affected directory when validation or commit fails.
+- Marketplace refresh is metadata-only: deleted entries are reported as retained orphaned plugins, marketplace removal is blocked while plugins remain installed, and the obsolete `forceRemoveDeletedPlugins` field is rejected.
 - Replaced the internal pass state machine with a direct `agent_loop` owned by `AgentRuntime`.
 - Replaced removed plugin hooks/interceptors with semantic lifecycle policies for session, model, tool, and turn boundaries.
 - Lifecycle policy events now stream as they happen and distinguish completion, rejection, and execution failure.

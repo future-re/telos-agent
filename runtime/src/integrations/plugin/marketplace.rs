@@ -16,8 +16,6 @@ pub struct Marketplace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<PluginAuthor>,
     pub plugins: Vec<MarketplaceEntry>,
-    #[serde(default)]
-    pub force_remove_deleted_plugins: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allow_cross_marketplace_deps_on: Option<Vec<String>>,
 }
@@ -59,7 +57,6 @@ impl PluginSourceStatus {
 
 #[derive(Debug, Clone, Default)]
 pub struct MarketplaceRefreshReport {
-    pub removed: Vec<crate::integrations::plugin::PluginId>,
     pub orphaned: Vec<crate::integrations::plugin::PluginId>,
 }
 
@@ -151,7 +148,6 @@ impl MarketplaceRegistry {
                     name: name.clone(),
                     owner: None,
                     plugins: plugins.clone(),
-                    force_remove_deleted_plugins: false,
                     allow_cross_marketplace_deps_on: None,
                 };
                 (manifest, 0)
@@ -162,7 +158,6 @@ impl MarketplaceRegistry {
                     name: name.clone(),
                     owner: None,
                     plugins: Vec::new(),
-                    force_remove_deleted_plugins: false,
                     allow_cross_marketplace_deps_on: None,
                 };
                 (manifest, 0)
@@ -339,14 +334,12 @@ impl MarketplaceRegistry {
                             name: name.clone(),
                             owner: None,
                             plugins: Vec::new(),
-                            force_remove_deleted_plugins: false,
                             allow_cross_marketplace_deps_on: None,
                         }),
                     MarketplaceSource::Inline { name: inline_name, plugins } => Marketplace {
                         name: inline_name.clone(),
                         owner: None,
                         plugins: plugins.clone(),
-                        force_remove_deleted_plugins: false,
                         allow_cross_marketplace_deps_on: None,
                     },
                     _ => Self::load_manifest_from_dir(&install_location).unwrap_or_else(|_| {
@@ -354,7 +347,6 @@ impl MarketplaceRegistry {
                             name: name.clone(),
                             owner: None,
                             plugins: Vec::new(),
-                            force_remove_deleted_plugins: false,
                             allow_cross_marketplace_deps_on: None,
                         }
                     }),

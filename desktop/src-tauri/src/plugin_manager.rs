@@ -258,7 +258,6 @@ mod tests {
                     strict: true,
                     manifest_override: None,
                 }],
-                force_remove_deleted_plugins: false,
                 allow_cross_marketplace_deps_on: None,
             })
             .unwrap(),

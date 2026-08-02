@@ -83,7 +83,6 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
                     name: marketplace.clone(),
                     owner: None,
                     plugins: Vec::new(),
-                    force_remove_deleted_plugins: false,
                     allow_cross_marketplace_deps_on: None,
                 }
             };
@@ -161,9 +160,6 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
         }
         PluginCommand::MarketplaceRefresh { name } => {
             let report = registry.refresh_marketplace(&mut marketplaces, &name)?;
-            for id in report.removed {
-                println!("removed deleted plugin {id}");
-            }
             for id in report.orphaned {
                 println!("retained orphaned plugin {id}");
             }

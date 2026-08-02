@@ -52,11 +52,12 @@ impl PluginRegistry {
         id: &PluginId,
     ) -> Result<(), PluginError> {
         let _operation = self.operation_lock.lock().expect("plugin operation lock poisoned");
-        if !self.is_installed(id) {
-            return Err(PluginError::PluginNotFound {
-                plugin_id: id.to_string(),
-                marketplace: id.marketplace.clone(),
-            });
+        let installed = self.get(id).ok_or_else(|| PluginError::PluginNotFound {
+            plugin_id: id.to_string(),
+            marketplace: id.marketplace.clone(),
+        })?;
+        if installed.status != PluginStatus::Disabled {
+            return Err(PluginError::Other(format!("disable plugin `{id}` before replacing it")));
         }
         self.install_or_upgrade(marketplaces, id, true)
     }
@@ -147,10 +148,16 @@ impl PluginRegistry {
             &mut prepared,
         )?;
 
-        let candidate_versions = prepared
-            .iter()
-            .map(|(id, plugin)| (id.clone(), plugin.plugin.manifest.version.clone()))
+        let mut candidate_versions = self
+            .list_all()
+            .into_iter()
+            .map(|entry| (entry.plugin.id, entry.plugin.manifest.version))
             .collect::<HashMap<_, _>>();
+        candidate_versions.extend(
+            prepared
+                .iter()
+                .map(|(id, plugin)| (id.clone(), plugin.plugin.manifest.version.clone())),
+        );
         for requirement in &requirements {
             let actual = candidate_versions.get(&requirement.plugin).ok_or_else(|| {
                 PluginError::DependencyUnsatisfied {
@@ -179,17 +186,26 @@ impl PluginRegistry {
             })
             .collect::<HashSet<_>>();
 
+        for id in &change_ids {
+            if let Some(entry) = self.get(id)
+                && entry.status != PluginStatus::Disabled
+            {
+                return Err(PluginError::Other(format!(
+                    "disable plugin `{id}` before replacing it"
+                )));
+            }
+        }
+
         self.validate_planned_graph(marketplaces, &prepared, &change_ids)?;
-        let root_was_enabled = self.get(root).is_some_and(|entry| entry.plugin.enabled);
         for (id, candidate) in &prepared {
-            if change_ids.contains(id) && (self.is_installed(id) || root_was_enabled) {
+            if change_ids.contains(id) && self.is_installed(id) {
                 self.validate_config_for_manifest(id, &candidate.plugin.manifest)?;
             }
         }
 
         let changes =
             prepared.into_iter().filter(|(id, _)| change_ids.contains(id)).collect::<Vec<_>>();
-        self.commit_prepared_batch(changes, root_was_enabled)
+        self.commit_prepared_batch(changes)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -229,14 +245,19 @@ impl PluginRegistry {
                 version: dependency.version.clone(),
                 required_by: id.clone(),
             });
-            self.prepare_closure(
-                marketplaces,
-                &dependency_id,
-                seen,
-                stack,
-                requirements,
-                prepared,
-            )?;
+            let installed_satisfies = self
+                .get(&dependency_id)
+                .is_some_and(|entry| dependency.version.matches(&entry.plugin.manifest.version));
+            if !installed_satisfies {
+                self.prepare_closure(
+                    marketplaces,
+                    &dependency_id,
+                    seen,
+                    stack,
+                    requirements,
+                    prepared,
+                )?;
+            }
         }
         stack.pop();
         seen.insert(id.clone());
@@ -290,7 +311,7 @@ impl PluginRegistry {
                 }
             }
         }
-        Ok(())
+        validate_manifest_cycles(&combined)
     }
 
     fn prepare_entry(
@@ -353,7 +374,6 @@ impl PluginRegistry {
     fn commit_prepared_batch(
         &self,
         mut changes: Vec<(PluginId, PreparedPlugin)>,
-        enable_new: bool,
     ) -> Result<(), PluginError> {
         if changes.is_empty() {
             return Ok(());
@@ -369,8 +389,7 @@ impl PluginRegistry {
 
         for (index, (id, prepared)) in changes.iter_mut().enumerate() {
             if let Err(error) = maybe_fail_commit(index) {
-                self.rollback_committed(&completed);
-                return Err(error);
+                return Err(self.rollback_failure(&completed, error, Vec::new()));
             }
             let target = self.installed_dir().join(id.to_string());
             let backup = backup_root.join(id.to_string());
@@ -378,19 +397,20 @@ impl PluginRegistry {
             if target.exists()
                 && let Err(error) = std::fs::rename(&target, &backup)
             {
-                self.rollback_committed(&completed);
-                return Err(error.into());
+                return Err(self.rollback_failure(&completed, error.into(), Vec::new()));
             }
             if let Err(error) = std::fs::rename(&prepared.directory, &target) {
-                if backup.exists() {
-                    let _ = std::fs::rename(&backup, &target);
+                let mut rollback_errors = Vec::new();
+                if backup.exists()
+                    && let Err(restore) = std::fs::rename(&backup, &target)
+                {
+                    rollback_errors
+                        .push(format!("restoring `{}` failed: {restore}", target.display()));
                 }
-                self.rollback_committed(&completed);
-                return Err(error.into());
+                return Err(self.rollback_failure(&completed, error.into(), rollback_errors));
             }
-            let was_enabled = previous.as_ref().is_some_and(|entry| entry.plugin.enabled);
             prepared.plugin.path = target.clone();
-            prepared.plugin.enabled = was_enabled || (previous.is_none() && enable_new);
+            prepared.plugin.enabled = false;
             self.register(prepared.plugin.clone());
             if let Some(entry) =
                 self.plugins.write().expect("plugin registry lock poisoned").get_mut(id)
@@ -406,8 +426,7 @@ impl PluginRegistry {
         }
 
         if let Err(error) = maybe_fail_commit(changes.len()).and_then(|_| self.save_state()) {
-            self.rollback_committed(&completed);
-            return Err(error);
+            return Err(self.rollback_failure(&completed, error, Vec::new()));
         }
         if let Err(error) = std::fs::remove_dir_all(&backup_root) {
             tracing::warn!(path = %backup_root.display(), %error, "failed to clean plugin transaction backup");
@@ -415,20 +434,47 @@ impl PluginRegistry {
         Ok(())
     }
 
-    fn rollback_committed(&self, completed: &[CommittedChange]) {
+    fn rollback_failure(
+        &self,
+        completed: &[CommittedChange],
+        original: PluginError,
+        mut rollback_errors: Vec<String>,
+    ) -> PluginError {
+        if let Err(error) = self.rollback_committed(completed) {
+            rollback_errors.push(error.to_string());
+        }
+        if rollback_errors.is_empty() {
+            original
+        } else {
+            PluginError::Other(format!(
+                "plugin transaction failed: {original}; rollback also failed: {}",
+                rollback_errors.join("; ")
+            ))
+        }
+    }
+
+    fn rollback_committed(&self, completed: &[CommittedChange]) -> Result<(), PluginError> {
+        let mut errors = Vec::new();
         for change in completed.iter().rev() {
-            if change.target.exists() {
-                let _ = std::fs::remove_dir_all(&change.target);
+            if change.target.exists()
+                && let Err(error) = std::fs::remove_dir_all(&change.target)
+            {
+                errors.push(format!("removing `{}` failed: {error}", change.target.display()));
             }
-            if change.backup.exists() {
-                let _ = std::fs::rename(&change.backup, &change.target);
+            if change.backup.exists()
+                && let Err(error) = std::fs::rename(&change.backup, &change.target)
+            {
+                errors.push(format!("restoring `{}` failed: {error}", change.target.display()));
             }
             self.remove(&change.id);
             if let Some(previous) = change.previous.clone() {
                 restore_entry(self, previous);
             }
         }
-        let _ = self.save_state();
+        if let Err(error) = self.save_state() {
+            errors.push(format!("restoring plugin state failed: {error}"));
+        }
+        if errors.is_empty() { Ok(()) } else { Err(PluginError::Other(errors.join("; "))) }
     }
 }
 
@@ -436,6 +482,40 @@ struct VersionRequirement {
     plugin: PluginId,
     version: semver::VersionReq,
     required_by: PluginId,
+}
+
+fn validate_manifest_cycles(
+    manifests: &HashMap<PluginId, crate::integrations::plugin::PluginManifest>,
+) -> Result<(), PluginError> {
+    fn visit(
+        id: &PluginId,
+        manifests: &HashMap<PluginId, crate::integrations::plugin::PluginManifest>,
+        stack: &mut Vec<PluginId>,
+        visited: &mut HashSet<PluginId>,
+    ) -> Result<(), PluginError> {
+        if let Some(index) = stack.iter().position(|candidate| candidate == id) {
+            let mut cycle = stack[index..].to_vec();
+            cycle.push(id.clone());
+            return Err(PluginError::CircularDependency { cycle });
+        }
+        if !visited.insert(id.clone()) {
+            return Ok(());
+        }
+        stack.push(id.clone());
+        if let Some(manifest) = manifests.get(id) {
+            for dependency in &manifest.dependencies {
+                visit(&dependency.resolve(&id.marketplace), manifests, stack, visited)?;
+            }
+        }
+        stack.pop();
+        Ok(())
+    }
+
+    let mut visited = HashSet::new();
+    for id in manifests.keys() {
+        visit(id, manifests, &mut Vec::new(), &mut visited)?;
+    }
+    Ok(())
 }
 
 struct CommittedChange {

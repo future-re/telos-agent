@@ -8,7 +8,7 @@ interface DesktopPluginInfo {
   id: string;
   name: string;
   description?: string;
-  version?: string;
+  version: string;
   sourceStatus: "available" | "removed-from-marketplace" | "marketplace-missing";
   status: "enabled" | "disabled" | "degraded" | "error";
   errors: string[];
@@ -20,7 +20,7 @@ interface DesktopMarketplacePlugin {
   id: string;
   name: string;
   description?: string;
-  version?: string;
+  version: string;
   installed: boolean;
 }
 
@@ -112,13 +112,14 @@ export function PluginSettings({ cwd }: { cwd: string }) {
         <div className="grid max-h-[430px] gap-2 overflow-y-auto pr-1">
           {plugins.map((plugin) => {
             const active = plugin.status === "enabled" || plugin.status === "degraded";
+            const replaceable = plugin.status === "disabled";
             return (
               <article key={plugin.id} className="rounded-md border bg-background p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h4 className="truncate text-sm font-semibold">{plugin.name}</h4>
                     <p className="truncate font-mono text-[11px] text-muted-foreground">
-                      {plugin.id}{plugin.version ? ` · ${plugin.version}` : ""}
+                      {plugin.id} · {plugin.version}
                     </p>
                     {plugin.description && <p className="mt-1 text-xs text-muted-foreground">{plugin.description}</p>}
                   </div>
@@ -141,7 +142,7 @@ export function PluginSettings({ cwd }: { cwd: string }) {
                   </p>
                 )}
                 <div className="mt-2 flex gap-2">
-                  <Button type="button" size="sm" variant="outline" disabled={busy === plugin.id} onClick={() => void mutate(plugin.id, "upgrade_plugin")}>升级</Button>
+                  <Button type="button" size="sm" variant="outline" disabled={busy === plugin.id || !replaceable} title={!replaceable ? "请先停用插件" : undefined} onClick={() => void mutate(plugin.id, "upgrade_plugin")}>升级</Button>
                   <Button type="button" size="sm" variant="outline" disabled={busy === plugin.id || active} title={active ? "请先停用插件" : undefined} onClick={() => void mutate(plugin.id, "uninstall_plugin")}>卸载</Button>
                 </div>
                 {plugin.errors.map((message) => (
@@ -186,7 +187,7 @@ export function PluginSettings({ cwd }: { cwd: string }) {
             <article key={plugin.id} className="flex items-start justify-between gap-3 rounded-md border bg-background p-3">
               <div className="min-w-0">
                 <h5 className="truncate text-sm font-medium">{plugin.name}</h5>
-                <p className="truncate font-mono text-[11px] text-muted-foreground">{plugin.id}{plugin.version ? ` · ${plugin.version}` : ""}</p>
+                <p className="truncate font-mono text-[11px] text-muted-foreground">{plugin.id} · {plugin.version}</p>
                 {plugin.description && <p className="mt-1 text-xs text-muted-foreground">{plugin.description}</p>}
               </div>
               <Button type="button" size="sm" disabled={busy === plugin.id} onClick={() => void mutate(plugin.id, "install_plugin")}>安装</Button>

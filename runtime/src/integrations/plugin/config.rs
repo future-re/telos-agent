@@ -185,13 +185,6 @@ impl PluginConfigStore {
         self.resolve(id, manifest).map(|_| ())
     }
 
-    pub(crate) fn remove_many(&mut self, ids: &[PluginId]) -> Result<(), PluginError> {
-        for id in ids {
-            self.values.remove(id);
-        }
-        self.save()
-    }
-
     pub fn resolve(
         &self,
         id: &PluginId,

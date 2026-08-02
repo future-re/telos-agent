@@ -590,9 +590,12 @@ fn transactional_local_install_resolves_dependencies_upgrades_and_uninstalls() {
     manifest["version"] = serde_json::json!("2.0.0");
     std::fs::write(&app_source, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
     marketplaces = build_marketplace(semver::Version::new(2, 0, 0));
+    let active_error = registry.upgrade(&marketplaces, &app).unwrap_err();
+    assert!(active_error.to_string().contains("disable plugin"));
+    registry.disable(&app).unwrap();
     registry.upgrade(&marketplaces, &app).unwrap();
     assert_eq!(registry.get(&app).unwrap().plugin.manifest.version, semver::Version::new(2, 0, 0));
-    assert_eq!(registry.get(&app).unwrap().status, PluginStatus::Enabled);
+    assert_eq!(registry.get(&app).unwrap().status, PluginStatus::Disabled);
 
     manifest["version"] = serde_json::json!("3.0.0");
     manifest["dependencies"] = serde_json::json!([{"name": "missing", "version": "^1"}]);
@@ -600,9 +603,8 @@ fn transactional_local_install_resolves_dependencies_upgrades_and_uninstalls() {
     marketplaces = build_marketplace(semver::Version::new(3, 0, 0));
     assert!(registry.upgrade(&marketplaces, &app).is_err());
     assert_eq!(registry.get(&app).unwrap().plugin.manifest.version, semver::Version::new(2, 0, 0));
-    assert_eq!(registry.get(&app).unwrap().status, PluginStatus::Enabled);
+    assert_eq!(registry.get(&app).unwrap().status, PluginStatus::Disabled);
 
-    registry.disable(&app).unwrap();
     registry.uninstall(&app).unwrap();
     registry.disable(&base).unwrap();
     registry.uninstall(&base).unwrap();
@@ -690,6 +692,63 @@ fn install_rejects_dependency_version_without_a_global_solution() {
     let error = registry.install(&marketplaces, &PluginId::parse("app@test").unwrap()).unwrap_err();
     assert!(matches!(error, PluginError::DependencyVersionConflict { .. }));
     assert!(registry.is_empty());
+}
+
+#[test]
+fn install_reuses_an_installed_dependency_that_satisfies_the_requirement() {
+    let tmp = TempDir::new().unwrap();
+    let sources = tmp.path().join("sources");
+    let write_plugin = |name: &str, directory: &str, version: &str, dependencies| {
+        let source = sources.join(directory);
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(
+            source.join("plugin.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "manifestVersion": 2,
+                "name": name,
+                "version": version,
+                "dependencies": dependencies
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        source
+    };
+    let base_v1 = write_plugin("base", "base-v1", "1.5.0", serde_json::json!([]));
+    let base_v2 = write_plugin("base", "base-v2", "2.0.0", serde_json::json!([]));
+    let app =
+        write_plugin("app", "app", "1.0.0", serde_json::json!([{"name": "base", "version": "^1"}]));
+    let entry = |name: &str, version: &str, source: std::path::PathBuf| crate::MarketplaceEntry {
+        name: name.into(),
+        description: None,
+        version: version.parse().unwrap(),
+        source: PluginSource::Local { path: source },
+        category: None,
+        tags: Vec::new(),
+        strict: true,
+        manifest_override: None,
+    };
+    let marketplace = |entries| {
+        let mut marketplaces = crate::MarketplaceRegistry::new(tmp.path().join("cache"));
+        marketplaces
+            .add(crate::MarketplaceSource::Inline { name: "test".into(), plugins: entries })
+            .unwrap();
+        marketplaces
+    };
+    let registry = PluginRegistry::new(tmp.path().join("plugins"));
+    let base = PluginId::parse("base@test").unwrap();
+    registry.install(&marketplace(vec![entry("base", "1.5.0", base_v1)]), &base).unwrap();
+
+    let app_id = PluginId::parse("app@test").unwrap();
+    registry
+        .install(
+            &marketplace(vec![entry("base", "2.0.0", base_v2), entry("app", "1.0.0", app)]),
+            &app_id,
+        )
+        .unwrap();
+
+    assert_eq!(registry.get(&base).unwrap().plugin.manifest.version.to_string(), "1.5.0");
+    assert!(registry.is_installed(&app_id));
 }
 
 #[test]

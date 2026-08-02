@@ -118,13 +118,13 @@ telos plugin uninstall formatter@my-marketplace
 telos plugin marketplace-remove my-marketplace
 ```
 
-Install and upgrade refresh the selected marketplace, solve one global version per `name@marketplace`, validate existing configuration against replacement manifests, and only then switch all affected directories in one transaction. A catalog/plugin version mismatch or an unsatisfied semver range aborts the operation and preserves every previous version.
+Install and upgrade refresh the selected marketplace and keep an installed dependency when its version already satisfies the requested range. Otherwise, the current catalog version is considered as its replacement. Existing configuration is validated before replacement, and all affected directories are switched as one rollback-aware batch. A catalog/plugin version mismatch, an unsatisfied semver range, or an active plugin that would need replacement aborts the operation and preserves every previous version. Disable a plugin before upgrading it.
 
-When a refresh removes a catalog entry, installed copies are retained and reported as orphaned by default. With `forceRemoveDeletedPlugins: true`, only disabled plugins without outside dependents are removed; otherwise the refresh fails and preserves the previous catalog. A marketplace cannot be removed while any of its plugins remain installed.
+Marketplace refresh only updates catalog metadata. When an entry disappears, every installed copy is retained and reported as orphaned; removal is always an explicit uninstall operation. A marketplace cannot be removed while any of its plugins remain installed.
 
 Marketplace sources support local directories, inline catalogs, GitHub/git, direct JSON URLs, and npm catalogs; plugin entries support local, GitHub/git, npm, and pip sources. npm lifecycle scripts are disabled during installation. Source declarations currently define the trust boundary: Git SHA pinning is optional and npm/pip checksums or signatures are not verified, so only register trusted marketplaces and pin immutable sources where possible. The desktop settings dialog lists registered marketplace entries and supports install, upgrade, disable, uninstall, schema inspection, and configuration with sensitive-value preservation.
 
-Migration note: manifest v1 is intentionally unsupported. Set `manifestVersion` to `2`, add a required semver `version`, convert every dependency string into the versioned object form above, and move removed `hooks` or `interceptors` commands to `policies`. Unknown or misspelled fields fail validation.
+Migration note: manifest v1 is intentionally unsupported. Set `manifestVersion` to `2`, add a required semver `version`, convert every dependency string into the versioned object form above, and move removed `hooks` or `interceptors` commands to `policies`. Marketplace manifests must remove the obsolete `forceRemoveDeletedPlugins` field. Unknown or misspelled fields fail validation.
 
 ## Skills
 

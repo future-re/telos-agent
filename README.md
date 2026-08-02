@@ -191,7 +191,7 @@ async fn main() -> Result<(), AgentError> {
 - `SubagentTool`（完整子会话 + fork 并发多视角）、`SkillTool`（slash-command）。
 - Memory 工具（Read/Write/Grep/Edit/Status）、Task 工具（Create/Get/List/Update）。
 - MCP 工具桥接（stdio JSON-RPC，自动注册为 `mcp__<server>__<tool>`）。
-- 插件系统可加载严格的 manifest v2、tool specs、八个生命周期 policy 点、skills、subagents、prompt sections、output styles、settings/userConfig、MCP 与只读 LSP 工具；支持全局单版本 SemVer 求解、事务式安装升级、安全目录删项及 CLI/桌面管理。
+- 插件系统可加载严格的 manifest v2、tool specs、八个生命周期 policy 点、skills、subagents、prompt sections、output styles、settings/userConfig、MCP 与只读 LSP 工具；支持保守的单版本 SemVer 依赖规划、失败回滚、无副作用目录刷新及 CLI/桌面管理。
 - 工具超时、panic 隔离、文件写冲突保护。
 
 ### 权限与安全

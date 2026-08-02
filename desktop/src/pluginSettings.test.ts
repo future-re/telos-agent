@@ -20,6 +20,7 @@ describe("editableConfig", () => {
       editableConfig({
         id: "configured@test",
         name: "configured",
+        version: "1.0.0",
         status: "enabled",
         sourceStatus: "available",
         errors: [],
@@ -120,5 +121,30 @@ describe("editableConfig", () => {
         request: { cwd: "/project", id: "formatter@test" },
       });
     });
+  });
+
+  it("requires an active plugin to be disabled before upgrade", async () => {
+    const invokeMock = vi.mocked(invoke);
+    invokeMock.mockImplementation(async (command) => {
+      if (command === "list_plugins") {
+        return [{
+          id: "active@test",
+          name: "active",
+          version: "1.0.0",
+          sourceStatus: "available",
+          status: "enabled",
+          errors: [],
+          configSchema: null,
+          config: null,
+        }];
+      }
+      if (command === "list_marketplace_plugins") return [];
+      return undefined;
+    });
+    render(createElement(PluginSettings, { cwd: "/project" }));
+
+    const upgrade = await screen.findByRole("button", { name: "升级" });
+    expect((upgrade as HTMLButtonElement).disabled).toBe(true);
+    expect(upgrade.getAttribute("title")).toBe("请先停用插件");
   });
 });

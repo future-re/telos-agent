@@ -87,8 +87,6 @@ pub enum PluginError {
     Degraded { id: PluginId, loaded: usize, total: usize },
     #[error("marketplace '{marketplace}' still has installed plugins: {plugins:?}")]
     MarketplaceInUse { marketplace: String, plugins: Vec<PluginId> },
-    #[error("marketplace refresh cannot safely remove plugins: {plugins:?}")]
-    MarketplaceRefreshBlocked { plugins: Vec<PluginId> },
 
     // --- User config ---
     #[error("user configuration required for plugin '{id}'")]

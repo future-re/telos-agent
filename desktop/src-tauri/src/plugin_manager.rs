@@ -35,13 +35,11 @@ pub fn list_plugins(cwd: Option<PathBuf>) -> Result<Vec<DesktopPluginInfo>, Stri
     let root = plugins_root(cwd)?;
     let manager = load_manager(&root)?;
     let mut plugins = manager
-        .registry()
-        .list_all()
+        .list_plugins()
         .into_iter()
         .map(|entry| {
             let config = manager
-                .registry()
-                .resolved_config(&entry.plugin.id)
+                .plugin_config(&entry.plugin.id)
                 .map(|config| serde_json::to_value(config.redacted_values()).unwrap_or(Value::Null))
                 .unwrap_or(Value::Null);
             DesktopPluginInfo {
@@ -49,11 +47,7 @@ pub fn list_plugins(cwd: Option<PathBuf>) -> Result<Vec<DesktopPluginInfo>, Stri
                 name: entry.plugin.manifest.name,
                 description: entry.plugin.manifest.description,
                 version: entry.plugin.manifest.version.to_string(),
-                source_status: manager
-                    .marketplaces()
-                    .source_status(&entry.plugin.id)
-                    .as_str()
-                    .to_string(),
+                source_status: manager.plugin_source_status(&entry.plugin.id).as_str().to_string(),
                 status: format!("{:?}", entry.status).to_lowercase(),
                 errors: entry.load_errors.into_iter().map(|error| error.to_string()).collect(),
                 config_schema: serde_json::to_value(entry.plugin.manifest.user_config)
@@ -96,21 +90,18 @@ pub fn list_marketplace_plugins(
 ) -> Result<Vec<DesktopMarketplacePlugin>, String> {
     let root = plugins_root(cwd)?;
     let manager = load_manager(&root)?;
-    let mut plugins = Vec::new();
-    for marketplace in manager.marketplaces().names() {
-        if let Some(catalog) = manager.marketplaces().get(marketplace) {
-            plugins.extend(catalog.plugins.iter().map(|entry| {
-                let id = PluginId { name: entry.name.clone(), marketplace: marketplace.clone() };
-                DesktopMarketplacePlugin {
-                    id: id.to_string(),
-                    name: entry.name.clone(),
-                    description: entry.description.clone(),
-                    version: entry.version.to_string(),
-                    installed: manager.registry().is_installed(&id),
-                }
-            }));
-        }
-    }
+    let mut plugins = manager
+        .list_marketplace_plugins(None)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|plugin| DesktopMarketplacePlugin {
+            id: plugin.id.to_string(),
+            name: plugin.entry.name,
+            description: plugin.entry.description,
+            version: plugin.entry.version.to_string(),
+            installed: plugin.installed,
+        })
+        .collect::<Vec<_>>();
     plugins.sort_by(|left, right| left.id.cmp(&right.id));
     Ok(plugins)
 }

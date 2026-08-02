@@ -13,7 +13,7 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
 
     match command {
         PluginCommand::List => {
-            let mut entries = manager.registry().list_all();
+            let mut entries = manager.list_plugins();
             entries.sort_by_key(|entry| entry.plugin.id.to_string());
             for entry in entries {
                 println!(
@@ -21,7 +21,7 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
                     entry.plugin.id,
                     entry.status,
                     entry.plugin.manifest.version,
-                    manager.marketplaces().source_status(&entry.plugin.id).as_str()
+                    manager.plugin_source_status(&entry.plugin.id).as_str()
                 );
                 for error in entry.load_errors {
                     println!("  error: {error}");
@@ -30,16 +30,14 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
         }
         PluginCommand::Inspect { id } => {
             let id = parse_id(&id)?;
-            let entry = manager
-                .registry()
-                .get(&id)
-                .ok_or_else(|| anyhow!("plugin `{id}` is not installed"))?;
-            let config = manager.registry().resolved_config(&id);
+            let entry =
+                manager.plugin(&id).ok_or_else(|| anyhow!("plugin `{id}` is not installed"))?;
+            let config = manager.plugin_config(&id);
             println!("id: {}", entry.plugin.id);
             println!("status: {:?}", entry.status);
             println!("version: {}", entry.plugin.manifest.version);
             println!("path: {}", entry.plugin.path.display());
-            println!("source: {}", manager.marketplaces().source_status(&id).as_str());
+            println!("source: {}", manager.plugin_source_status(&id).as_str());
             match config {
                 Ok(config) => {
                     println!("config: {}", serde_json::to_string_pretty(&config.redacted_values())?)
@@ -114,28 +112,31 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
         }
         PluginCommand::MarketplaceSearch { query } => {
             let query = query.to_lowercase();
-            let mut matches = manager.marketplaces().search_entries(&query);
-            matches.sort_by(|left, right| left.0.cmp(&right.0));
-            for (id, entry) in matches {
-                println!("{id}\t{}\t{}", entry.version, entry.description.as_deref().unwrap_or(""));
+            let mut matches = manager.search_marketplace_plugins(&query);
+            matches.sort_by_key(|plugin| plugin.id.to_string());
+            for plugin in matches {
+                println!(
+                    "{}\t{}\t{}",
+                    plugin.id,
+                    plugin.entry.version,
+                    plugin.entry.description.as_deref().unwrap_or("")
+                );
             }
         }
         PluginCommand::MarketplaceListPlugins { name } => {
-            let mut entries = manager.marketplaces().entries(name.as_deref())?;
-            entries.sort_by(|left, right| left.0.cmp(&right.0));
-            for (id, entry) in entries {
-                println!("{id}\t{}\t{}", entry.version, entry.description.as_deref().unwrap_or(""));
+            let mut entries = manager.list_marketplace_plugins(name.as_deref())?;
+            entries.sort_by_key(|plugin| plugin.id.to_string());
+            for plugin in entries {
+                println!(
+                    "{}\t{}\t{}",
+                    plugin.id,
+                    plugin.entry.version,
+                    plugin.entry.description.as_deref().unwrap_or("")
+                );
             }
         }
         PluginCommand::MarketplaceList => {
-            let mut names = manager.marketplaces().names().into_iter().cloned().collect::<Vec<_>>();
-            names.sort();
-            for name in names {
-                let count = manager
-                    .marketplaces()
-                    .get(&name)
-                    .map(|marketplace| marketplace.plugins.len())
-                    .unwrap_or(0);
+            for (name, count) in manager.list_marketplaces() {
                 println!("{name}\t{count} plugins");
             }
         }

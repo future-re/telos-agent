@@ -8,8 +8,16 @@ use fs2::FileExt;
 use serde_json::Value;
 
 use crate::integrations::plugin::{
-    MarketplaceRegistry, MarketplaceSource, PluginError, PluginId, PluginRegistry,
+    MarketplaceEntry, MarketplaceRegistry, MarketplaceSource, PluginEntry, PluginError, PluginId,
+    PluginRegistry, PluginSourceStatus, ResolvedPluginConfig,
 };
+
+#[derive(Debug, Clone)]
+pub struct MarketplacePluginInfo {
+    pub id: PluginId,
+    pub entry: MarketplaceEntry,
+    pub installed: bool,
+}
 
 /// Owns the installed-plugin and marketplace views while holding the project
 /// plugin lock. Management callers should open one manager per operation.
@@ -43,12 +51,76 @@ impl PluginManager {
         Ok(Self { registry, marketplaces, _lock: lock })
     }
 
-    pub fn registry(&self) -> &PluginRegistry {
-        &self.registry
+    pub fn list_plugins(&self) -> Vec<PluginEntry> {
+        self.registry.list_all()
     }
 
-    pub fn marketplaces(&self) -> &MarketplaceRegistry {
-        &self.marketplaces
+    pub fn is_empty(&self) -> bool {
+        self.registry.is_empty()
+    }
+
+    pub fn is_plugin_installed(&self, id: &PluginId) -> bool {
+        self.registry.is_installed(id)
+    }
+
+    pub fn plugin(&self, id: &PluginId) -> Option<PluginEntry> {
+        self.registry.get(id)
+    }
+
+    pub fn plugin_config(&self, id: &PluginId) -> Result<ResolvedPluginConfig, PluginError> {
+        self.registry.resolved_config(id)
+    }
+
+    pub fn plugin_source_status(&self, id: &PluginId) -> PluginSourceStatus {
+        self.marketplaces.source_status(id)
+    }
+
+    pub fn list_marketplaces(&self) -> Vec<(String, usize)> {
+        let mut marketplaces = self
+            .marketplaces
+            .names()
+            .into_iter()
+            .map(|name| {
+                let count = self.marketplaces.get(name).map_or(0, |catalog| catalog.plugins.len());
+                (name.clone(), count)
+            })
+            .collect::<Vec<_>>();
+        marketplaces.sort_by(|left, right| left.0.cmp(&right.0));
+        marketplaces
+    }
+
+    pub fn list_marketplace_plugins(
+        &self,
+        selected: Option<&str>,
+    ) -> Result<Vec<MarketplacePluginInfo>, PluginError> {
+        self.marketplaces.entries(selected).map(|entries| {
+            entries
+                .into_iter()
+                .filter_map(|(raw_id, entry)| {
+                    let id = PluginId::parse(&raw_id)?;
+                    Some(MarketplacePluginInfo {
+                        installed: self.registry.is_installed(&id),
+                        id,
+                        entry: entry.clone(),
+                    })
+                })
+                .collect()
+        })
+    }
+
+    pub fn search_marketplace_plugins(&self, query: &str) -> Vec<MarketplacePluginInfo> {
+        self.marketplaces
+            .search_entries(query)
+            .into_iter()
+            .filter_map(|(raw_id, entry)| {
+                let id = PluginId::parse(&raw_id)?;
+                Some(MarketplacePluginInfo {
+                    installed: self.registry.is_installed(&id),
+                    id,
+                    entry: entry.clone(),
+                })
+            })
+            .collect()
     }
 
     pub fn enable(&self, id: &PluginId) -> Result<(), PluginError> {
@@ -221,7 +293,7 @@ mod tests {
         let id = manager.install_local(&plugin_dir, "local").unwrap();
 
         assert_eq!(id.to_string(), "local-plugin@local");
-        assert!(manager.registry().is_installed(&id));
+        assert!(manager.is_plugin_installed(&id));
         assert!(root.join("local-marketplaces/local/marketplace.json").is_file());
     }
 

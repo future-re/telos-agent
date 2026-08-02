@@ -158,7 +158,7 @@ fn create_plugin_registry(project_root_or_cwd: &Path) -> Option<Arc<crate::Plugi
             return None;
         }
     };
-    if manager.registry().is_empty() {
+    if manager.is_empty() {
         return None;
     }
     Some(Arc::new(manager.into_registry()))

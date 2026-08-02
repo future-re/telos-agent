@@ -25,7 +25,7 @@ use std::fmt;
 pub use config::ResolvedPluginConfig;
 pub use errors::{DependencyReason, PluginError};
 pub use lsp_tool::LspTool;
-pub use manager::PluginManager;
+pub use manager::{MarketplacePluginInfo, PluginManager};
 pub use manifest::{
     CommandPolicyDef, ConfigOptionType, DependencyRef, LspServerEntry, LspServersConfig,
     MarketplaceEntry, McpServerEntry, McpServersConfig, PluginAuthor, PluginManifest, PluginSource,

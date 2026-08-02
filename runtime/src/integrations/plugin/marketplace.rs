@@ -183,7 +183,7 @@ impl MarketplaceRegistry {
         self.marketplaces.keys().collect()
     }
 
-    pub fn entries(
+    pub(crate) fn entries(
         &self,
         selected: Option<&str>,
     ) -> Result<Vec<(String, &MarketplaceEntry)>, PluginError> {
@@ -212,7 +212,7 @@ impl MarketplaceRegistry {
         Ok(entries)
     }
 
-    pub fn search_entries(&self, query: &str) -> Vec<(String, &MarketplaceEntry)> {
+    pub(crate) fn search_entries(&self, query: &str) -> Vec<(String, &MarketplaceEntry)> {
         let query = query.to_lowercase();
         self.entries(None)
             .unwrap_or_default()

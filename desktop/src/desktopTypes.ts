@@ -7,6 +7,7 @@ export type SettingsSection =
   | "key"
   | "approval"
   | "model"
+  | "plugins"
   | "directory";
 
 export interface DesktopSettingsOverrides {

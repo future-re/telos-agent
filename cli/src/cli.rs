@@ -37,6 +37,94 @@ pub enum Command {
     },
     /// JSON-line daemon mode: read commands from stdin, emit events on stdout.
     Serve,
+    /// Manage plugins and marketplaces without starting a model provider.
+    Plugin {
+        #[clap(subcommand)]
+        command: PluginCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PluginCommand {
+    List,
+    Inspect {
+        id: String,
+    },
+    Enable {
+        id: String,
+    },
+    Disable {
+        id: String,
+    },
+    Install {
+        id: String,
+    },
+    InstallLocal {
+        path: PathBuf,
+        #[clap(long, default_value = "local")]
+        marketplace: String,
+    },
+    Upgrade {
+        id: String,
+    },
+    Uninstall {
+        id: String,
+    },
+    Config {
+        id: String,
+        #[clap(long)]
+        json: String,
+    },
+    ClearConfig {
+        id: String,
+    },
+    MarketplaceAddLocal {
+        path: PathBuf,
+        #[clap(long)]
+        name: Option<String>,
+    },
+    MarketplaceAddUrl {
+        url: String,
+        #[clap(long)]
+        name: Option<String>,
+    },
+    MarketplaceAddGithub {
+        repo: String,
+        #[clap(long = "ref")]
+        ref_: Option<String>,
+        #[clap(long)]
+        path: Option<String>,
+        #[clap(long)]
+        name: Option<String>,
+    },
+    MarketplaceAddGit {
+        url: String,
+        #[clap(long = "ref")]
+        ref_: Option<String>,
+        #[clap(long)]
+        path: Option<String>,
+        #[clap(long)]
+        name: Option<String>,
+    },
+    MarketplaceAddNpm {
+        package: String,
+        #[clap(long)]
+        name: Option<String>,
+    },
+    MarketplaceRefresh {
+        name: String,
+    },
+    MarketplaceRemove {
+        name: String,
+    },
+    MarketplaceSearch {
+        query: String,
+    },
+    MarketplaceListPlugins {
+        #[clap(long)]
+        name: Option<String>,
+    },
+    MarketplaceList,
 }
 
 #[derive(Debug, Parser, Clone, Default)]
@@ -126,5 +214,41 @@ mod tests {
     fn parse_chat_command() {
         let cli = Cli::parse_from(["telos", "chat"]);
         assert!(matches!(cli.command, Some(Command::Chat)));
+    }
+
+    #[test]
+    fn parse_plugin_management_commands() {
+        let cli = Cli::parse_from(["telos", "plugin", "install", "formatter@community"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Plugin {
+                command: PluginCommand::Install { id }
+            }) if id == "formatter@community"
+        ));
+
+        let cli = Cli::parse_from([
+            "telos",
+            "plugin",
+            "marketplace-add-github",
+            "org/catalog",
+            "--ref",
+            "stable",
+            "--path",
+            "registry",
+        ]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Plugin {
+                command: PluginCommand::MarketplaceAddGithub { repo, ref_, path, name: _ }
+            }) if repo == "org/catalog" && ref_.as_deref() == Some("stable") && path.as_deref() == Some("registry")
+        ));
+
+        let cli = Cli::parse_from(["telos", "plugin", "marketplace-search", "format"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Plugin {
+                command: PluginCommand::MarketplaceSearch { query }
+            }) if query == "format"
+        ));
     }
 }

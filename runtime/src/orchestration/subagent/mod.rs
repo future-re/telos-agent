@@ -74,7 +74,7 @@ You audit plugin behavior.
         )
         .unwrap();
 
-        let mut plugins = PluginRegistry::new(temp.path());
+        let plugins = PluginRegistry::new(temp.path());
         plugins.discover_installed().unwrap();
         plugins.enable(&PluginId::parse("agent-plugin@mkt").unwrap()).unwrap();
 
@@ -88,7 +88,7 @@ You audit plugin behavior.
             .validate(
                 &json!({
                     "prompt": "audit",
-                    "subagent_type": "agent-plugin:auditor"
+                    "subagent_type": "agent-plugin@mkt:auditor"
                 }),
                 &ToolContext::dummy(),
             )
@@ -133,7 +133,7 @@ Missing required description.
         )
         .unwrap();
 
-        let mut plugins = PluginRegistry::new(temp.path());
+        let plugins = PluginRegistry::new(temp.path());
         plugins.discover_installed().unwrap();
         plugins.enable(&PluginId::parse("agent-plugin@mkt").unwrap()).unwrap();
 
@@ -147,7 +147,7 @@ Missing required description.
             .validate(
                 &json!({
                     "prompt": "audit",
-                    "subagent_type": "agent-plugin:auditor"
+                    "subagent_type": "agent-plugin@mkt:auditor"
                 }),
                 &ToolContext::dummy(),
             )

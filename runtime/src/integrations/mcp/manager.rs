@@ -131,18 +131,22 @@ impl McpManager {
         tool_name: &str,
         args: Value,
     ) -> Result<Value, AgentError> {
-        let servers = self.servers.lock().await;
-        let handle = servers.get(server_id).ok_or_else(|| {
+        let mut servers = self.servers.lock().await;
+        let handle = servers.get_mut(server_id).ok_or_else(|| {
             AgentError::ToolNotFound(format!("MCP server '{server_id}' not found"))
         })?;
-        handle.client.call_tool(tool_name, args).await
+        let result = handle.client.call_tool(tool_name, args).await;
+        if !handle.client.is_connected().await {
+            handle.connected = false;
+        }
+        result
     }
 
     /// Disconnect all servers.
     pub async fn disconnect_all(&self) {
         let servers = self.servers.lock().await;
         for (_, handle) in servers.iter() {
-            handle.client.disconnect();
+            handle.client.disconnect().await;
         }
     }
 }

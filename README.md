@@ -191,7 +191,7 @@ async fn main() -> Result<(), AgentError> {
 - `SubagentTool`（完整子会话 + fork 并发多视角）、`SkillTool`（slash-command）。
 - Memory 工具（Read/Write/Grep/Edit/Status）、Task 工具（Create/Get/List/Update）。
 - MCP 工具桥接（stdio JSON-RPC，自动注册为 `mcp__<server>__<tool>`）。
-- 插件系统可加载 manifest、tool specs、skills、prompt sections 和 MCP 声明；core 层已提供 registry/apply 能力。
+- 插件系统可加载严格版本化 manifest、tool specs、八个生命周期 policy 点、skills、subagents、prompt sections、output styles、settings/userConfig、MCP 与只读 LSP 工具；支持事务式安装升级、依赖校验及 CLI/桌面管理。
 - 工具超时、panic 隔离、文件写冲突保护。
 
 ### 权限与安全
@@ -319,7 +319,7 @@ min_occurrences = 3
 - 多模态输入输出。
 - 跨 provider 自动 fallback。
 - 远程沙箱或容器级隔离；当前提供规则权限、命令安全分析和人工审批。
-- 长期兼容的外部插件市场协议；本仓库已有本地插件 registry 和 manifest 能力，但仍在演进。
+- 永久冻结的第三方插件 ABI；当前 `manifestVersion: 1`、市场源和迁移规则已明确，但后续主版本仍可能演进。
 
 ## 开发
 

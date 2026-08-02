@@ -3,6 +3,7 @@
 use crate::integrations::plugin::registry::lifecycle::PluginRegistry;
 use crate::integrations::plugin::registry::types::{LoadedPlugin, PluginStatus};
 use crate::integrations::plugin::{PluginError, PluginId, PluginManifest, PluginSource};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -25,7 +26,7 @@ fn make_plugin_dir(dir: &Path, name: &str, marketplace: &str) -> PathBuf {
 #[test]
 fn register_and_get_plugin() {
     let tmp = TempDir::new().unwrap();
-    let mut registry = PluginRegistry::new(tmp.path());
+    let registry = PluginRegistry::new(tmp.path());
 
     let id = PluginId { name: "test".into(), marketplace: "test-mkt".into() };
     let plugin = LoadedPlugin {
@@ -53,7 +54,7 @@ fn register_and_get_plugin() {
 #[test]
 fn enable_disable_lifecycle() {
     let tmp = TempDir::new().unwrap();
-    let mut registry = PluginRegistry::new(tmp.path());
+    let registry = PluginRegistry::new(tmp.path());
     let id = PluginId { name: "t".into(), marketplace: "m".into() };
     let plugin = LoadedPlugin {
         id: id.clone(),
@@ -90,10 +91,43 @@ fn enable_disable_lifecycle() {
 #[test]
 fn enable_nonexistent_returns_error() {
     let tmp = TempDir::new().unwrap();
-    let mut registry = PluginRegistry::new(tmp.path());
+    let registry = PluginRegistry::new(tmp.path());
     let id = PluginId { name: "nope".into(), marketplace: "nope".into() };
     let result = registry.enable(&id);
     assert!(result.is_err());
+}
+
+#[test]
+fn enable_requires_complete_plugin_configuration() {
+    let tmp = TempDir::new().unwrap();
+    let plugin_dir = tmp.path().join("installed/configured@mkt");
+    std::fs::create_dir_all(&plugin_dir).unwrap();
+    std::fs::write(
+        plugin_dir.join("plugin.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "name": "configured",
+            "userConfig": {
+                "token": {
+                    "type": "string",
+                    "title": "Token",
+                    "description": "API token",
+                    "required": true,
+                    "sensitive": true
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let registry = PluginRegistry::new(tmp.path());
+    registry.discover_installed().unwrap();
+    let id = PluginId::parse("configured@mkt").unwrap();
+
+    assert!(matches!(registry.enable(&id), Err(PluginError::UserConfigRequired { .. })));
+    registry
+        .set_config(&id, HashMap::from([("token".into(), serde_json::json!("secret"))]))
+        .unwrap();
+    registry.enable(&id).unwrap();
 }
 
 #[test]
@@ -102,7 +136,7 @@ fn discover_installed_finds_plugins() {
     make_plugin_dir(tmp.path(), "my-plugin", "community");
     make_plugin_dir(tmp.path(), "other", "telos-official");
 
-    let mut registry = PluginRegistry::new(tmp.path());
+    let registry = PluginRegistry::new(tmp.path());
     let discovered = registry.discover_installed().unwrap();
     assert_eq!(discovered.len(), 2);
     assert_eq!(registry.len(), 2);
@@ -116,7 +150,7 @@ fn discover_skips_non_plugin_dirs() {
     // Empty directory — no plugin.json
     std::fs::create_dir_all(installed.join("not-a-plugin")).unwrap();
 
-    let mut registry = PluginRegistry::new(tmp.path());
+    let registry = PluginRegistry::new(tmp.path());
     let discovered = registry.discover_installed().unwrap();
     assert!(discovered.is_empty());
 }
@@ -129,7 +163,7 @@ fn discovery_rejects_removed_hooks_field() {
     std::fs::write(plugin_dir.join("plugin.json"), r#"{"name":"legacy","hooks":{"Stop":[]}}"#)
         .unwrap();
 
-    let mut registry = PluginRegistry::new(tmp.path());
+    let registry = PluginRegistry::new(tmp.path());
     assert!(registry.discover_installed().unwrap().is_empty());
     assert!(registry.is_empty());
 }
@@ -140,21 +174,23 @@ fn save_and_load_state() {
     make_plugin_dir(tmp.path(), "p1", "mkt");
     make_plugin_dir(tmp.path(), "p2", "mkt");
 
-    let mut registry = PluginRegistry::new(tmp.path());
+    let registry = PluginRegistry::new(tmp.path());
     registry.discover_installed().unwrap();
 
     // Enable p1, keep p2 disabled
     let id1 = PluginId::parse("p1@mkt").unwrap();
     let id2 = PluginId::parse("p2@mkt").unwrap();
     registry.enable(&id1).unwrap();
+    registry.mark_degraded(&id1, vec![PluginError::Other("component failed".into())]);
     registry.save_state().unwrap();
 
     // Create a fresh registry and load state
-    let mut registry2 = PluginRegistry::new(tmp.path());
+    let registry2 = PluginRegistry::new(tmp.path());
     registry2.discover_installed().unwrap();
     registry2.load_state().unwrap();
 
-    assert_eq!(registry2.get(&id1).unwrap().status, PluginStatus::Enabled);
+    assert_eq!(registry2.get(&id1).unwrap().status, PluginStatus::Degraded);
+    assert_eq!(registry2.get(&id1).unwrap().load_errors[0].to_string(), "component failed");
     assert_eq!(registry2.get(&id2).unwrap().status, PluginStatus::Disabled);
 }
 
@@ -164,7 +200,7 @@ fn list_enabled_and_disabled() {
     make_plugin_dir(tmp.path(), "a", "m");
     make_plugin_dir(tmp.path(), "b", "m");
 
-    let mut registry = PluginRegistry::new(tmp.path());
+    let registry = PluginRegistry::new(tmp.path());
     registry.discover_installed().unwrap();
     let id_a = PluginId::parse("a@m").unwrap();
     registry.enable(&id_a).unwrap();
@@ -179,7 +215,7 @@ fn mark_degraded_and_error() {
     let tmp = TempDir::new().unwrap();
     make_plugin_dir(tmp.path(), "d", "m");
 
-    let mut registry = PluginRegistry::new(tmp.path());
+    let registry = PluginRegistry::new(tmp.path());
     registry.discover_installed().unwrap();
     let id = PluginId::parse("d@m").unwrap();
 
@@ -222,7 +258,7 @@ fn apply_registers_plugin_tools_with_namespace() {
     )
     .unwrap();
 
-    let mut registry = PluginRegistry::new(tmp.path());
+    let registry = PluginRegistry::new(tmp.path());
     registry.discover_installed().unwrap();
     let id = PluginId::parse("test-plugin@mkt").unwrap();
     registry.enable(&id).unwrap();
@@ -245,7 +281,7 @@ fn apply_registers_plugin_tools_with_namespace() {
     assert!(result.is_ok());
 
     // Tool should be registered with namespace
-    let tool = tools.get("plugin__test-plugin__hello");
+    let tool = tools.get("plugin__test-plugin__mkt__hello");
     assert!(tool.is_ok(), "plugin tool should be registered with namespace prefix");
 }
 
@@ -281,7 +317,7 @@ async fn apply_registers_and_executes_command_policy() {
     )
     .unwrap();
 
-    let mut registry = PluginRegistry::new(tmp.path());
+    let registry = PluginRegistry::new(tmp.path());
     registry.discover_installed().unwrap();
     registry.enable(&PluginId::parse("policy-plugin@mkt").unwrap()).unwrap();
     let mut tools = crate::ToolRegistry::new();
@@ -302,7 +338,7 @@ async fn apply_registers_and_executes_command_policy() {
 
     let registered = policies.session_start(crate::SessionMode::Create);
     assert_eq!(registered.len(), 1);
-    assert_eq!(registered[0].name(), "plugin::policy-plugin::session-guard");
+    assert_eq!(registered[0].name(), "plugin::policy-plugin__mkt::session-guard");
     let outcome = registered[0]
         .evaluate(&crate::PolicyContext::SessionStart {
             session_id: "session-1".into(),
@@ -314,24 +350,34 @@ async fn apply_registers_and_executes_command_policy() {
     assert_eq!(outcome.feedback, vec!["from plugin"]);
 }
 
-#[test]
-fn apply_reports_declared_but_unsupported_components() {
+#[tokio::test]
+async fn apply_activates_output_styles_settings_and_lsp_servers() {
     let tmp = TempDir::new().unwrap();
     let plugin_dir = tmp.path().join("installed").join("future-plugin@mkt");
     std::fs::create_dir_all(&plugin_dir).unwrap();
-    std::fs::write(plugin_dir.join("style.json"), "{}").unwrap();
+    std::fs::write(
+        plugin_dir.join("style.json"),
+        r#"{"name":"concise","instructions":"Use ${CONFIG:theme} output."}"#,
+    )
+    .unwrap();
     std::fs::write(
         plugin_dir.join("plugin.json"),
         serde_json::to_string_pretty(&serde_json::json!({
             "name": "future-plugin",
             "outputStyles": ["style.json"],
-            "settings": {"theme": "dark"}
+            "settings": {"theme": "dark"},
+            "lspServers": {
+                "rust": {
+                    "command": "rust-analyzer",
+                    "extensionToLanguage": {".rs": "rust"}
+                }
+            }
         }))
         .unwrap(),
     )
     .unwrap();
 
-    let mut registry = PluginRegistry::new(tmp.path());
+    let registry = PluginRegistry::new(tmp.path());
     registry.discover_installed().unwrap();
     registry.enable(&PluginId::parse("future-plugin@mkt").unwrap()).unwrap();
     let mut tools = crate::ToolRegistry::new();
@@ -340,7 +386,7 @@ fn apply_reports_declared_but_unsupported_components() {
     let mut mcp = crate::McpManager::new(std::collections::HashMap::new());
     let mut prompt = crate::PromptAssembly::new();
 
-    let errors = registry
+    registry
         .apply(
             &mut tools,
             &mut policies,
@@ -349,16 +395,10 @@ fn apply_reports_declared_but_unsupported_components() {
             &mut mcp,
             &mut prompt,
         )
-        .unwrap_err();
+        .unwrap();
 
-    assert!(errors.iter().any(|error| matches!(
-        error,
-        PluginError::ComponentLoadFailed(_, detail) if detail.contains("output style")
-    )));
-    assert!(errors.iter().any(|error| matches!(
-        error,
-        PluginError::ComponentLoadFailed(_, detail) if detail.contains("settings")
-    )));
+    assert!(tools.get("plugin__future-plugin__mkt__lsp__rust").is_ok());
+    assert!(prompt.build().await.contains("Use dark output."));
 }
 
 #[test]
@@ -389,7 +429,7 @@ You audit plugin behavior.
     )
     .unwrap();
 
-    let mut plugins = PluginRegistry::new(tmp.path());
+    let plugins = PluginRegistry::new(tmp.path());
     plugins.discover_installed().unwrap();
     let id = PluginId::parse("agent-plugin@mkt").unwrap();
     plugins.enable(&id).unwrap();
@@ -397,7 +437,223 @@ You audit plugin behavior.
     let mut subagents = crate::orchestration::subagent::SubagentRegistry::new();
     plugins.apply_subagents(&mut subagents).unwrap();
 
-    let agent = subagents.get("agent-plugin:auditor").unwrap();
+    let agent = subagents.get("agent-plugin@mkt:auditor").unwrap();
     assert_eq!(agent.description, "Audit plugin-provided behavior.");
     assert_eq!(agent.system_prompt, "You audit plugin behavior.");
+}
+
+#[test]
+fn apply_keeps_same_named_plugins_from_different_marketplaces_distinct() {
+    let tmp = TempDir::new().unwrap();
+    for marketplace in ["official", "community"] {
+        let plugin_dir = tmp.path().join("installed").join(format!("formatter@{marketplace}"));
+        std::fs::create_dir_all(plugin_dir.join("tools")).unwrap();
+        std::fs::write(
+            plugin_dir.join("plugin.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "name": "formatter",
+                "tools": ["./tools/format.json"]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            plugin_dir.join("tools/format.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "name": "format",
+                "description": "Format a file",
+                "inputSchema": {"type": "object"},
+                "command": "echo",
+                "permission": "allow"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
+    let plugins = PluginRegistry::new(tmp.path());
+    plugins.discover_installed().unwrap();
+    plugins.enable(&PluginId::parse("formatter@official").unwrap()).unwrap();
+    plugins.enable(&PluginId::parse("formatter@community").unwrap()).unwrap();
+    let mut tools = crate::ToolRegistry::new();
+    let mut policies = crate::PolicyRegistry::new();
+    let mut skills = crate::SkillRegistry::new();
+    let mut mcp = crate::McpManager::new(std::collections::HashMap::new());
+    let mut prompt = crate::PromptAssembly::new();
+
+    plugins
+        .apply(
+            &mut tools,
+            &mut policies,
+            &std::collections::HashMap::new(),
+            &mut skills,
+            &mut mcp,
+            &mut prompt,
+        )
+        .unwrap();
+
+    assert!(tools.get("plugin__formatter__official__format").is_ok());
+    assert!(tools.get("plugin__formatter__community__format").is_ok());
+}
+
+#[test]
+fn component_namespace_encoding_does_not_collapse_dots_and_underscores() {
+    assert_ne!(
+        super::apply::normalize_component_name("formatter.one"),
+        super::apply::normalize_component_name("formatter_one")
+    );
+}
+
+#[test]
+fn transactional_local_install_resolves_dependencies_upgrades_and_uninstalls() {
+    let tmp = TempDir::new().unwrap();
+    let sources = tmp.path().join("sources");
+    for (name, dependencies) in
+        [("base", serde_json::json!([])), ("app", serde_json::json!(["base"]))]
+    {
+        let root = sources.join(name);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("plugin.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "name": name,
+                "version": "1.0.0",
+                "dependencies": dependencies
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    let entries = ["base", "app"]
+        .into_iter()
+        .map(|name| crate::MarketplaceEntry {
+            name: name.into(),
+            description: None,
+            version: Some("1.0.0".into()),
+            source: PluginSource::Local { path: sources.join(name) },
+            category: None,
+            tags: Vec::new(),
+            strict: true,
+            manifest_override: None,
+        })
+        .collect();
+    let mut marketplaces = crate::MarketplaceRegistry::new(tmp.path().join("cache"));
+    marketplaces
+        .add(crate::MarketplaceSource::Inline { name: "test".into(), plugins: entries })
+        .unwrap();
+    let registry = PluginRegistry::new(tmp.path().join("plugins"));
+    let app = PluginId::parse("app@test").unwrap();
+    let base = PluginId::parse("base@test").unwrap();
+
+    registry.install(&marketplaces, &app).unwrap();
+    assert!(registry.is_installed(&app));
+    assert!(registry.is_installed(&base));
+    assert!(matches!(registry.uninstall(&base), Err(PluginError::DependencyRequiredBy { .. })));
+
+    registry.enable(&base).unwrap();
+    registry.enable(&app).unwrap();
+
+    let app_source = sources.join("app").join("plugin.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&app_source).unwrap()).unwrap();
+    manifest["version"] = serde_json::json!("2.0.0");
+    std::fs::write(&app_source, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+    registry.upgrade(&marketplaces, &app).unwrap();
+    assert_eq!(registry.get(&app).unwrap().plugin.manifest.version.as_deref(), Some("2.0.0"));
+    assert_eq!(registry.get(&app).unwrap().status, PluginStatus::Enabled);
+
+    manifest["version"] = serde_json::json!("3.0.0");
+    manifest["dependencies"] = serde_json::json!(["missing"]);
+    std::fs::write(&app_source, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+    assert!(registry.upgrade(&marketplaces, &app).is_err());
+    assert_eq!(registry.get(&app).unwrap().plugin.manifest.version.as_deref(), Some("2.0.0"));
+    assert_eq!(registry.get(&app).unwrap().status, PluginStatus::Enabled);
+
+    registry.disable(&app).unwrap();
+    registry.uninstall(&app).unwrap();
+    registry.disable(&base).unwrap();
+    registry.uninstall(&base).unwrap();
+    assert!(registry.is_empty());
+}
+
+#[test]
+fn install_rejects_dependency_cycles_without_committing_plugins() {
+    let tmp = TempDir::new().unwrap();
+    let sources = tmp.path().join("cycle-sources");
+    for (name, dependency) in [("a", "b"), ("b", "a")] {
+        let root = sources.join(name);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("plugin.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "name": name,
+                "version": "1.0.0",
+                "dependencies": [dependency]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    let entries = ["a", "b"]
+        .into_iter()
+        .map(|name| crate::MarketplaceEntry {
+            name: name.into(),
+            description: None,
+            version: Some("1.0.0".into()),
+            source: PluginSource::Local { path: sources.join(name) },
+            category: None,
+            tags: Vec::new(),
+            strict: true,
+            manifest_override: None,
+        })
+        .collect();
+    let mut marketplaces = crate::MarketplaceRegistry::new(tmp.path().join("cache"));
+    marketplaces
+        .add(crate::MarketplaceSource::Inline { name: "cycles".into(), plugins: entries })
+        .unwrap();
+    let registry = PluginRegistry::new(tmp.path().join("plugins"));
+
+    let error = registry.install(&marketplaces, &PluginId::parse("a@cycles").unwrap()).unwrap_err();
+
+    assert!(matches!(error, PluginError::CircularDependency { .. }));
+    assert!(registry.is_empty());
+    assert!(
+        registry
+            .installed_dir()
+            .read_dir()
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(true)
+    );
+}
+
+#[test]
+fn non_strict_marketplace_entry_can_synthesize_manifest() {
+    let tmp = TempDir::new().unwrap();
+    let source = tmp.path().join("manifestless");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(source.join("instructions.md"), "Plugin instructions").unwrap();
+    let entry = crate::MarketplaceEntry {
+        name: "synthesized".into(),
+        description: Some("Entry-owned manifest".into()),
+        version: Some("1.0.0".into()),
+        source: PluginSource::Local { path: source },
+        category: None,
+        tags: Vec::new(),
+        strict: false,
+        manifest_override: Some(serde_json::json!({
+            "promptSections": ["./instructions.md"]
+        })),
+    };
+    let mut marketplaces = crate::MarketplaceRegistry::new(tmp.path().join("cache"));
+    marketplaces
+        .add(crate::MarketplaceSource::Inline { name: "entry-only".into(), plugins: vec![entry] })
+        .unwrap();
+    let registry = PluginRegistry::new(tmp.path().join("plugins"));
+    let id = PluginId::parse("synthesized@entry-only").unwrap();
+
+    registry.install(&marketplaces, &id).unwrap();
+
+    let installed = registry.get(&id).unwrap();
+    assert_eq!(installed.plugin.manifest.version.as_deref(), Some("1.0.0"));
+    assert_eq!(installed.plugin.resolved_prompt_sections.len(), 1);
 }

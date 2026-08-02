@@ -11,7 +11,7 @@ impl PluginRegistry {
     ///
     /// Each subdirectory that contains a `plugin.json` is loaded.
     /// Plugins are NOT auto-enabled — state is restored from `plugin_state.json`.
-    pub fn discover_installed(&mut self) -> Result<Vec<PluginId>, PluginError> {
+    pub fn discover_installed(&self) -> Result<Vec<PluginId>, PluginError> {
         let installed_dir = self.installed_dir();
         if !installed_dir.exists() {
             return Ok(Vec::new());
@@ -51,7 +51,7 @@ impl PluginRegistry {
         Ok(discovered)
     }
     /// Load a single plugin from a directory containing plugin.json.
-    fn load_plugin_from_dir(&self, dir: &Path) -> Result<LoadedPlugin, PluginError> {
+    pub(crate) fn load_plugin_from_dir(&self, dir: &Path) -> Result<LoadedPlugin, PluginError> {
         let manifest_path = dir.join("plugin.json");
         let content =
             std::fs::read_to_string(&manifest_path).map_err(|e| PluginError::ManifestParse {
@@ -81,10 +81,28 @@ impl PluginRegistry {
         let mut validation_errors = Vec::new();
         if manifest.name.trim().is_empty() {
             validation_errors.push("name must not be empty".into());
+        } else if !crate::integrations::plugin::is_valid_id_part(&manifest.name) {
+            validation_errors.push(
+                "name may contain only ASCII letters, digits, dots, hyphens, and underscores"
+                    .into(),
+            );
+        }
+        if manifest.manifest_version != 1 {
+            validation_errors.push(format!(
+                "unsupported manifestVersion {}; expected 1",
+                manifest.manifest_version
+            ));
+        }
+        if let Some(version) = &manifest.version
+            && let Err(error) = semver::Version::parse(version)
+        {
+            validation_errors.push(format!("version must be valid semver: {error}"));
         }
         if let Some(policies) = &manifest.policies {
             validation_errors.extend(policies.validate());
         }
+        validation_errors
+            .extend(crate::integrations::plugin::config::validate_manifest_config(&manifest));
         if !validation_errors.is_empty() {
             return Err(PluginError::ManifestValidation { errors: validation_errors });
         }
@@ -96,14 +114,25 @@ impl PluginRegistry {
             name: manifest.name.clone(),
             marketplace: "unknown".into(),
         });
+        if id.name != manifest.name {
+            return Err(PluginError::ManifestValidation {
+                errors: vec![format!(
+                    "manifest name `{}` does not match installed directory plugin id `{}`",
+                    manifest.name, id.name
+                )],
+            });
+        }
 
         // Resolve component paths
-        let resolve = |paths: &Option<Vec<String>>| -> Vec<PathBuf> {
-            paths.as_ref().map(|p| p.iter().map(|s| dir.join(s)).collect()).unwrap_or_default()
+        let resolve = |paths: &Option<Vec<String>>| -> Result<Vec<PathBuf>, PluginError> {
+            paths
+                .as_ref()
+                .map(|paths| paths.iter().map(|path| resolve_component_path(dir, path)).collect())
+                .unwrap_or_else(|| Ok(Vec::new()))
         };
 
         // Find .json tool files in the tools/ directory
-        let mut resolved_tools = resolve(&manifest.tools);
+        let mut resolved_tools = resolve(&manifest.tools)?;
         let tools_dir = dir.join("tools");
         if tools_dir.exists()
             && tools_dir.is_dir()
@@ -119,10 +148,10 @@ impl PluginRegistry {
         resolved_tools.sort();
         resolved_tools.dedup();
 
-        let resolved_skills = resolve(&manifest.skills);
-        let resolved_agents = resolve(&manifest.agents);
-        let resolved_prompt_sections = resolve(&manifest.prompt_sections);
-        let resolved_output_styles = resolve(&manifest.output_styles);
+        let resolved_skills = resolve(&manifest.skills)?;
+        let resolved_agents = resolve(&manifest.agents)?;
+        let resolved_prompt_sections = resolve(&manifest.prompt_sections)?;
+        let resolved_output_styles = resolve(&manifest.output_styles)?;
 
         Ok(LoadedPlugin {
             id,
@@ -137,5 +166,36 @@ impl PluginRegistry {
             resolved_prompt_sections,
             resolved_output_styles,
         })
+    }
+}
+
+fn resolve_component_path(root: &Path, declared: &str) -> Result<PathBuf, PluginError> {
+    let path = Path::new(declared);
+    if path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(PluginError::ManifestValidation {
+            errors: vec![format!("component path `{declared}` escapes the plugin root")],
+        });
+    }
+    let joined = root.join(path);
+    if joined.exists() {
+        let canonical_root = std::fs::canonicalize(root)?;
+        let canonical = std::fs::canonicalize(&joined)?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err(PluginError::ManifestValidation {
+                errors: vec![format!("component path `{declared}` resolves outside plugin root")],
+            });
+        }
+        Ok(canonical)
+    } else {
+        Ok(joined)
     }
 }

@@ -7,7 +7,7 @@ use crate::integrations::plugin::manifest::MarketplaceEntry;
 
 /// Where a marketplace manifest is fetched from.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum MarketplaceSource {
     /// GitHub repository containing marketplace.json.
     #[serde(rename_all = "camelCase")]

@@ -1,6 +1,7 @@
 //! Marketplace registry — manages marketplace sources and their plugin catalogs.
 
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::integrations::plugin::PluginError;
@@ -9,7 +10,7 @@ use crate::integrations::plugin::sources::MarketplaceSource;
 
 /// A curated collection of plugins fetched from a marketplace source.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Marketplace {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -50,7 +51,16 @@ impl MarketplaceRegistry {
     ///
     /// Returns the marketplace name.
     pub fn add(&mut self, source: MarketplaceSource) -> Result<String, PluginError> {
-        let name = match &source {
+        self.add_named(source, None)
+    }
+
+    /// Add a marketplace with an optional stable local alias.
+    pub fn add_named(
+        &mut self,
+        source: MarketplaceSource,
+        requested_name: Option<String>,
+    ) -> Result<String, PluginError> {
+        let derived_name = match &source {
             MarketplaceSource::GitHub { repo, .. } => {
                 // Derive name from repo: strip org, keep repo name
                 repo.split('/').next_back().unwrap_or(repo).to_string()
@@ -64,15 +74,30 @@ impl MarketplaceRegistry {
                     .unwrap_or("unknown")
                     .to_string()
             }
-            MarketplaceSource::Url { url } => {
-                url.trim_end_matches('/').split('/').next_back().unwrap_or("unknown").to_string()
+            MarketplaceSource::Url { url } => url
+                .trim_end_matches('/')
+                .split('/')
+                .next_back()
+                .unwrap_or("unknown")
+                .split(['?', '#'])
+                .next()
+                .unwrap_or("unknown")
+                .to_string(),
+            MarketplaceSource::Npm { package } => {
+                package.trim_start_matches('@').replace(['/', '@'], "-")
             }
-            MarketplaceSource::Npm { package } => package.replace('/', "-"),
             MarketplaceSource::Local { path } => {
                 path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown").to_string()
             }
             MarketplaceSource::Inline { name, .. } => name.clone(),
         };
+        let name = requested_name.unwrap_or(derived_name);
+
+        if !crate::integrations::plugin::is_valid_id_part(&name) {
+            return Err(PluginError::Other(format!(
+                "invalid marketplace name `{name}`; use ASCII letters, digits, dots, hyphens, or underscores"
+            )));
+        }
 
         let install_location = self.cache_root.join("marketplaces").join(&name);
 
@@ -108,6 +133,7 @@ impl MarketplaceRegistry {
                 (manifest, 0)
             }
         };
+        validate_marketplace(&manifest)?;
 
         self.marketplaces.insert(
             name.clone(),
@@ -117,12 +143,22 @@ impl MarketplaceRegistry {
         Ok(name)
     }
 
-    /// Remove a marketplace and its cached data.
+    /// Remove a marketplace and any Telos-owned cached data.
     pub fn remove(&mut self, name: &str) -> Result<(), PluginError> {
-        self.marketplaces.remove(name).ok_or_else(|| PluginError::MarketplaceNotFound {
-            marketplace: name.to_string(),
-            available: self.marketplaces.keys().cloned().collect(),
-        })?;
+        if !crate::integrations::plugin::is_valid_id_part(name) {
+            return Err(PluginError::Other(format!("invalid marketplace name `{name}`")));
+        }
+        if !self.marketplaces.contains_key(name) {
+            return Err(PluginError::MarketplaceNotFound {
+                marketplace: name.to_string(),
+                available: self.marketplaces.keys().cloned().collect(),
+            });
+        }
+        let owned_cache = self.cache_root.join("marketplaces").join(name);
+        if owned_cache.exists() {
+            std::fs::remove_dir_all(&owned_cache)?;
+        }
+        self.marketplaces.remove(name);
         Ok(())
     }
 
@@ -164,6 +200,33 @@ impl MarketplaceRegistry {
         results
     }
 
+    pub fn plugin_entry(
+        &self,
+        id: &crate::integrations::plugin::PluginId,
+    ) -> Option<MarketplaceEntry> {
+        self.marketplaces
+            .get(&id.marketplace)
+            .and_then(|cached| cached.manifest.plugins.iter().find(|entry| entry.name == id.name))
+            .cloned()
+    }
+
+    pub(crate) fn source_base(&self, marketplace: &str) -> Option<PathBuf> {
+        let cached = self.marketplaces.get(marketplace)?;
+        match &cached.source {
+            MarketplaceSource::Local { path } => Some(path.clone()),
+            _ => Some(cached.install_location.clone()),
+        }
+    }
+
+    pub(crate) fn allows_dependency(&self, from: &str, dependency: &str) -> bool {
+        from == dependency
+            || self
+                .marketplaces
+                .get(from)
+                .and_then(|cached| cached.manifest.allow_cross_marketplace_deps_on.as_ref())
+                .is_some_and(|allowed| allowed.iter().any(|name| name == dependency))
+    }
+
     /// Save known marketplaces metadata to `known_marketplaces.json`.
     pub fn save(&self) -> Result<(), PluginError> {
         let path = self.cache_root.join("known_marketplaces.json");
@@ -186,7 +249,7 @@ impl MarketplaceRegistry {
             "version": 1,
             "marketplaces": data,
         }))?;
-        std::fs::write(&path, json)?;
+        atomic_write_file(&path, json.as_bytes())?;
         Ok(())
     }
 
@@ -233,13 +296,15 @@ impl MarketplaceRegistry {
                         force_remove_deleted_plugins: None,
                         allow_cross_marketplace_deps_on: None,
                     },
-                    _ => Marketplace {
-                        name: name.clone(),
-                        owner: None,
-                        plugins: Vec::new(),
-                        force_remove_deleted_plugins: None,
-                        allow_cross_marketplace_deps_on: None,
-                    },
+                    _ => Self::load_manifest_from_dir(&install_location).unwrap_or_else(|_| {
+                        Marketplace {
+                            name: name.clone(),
+                            owner: None,
+                            plugins: Vec::new(),
+                            force_remove_deleted_plugins: None,
+                            allow_cross_marketplace_deps_on: None,
+                        }
+                    }),
                 };
 
                 self.marketplaces.insert(
@@ -262,14 +327,11 @@ impl MarketplaceRegistry {
         let manifest: Marketplace = serde_json::from_str(&content).map_err(|e| {
             PluginError::ManifestParse { path: manifest_path, reason: format!("invalid JSON: {e}") }
         })?;
+        validate_marketplace(&manifest)?;
         Ok(manifest)
     }
 
-    /// Refresh a marketplace by re-reading its source.
-    ///
-    /// For `Local` sources, this re-reads marketplace.json from disk.
-    /// For remote sources (GitHub, Git, Url, Npm), this is not yet implemented.
-    /// For `Inline` sources, this is a no-op.
+    /// Refresh a marketplace from its declared source and atomically replace its cache.
     pub fn refresh(&mut self, name: &str) -> Result<(), PluginError> {
         let cached =
             self.marketplaces.get(name).ok_or_else(|| PluginError::MarketplaceNotFound {
@@ -295,9 +357,345 @@ impl MarketplaceRegistry {
                 // Inline marketplaces are immutable; nothing to refresh.
                 Ok(())
             }
-            _ => Err(PluginError::Other("remote marketplace refresh not yet implemented".into())),
+            MarketplaceSource::GitHub { repo, ref_, path } => {
+                let url = format!("https://github.com/{repo}.git");
+                self.refresh_git(name, &url, ref_.as_deref(), path.as_deref())
+            }
+            MarketplaceSource::Git { url, ref_, path } => {
+                self.refresh_git(name, url, ref_.as_deref(), path.as_deref())
+            }
+            MarketplaceSource::Url { url } => self.refresh_url(name, url),
+            MarketplaceSource::Npm { package } => self.refresh_npm(name, package),
         }
     }
+
+    fn refresh_git(
+        &mut self,
+        name: &str,
+        url: &str,
+        reference: Option<&str>,
+        subpath: Option<&str>,
+    ) -> Result<(), PluginError> {
+        let staging = self.staging_dir(name);
+        reset_directory(&staging)?;
+        let _cleanup = CleanupDirectory(staging.clone());
+        let mut command = std::process::Command::new("git");
+        command.args(["clone", "--depth", "1"]);
+        if let Some(reference) = reference {
+            command.args(["--branch", reference]);
+        }
+        command.arg(url).arg(&staging);
+        isolate_marketplace_environment(&mut command);
+        let (status, stderr) = run_command_bounded(&mut command).map_err(|error| {
+            PluginError::GitCloneFailed { url: url.into(), reason: error.to_string() }
+        })?;
+        if !status.success() {
+            return Err(PluginError::GitCloneFailed { url: url.into(), reason: stderr });
+        }
+        let root = if let Some(path) = subpath {
+            let path = safe_relative_path(path)?;
+            let root = std::fs::canonicalize(staging.join(path))?;
+            let canonical_staging = std::fs::canonicalize(&staging)?;
+            if !root.starts_with(&canonical_staging) {
+                return Err(PluginError::Other("marketplace git subpath escapes checkout".into()));
+            }
+            root
+        } else {
+            staging.clone()
+        };
+        let manifest = Self::load_manifest_from_dir(&root)?;
+        let result = self.commit_cache(name, &root, manifest);
+        let _ = std::fs::remove_dir_all(staging);
+        result
+    }
+
+    fn refresh_url(&mut self, name: &str, url: &str) -> Result<(), PluginError> {
+        const MAX_MARKETPLACE_BYTES: u64 = 10 * 1024 * 1024;
+        let response = reqwest::blocking::Client::new()
+            .get(url)
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+            .map_err(|error| PluginError::NetworkError {
+                url: url.into(),
+                detail: error.to_string(),
+            })?;
+        if response.content_length().is_some_and(|length| length > MAX_MARKETPLACE_BYTES) {
+            return Err(PluginError::NetworkError {
+                url: url.into(),
+                detail: "marketplace manifest exceeds 10 MiB".into(),
+            });
+        }
+        let mut bytes = Vec::new();
+        response.take(MAX_MARKETPLACE_BYTES + 1).read_to_end(&mut bytes).map_err(|error| {
+            PluginError::NetworkError { url: url.into(), detail: error.to_string() }
+        })?;
+        if bytes.len() as u64 > MAX_MARKETPLACE_BYTES {
+            return Err(PluginError::NetworkError {
+                url: url.into(),
+                detail: "marketplace manifest exceeds 10 MiB".into(),
+            });
+        }
+        let manifest: Marketplace =
+            serde_json::from_slice(&bytes).map_err(|error| PluginError::ManifestParse {
+                path: PathBuf::from(url),
+                reason: format!("invalid JSON: {error}"),
+            })?;
+        validate_marketplace(&manifest)?;
+        let staging = self.staging_dir(name);
+        reset_directory(&staging)?;
+        let _cleanup = CleanupDirectory(staging.clone());
+        std::fs::write(staging.join("marketplace.json"), bytes)?;
+        let result = self.commit_cache(name, &staging, manifest);
+        let _ = std::fs::remove_dir_all(staging);
+        result
+    }
+
+    fn refresh_npm(&mut self, name: &str, package: &str) -> Result<(), PluginError> {
+        let staging = self.staging_dir(name);
+        reset_directory(&staging)?;
+        let _cleanup = CleanupDirectory(staging.clone());
+        let mut command = std::process::Command::new("npm");
+        command
+            .args(["install", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix"])
+            .arg(&staging)
+            .arg(package);
+        isolate_marketplace_environment(&mut command);
+        let (status, stderr) = run_command_bounded(&mut command).map_err(|error| {
+            PluginError::NpmInstallFailed { package: package.into(), reason: error.to_string() }
+        })?;
+        if !status.success() {
+            return Err(PluginError::NpmInstallFailed { package: package.into(), reason: stderr });
+        }
+        let root = staging.join("node_modules").join(package);
+        let manifest = Self::load_manifest_from_dir(&root)?;
+        let result = self.commit_cache(name, &root, manifest);
+        let _ = std::fs::remove_dir_all(staging);
+        result
+    }
+
+    fn staging_dir(&self, name: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        self.cache_root.join(".staging").join(format!("{name}-{nonce}"))
+    }
+
+    fn commit_cache(
+        &mut self,
+        name: &str,
+        source_root: &Path,
+        manifest: Marketplace,
+    ) -> Result<(), PluginError> {
+        let target = self.cache_root.join("marketplaces").join(name);
+        let prepared = self.staging_dir(&format!("{name}-prepared"));
+        copy_directory(source_root, &prepared)?;
+        replace_directory(&prepared, &target)?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let available = self.marketplaces.keys().cloned().collect();
+        let cached = self.marketplaces.get_mut(name).ok_or_else(|| {
+            PluginError::MarketplaceNotFound { marketplace: name.into(), available }
+        })?;
+        cached.manifest = manifest;
+        cached.install_location = target;
+        cached.last_updated = now;
+        Ok(())
+    }
+}
+
+fn safe_relative_path(path: &str) -> Result<&Path, PluginError> {
+    let path = Path::new(path);
+    if path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(PluginError::Other(format!("unsafe marketplace subpath `{}`", path.display())));
+    }
+    Ok(path)
+}
+
+fn validate_marketplace(manifest: &Marketplace) -> Result<(), PluginError> {
+    let mut errors = Vec::new();
+    if !crate::integrations::plugin::is_valid_id_part(&manifest.name) {
+        errors.push(format!("invalid marketplace name `{}`", manifest.name));
+    }
+    let mut names = std::collections::HashSet::new();
+    for entry in &manifest.plugins {
+        if !crate::integrations::plugin::is_valid_id_part(&entry.name) {
+            errors.push(format!("invalid plugin entry name `{}`", entry.name));
+        }
+        if !names.insert(&entry.name) {
+            errors.push(format!("duplicate plugin entry `{}`", entry.name));
+        }
+        if let Some(version) = &entry.version
+            && let Err(error) = semver::Version::parse(version)
+        {
+            errors.push(format!("plugin entry `{}` has invalid version: {error}", entry.name));
+        }
+    }
+    if let Some(allowed) = &manifest.allow_cross_marketplace_deps_on {
+        for marketplace in allowed {
+            if !crate::integrations::plugin::is_valid_id_part(marketplace) {
+                errors.push(format!("invalid allowed dependency marketplace `{marketplace}`"));
+            }
+        }
+    }
+    if errors.is_empty() { Ok(()) } else { Err(PluginError::ManifestValidation { errors }) }
+}
+
+fn isolate_marketplace_environment(command: &mut std::process::Command) {
+    command.env_clear().envs(crate::config::platform_base_env());
+}
+
+fn atomic_write_file(path: &Path, contents: &[u8]) -> Result<(), PluginError> {
+    let temporary = path.with_extension("json.tmp");
+    std::fs::write(&temporary, contents)?;
+    #[cfg(windows)]
+    {
+        let backup = path.with_extension("json.backup");
+        if backup.exists() {
+            std::fs::remove_file(&backup)?;
+        }
+        if path.exists() {
+            std::fs::rename(path, &backup)?;
+        }
+        if let Err(error) = std::fs::rename(&temporary, path) {
+            if backup.exists() {
+                let _ = std::fs::rename(&backup, path);
+            }
+            return Err(error.into());
+        }
+        if backup.exists() {
+            let _ = std::fs::remove_file(backup);
+        }
+    }
+    #[cfg(not(windows))]
+    std::fs::rename(temporary, path)?;
+    Ok(())
+}
+
+struct CleanupDirectory(PathBuf);
+
+impl Drop for CleanupDirectory {
+    fn drop(&mut self) {
+        if self.0.exists() {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+}
+
+pub(crate) fn reset_directory(path: &Path) -> Result<(), PluginError> {
+    if path.exists() {
+        std::fs::remove_dir_all(path)?;
+    }
+    std::fs::create_dir_all(path)?;
+    Ok(())
+}
+
+pub(crate) fn run_command_bounded(
+    command: &mut std::process::Command,
+) -> std::io::Result<(std::process::ExitStatus, String)> {
+    const MAX_STDERR_BYTES: usize = 1024 * 1024;
+    const COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+    command.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::piped());
+    let mut child = command.spawn()?;
+    let stderr_pipe = child.stderr.take();
+    let stderr_reader = std::thread::spawn(move || -> std::io::Result<(Vec<u8>, bool)> {
+        let mut stderr = Vec::new();
+        let mut truncated = false;
+        let Some(mut pipe) = stderr_pipe else {
+            return Ok((stderr, truncated));
+        };
+        let mut chunk = [0_u8; 8192];
+        loop {
+            let read = pipe.read(&mut chunk)?;
+            if read == 0 {
+                break;
+            }
+            let remaining = MAX_STDERR_BYTES.saturating_sub(stderr.len());
+            let retained = remaining.min(read);
+            stderr.extend_from_slice(&chunk[..retained]);
+            truncated |= retained < read;
+        }
+        Ok((stderr, truncated))
+    });
+    let started = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if started.elapsed() >= COMMAND_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stderr_reader.join();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "plugin source command timed out after 300 seconds",
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    let (stderr, truncated) = stderr_reader
+        .join()
+        .map_err(|_| std::io::Error::other("plugin source stderr reader panicked"))??;
+    let mut stderr = String::from_utf8_lossy(&stderr).trim().to_string();
+    if truncated {
+        stderr.push_str("… [truncated]");
+    }
+    Ok((status, stderr))
+}
+
+pub(crate) fn copy_directory(source: &Path, target: &Path) -> Result<(), PluginError> {
+    std::fs::create_dir_all(target)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let destination = target.join(entry.file_name());
+        if file_type.is_symlink() {
+            return Err(PluginError::Other(format!(
+                "marketplace cache refuses symlink {}",
+                entry.path().display()
+            )));
+        }
+        if file_type.is_dir() {
+            copy_directory(&entry.path(), &destination)?;
+        } else if file_type.is_file() {
+            std::fs::copy(entry.path(), destination)?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn replace_directory(source: &Path, target: &Path) -> Result<(), PluginError> {
+    let backup = target.with_extension("backup");
+    if backup.exists() {
+        std::fs::remove_dir_all(&backup)?;
+    }
+    if target.exists() {
+        std::fs::rename(target, &backup)?;
+    }
+    if let Err(error) = std::fs::rename(source, target) {
+        if backup.exists() {
+            let _ = std::fs::rename(&backup, target);
+        }
+        return Err(error.into());
+    }
+    if backup.exists()
+        && let Err(error) = std::fs::remove_dir_all(&backup)
+    {
+        tracing::warn!(path = %backup.display(), %error, "failed to clean marketplace backup");
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -398,9 +796,13 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let mut registry = MarketplaceRegistry::new(tmp.path());
         registry.add(MarketplaceSource::Inline { name: "test".into(), plugins: vec![] }).unwrap();
+        let cached = tmp.path().join("marketplaces/test");
+        std::fs::create_dir_all(&cached).unwrap();
+        std::fs::write(cached.join("marketplace.json"), "{}").unwrap();
         assert!(registry.names().contains(&&"test".to_string()));
         registry.remove("test").unwrap();
         assert!(!registry.names().contains(&&"test".to_string()));
+        assert!(!cached.exists());
     }
 
     #[test]
@@ -417,5 +819,35 @@ mod tests {
         registry2.load().unwrap();
         assert!(registry2.get("my-mkt").is_some());
         assert_eq!(registry2.list_all().len(), 2);
+    }
+
+    #[test]
+    fn load_reuses_cached_remote_marketplace_without_refresh() {
+        let tmp = TempDir::new().unwrap();
+        let cache = tmp.path().join("cache");
+        let mut registry = MarketplaceRegistry::new(&cache);
+        let name = registry
+            .add(MarketplaceSource::Url { url: "https://example.invalid/community.json".into() })
+            .unwrap();
+        let cached = cache.join("marketplaces").join(&name);
+        std::fs::create_dir_all(&cached).unwrap();
+        std::fs::write(
+            cached.join("marketplace.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "name": name,
+                "plugins": [{
+                    "name": "cached-plugin",
+                    "source": {"type": "local", "path": "./cached-plugin"}
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        registry.save().unwrap();
+
+        let mut loaded = MarketplaceRegistry::new(cache);
+        loaded.load().unwrap();
+
+        assert_eq!(loaded.get(&name).unwrap().plugins[0].name, "cached-plugin");
     }
 }

@@ -7,7 +7,9 @@
 //! Plugins are installed from marketplaces — curated collections fetched from
 //! GitHub, git URLs, npm, pip, or local directories.
 
+pub mod config;
 pub mod errors;
+pub mod lsp_tool;
 pub mod manifest;
 pub mod marketplace;
 pub mod policy_loader;
@@ -18,7 +20,9 @@ pub mod tool_loader;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub use config::{PluginConfigStore, ResolvedPluginConfig};
 pub use errors::{DependencyReason, PluginError};
+pub use lsp_tool::LspTool;
 pub use manifest::{
     CommandPolicyDef, ConfigOptionType, DependencyRef, LspServerEntry, LspServersConfig,
     MarketplaceEntry, McpServerEntry, McpServersConfig, PartialPluginManifest, PluginAuthor,
@@ -71,7 +75,7 @@ impl PluginId {
     /// Returns `None` if the string doesn't contain exactly one `@`.
     pub fn parse(raw: &str) -> Option<Self> {
         let (name, marketplace) = raw.split_once('@')?;
-        if name.is_empty() || marketplace.is_empty() {
+        if !is_valid_id_part(name) || !is_valid_id_part(marketplace) {
             return None;
         }
         // Reject multiple @ signs
@@ -80,6 +84,15 @@ impl PluginId {
         }
         Some(Self { name: name.to_string(), marketplace: marketplace.to_string() })
     }
+}
+
+pub(crate) fn is_valid_id_part(value: &str) -> bool {
+    !value.is_empty()
+        && value != "."
+        && value != ".."
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
 impl fmt::Display for PluginId {
@@ -141,6 +154,13 @@ mod tests {
     #[test]
     fn parse_multiple_at_returns_none() {
         assert!(PluginId::parse("foo@bar@baz").is_none());
+    }
+
+    #[test]
+    fn parse_rejects_path_and_shell_metacharacters() {
+        assert!(PluginId::parse("../escape@market").is_none());
+        assert!(PluginId::parse("plugin@../../escape").is_none());
+        assert!(PluginId::parse("plugin;run@market").is_none());
     }
 
     #[test]

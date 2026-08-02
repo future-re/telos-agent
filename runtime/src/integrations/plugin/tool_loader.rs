@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command as TokioCommand;
 
 use crate::error::AgentError;
@@ -18,9 +18,33 @@ use crate::tools::api::{
     InterruptBehavior, PermissionDecision, Tool, ToolContext, ToolDefinition, ToolOutput,
 };
 
+const MAX_TOOL_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+
+struct LimitedOutput {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+async fn read_limited(mut reader: impl AsyncRead + Unpin) -> std::io::Result<LimitedOutput> {
+    let mut bytes = Vec::new();
+    let mut truncated = false;
+    let mut chunk = [0_u8; 8192];
+    loop {
+        let read = reader.read(&mut chunk).await?;
+        if read == 0 {
+            break;
+        }
+        let remaining = MAX_TOOL_OUTPUT_BYTES.saturating_sub(bytes.len());
+        let retained = remaining.min(read);
+        bytes.extend_from_slice(&chunk[..retained]);
+        truncated |= retained < read;
+    }
+    Ok(LimitedOutput { bytes, truncated })
+}
+
 /// Declarative JSON spec for a plugin tool (e.g. `tools/my-tool.json`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ToolSpec {
     pub name: String,
     pub description: String,
@@ -66,6 +90,27 @@ pub fn load_tool_spec(path: &Path) -> Result<ToolSpec, PluginError> {
             path: path.to_path_buf(),
             reason: format!("invalid JSON: {e}"),
         })?;
+    let mut errors = Vec::new();
+    if spec.name.trim().is_empty() {
+        errors.push("tool name must not be empty".into());
+    }
+    if spec.command.trim().is_empty() {
+        errors.push("tool command must not be empty".into());
+    }
+    if spec.timeout_ms == 0 {
+        errors.push("tool timeoutMs must be greater than zero".into());
+    }
+    if !spec.input_schema.is_object() {
+        errors.push("tool inputSchema must be a JSON object".into());
+    }
+    for key in spec.env.keys() {
+        if key.is_empty() || key.contains('=') || key.contains('\0') {
+            errors.push(format!("tool environment key `{key}` is invalid"));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(PluginError::ManifestValidation { errors });
+    }
     Ok(spec)
 }
 
@@ -81,6 +126,7 @@ pub struct CommandTool {
     timeout: std::time::Duration,
     is_concurrency_safe: bool,
     default_permission: PermissionDecision,
+    inherit_context_env: bool,
 }
 
 impl CommandTool {
@@ -89,6 +135,14 @@ impl CommandTool {
     /// `plugin_root` is prepended to relative command paths and substituted
     /// for `${PLUGIN_ROOT}` in args and env values.
     pub fn from_spec(spec: ToolSpec, plugin_root: &Path) -> Self {
+        Self::from_spec_with_env(spec, plugin_root, HashMap::new())
+    }
+
+    pub fn from_spec_with_env(
+        spec: ToolSpec,
+        plugin_root: &Path,
+        mut plugin_env: HashMap<String, String>,
+    ) -> Self {
         let plugin_root_str = plugin_root.to_string_lossy();
 
         // Substitute ${PLUGIN_ROOT} in args
@@ -101,6 +155,7 @@ impl CommandTool {
             .into_iter()
             .map(|(k, v)| (k, v.replace("${PLUGIN_ROOT}", &plugin_root_str)))
             .collect();
+        plugin_env.extend(env);
 
         let command = resolve_plugin_command(
             &spec.command.replace("${PLUGIN_ROOT}", &plugin_root_str),
@@ -127,10 +182,11 @@ impl CommandTool {
             definition,
             command,
             args,
-            env,
+            env: plugin_env,
             timeout: std::time::Duration::from_millis(spec.timeout_ms),
             is_concurrency_safe: spec.is_concurrency_safe,
             default_permission,
+            inherit_context_env: false,
         }
     }
 
@@ -144,7 +200,16 @@ impl CommandTool {
         is_concurrency_safe: bool,
         default_permission: PermissionDecision,
     ) -> Self {
-        Self { definition, command, args, env, timeout, is_concurrency_safe, default_permission }
+        Self {
+            definition,
+            command,
+            args,
+            env,
+            timeout,
+            is_concurrency_safe,
+            default_permission,
+            inherit_context_env: true,
+        }
     }
 }
 
@@ -183,12 +248,14 @@ impl Tool for CommandTool {
             .args(&self.args)
             .current_dir(&context.cwd)
             .env_clear()
-            .envs(context.env.iter())
-            .envs(&self.env)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
+        if self.inherit_context_env {
+            command.envs(context.env.iter());
+        }
+        command.envs(&self.env);
         hide_console_window(&mut command);
         let mut child = command.spawn().map_err(|e| AgentError::ToolExecution {
             tool: self.definition.name.clone(),
@@ -200,6 +267,14 @@ impl Tool for CommandTool {
             tool: self.definition.name.clone(),
             message: "failed to open stdin".into(),
         })?;
+        let stdout = child.stdout.take().ok_or_else(|| AgentError::ToolExecution {
+            tool: self.definition.name.clone(),
+            message: "failed to open stdout".into(),
+        })?;
+        let stderr = child.stderr.take().ok_or_else(|| AgentError::ToolExecution {
+            tool: self.definition.name.clone(),
+            message: "failed to open stderr".into(),
+        })?;
 
         let output = tokio::time::timeout(self.timeout, async {
             match stdin.write_all(&args_json).await {
@@ -208,7 +283,9 @@ impl Tool for CommandTool {
                 Err(e) => return Err(e),
             }
             drop(stdin);
-            child.wait_with_output().await
+            let (status, stdout, stderr) =
+                tokio::try_join!(child.wait(), read_limited(stdout), read_limited(stderr))?;
+            Ok::<_, std::io::Error>((status, stdout, stderr))
         })
         .await
         .map_err(|_| AgentError::ToolExecution {
@@ -220,16 +297,23 @@ impl Tool for CommandTool {
             message: format!("I/O error: {e}"),
         })?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+        let (status, stdout, stderr) = output;
+        if !status.success() {
+            let stderr = String::from_utf8_lossy(&stderr.bytes);
             return Err(AgentError::ToolExecution {
                 tool: self.definition.name.clone(),
-                message: format!("tool exited with status {}: {}", output.status, stderr.trim()),
+                message: format!("tool exited with status {status}: {}", stderr.trim()),
+            });
+        }
+        if stdout.truncated {
+            return Err(AgentError::ToolExecution {
+                tool: self.definition.name.clone(),
+                message: format!("tool output exceeded {MAX_TOOL_OUTPUT_BYTES} bytes"),
             });
         }
 
         let value: Value =
-            serde_json::from_slice(&output.stdout).map_err(|e| AgentError::ToolExecution {
+            serde_json::from_slice(&stdout.bytes).map_err(|e| AgentError::ToolExecution {
                 tool: self.definition.name.clone(),
                 message: format!("invalid JSON output: {e}"),
             })?;
@@ -561,6 +645,33 @@ mod tests {
         assert_eq!(result.content["secret"], "");
         assert_eq!(result.content["context"], "context");
         assert_eq!(result.content["configured"], "yes");
+    }
+
+    #[tokio::test]
+    async fn plugin_tool_does_not_inherit_agent_context_environment() {
+        let (command, args) = env_probe_command();
+        let tool = CommandTool::from_spec_with_env(
+            ToolSpec {
+                name: "isolated_plugin_tool".into(),
+                description: "environment isolation test".into(),
+                input_schema: json!({"type": "object"}),
+                command,
+                args,
+                env: HashMap::new(),
+                timeout_ms: 5_000,
+                is_concurrency_safe: true,
+                permission: ToolPermission::Allow,
+            },
+            Path::new("."),
+            HashMap::from([("PLUGIN_VISIBLE".into(), "configured".into())]),
+        );
+        let mut context = ToolContext::dummy();
+        context.env.insert("TELOS_CONTEXT_VISIBLE".into(), "must-not-leak".into());
+
+        let result = tool.invoke(json!({}), context).await.unwrap();
+
+        assert_eq!(result.content["context"], "");
+        assert_eq!(result.content["configured"], "configured");
     }
 
     #[test]

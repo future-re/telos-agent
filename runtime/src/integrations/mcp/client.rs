@@ -1,9 +1,12 @@
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::process::Stdio;
+use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use serde_json::{Value, json};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::sync::Mutex;
 
 use crate::error::AgentError;
 use crate::integrations::mcp::config::McpServerConfig;
@@ -35,10 +38,11 @@ pub struct McpTool {
 pub struct McpClient {
     config: McpServerConfig,
     process: Mutex<Option<Child>>,
-    stdin: Mutex<Option<std::process::ChildStdin>>,
-    reader: Mutex<Option<BufReader<std::process::ChildStdout>>>,
-    server_info: Mutex<Option<Value>>,
-    tools: Mutex<Vec<McpTool>>,
+    stdin: Mutex<Option<ChildStdin>>,
+    reader: Mutex<Option<BufReader<ChildStdout>>>,
+    request_lock: Mutex<()>,
+    server_info: StdMutex<Option<Value>>,
+    tools: StdMutex<Vec<McpTool>>,
 }
 
 impl McpClient {
@@ -51,8 +55,9 @@ impl McpClient {
             process: Mutex::new(None),
             stdin: Mutex::new(None),
             reader: Mutex::new(None),
-            server_info: Mutex::new(None),
-            tools: Mutex::new(Vec::new()),
+            request_lock: Mutex::new(()),
+            server_info: StdMutex::new(None),
+            tools: StdMutex::new(Vec::new()),
         }
     }
 
@@ -65,7 +70,13 @@ impl McpClient {
         cmd.args(&self.config.args);
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
+        cmd.kill_on_drop(true);
+        // MCP is a long-lived JSON-RPC process. Discard stderr so a noisy
+        // server cannot fill an unread pipe and deadlock the protocol.
+        cmd.stderr(Stdio::null());
+        if !self.config.inherit_env {
+            cmd.env_clear();
+        }
         for (k, v) in &self.config.env {
             cmd.env(k, v);
         }
@@ -88,37 +99,41 @@ impl McpClient {
             message: "failed to open child stdout".into(),
         })?;
 
-        *self.stdin.lock().unwrap() = Some(stdin);
-        *self.reader.lock().unwrap() = Some(BufReader::new(stdout));
-        *self.process.lock().unwrap() = Some(child);
+        *self.stdin.lock().await = Some(stdin);
+        *self.reader.lock().await = Some(BufReader::new(stdout));
+        *self.process.lock().await = Some(child);
 
-        // MCP initialize handshake
-        let init_response = self
-            .send_request(
-                "initialize",
-                json!({
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": { "name": "telos-agent", "version": "0.1.0" },
-                }),
-            )
-            .await?;
-
-        self.server_info.lock().unwrap().replace(init_response);
-
-        // Send initialized notification
-        self.send_notification("notifications/initialized", json!({})).await?;
-
-        // Fetch tools
-        let tools_response = self.send_request("tools/list", json!({})).await?;
-        *self.tools.lock().unwrap() = Self::parse_tools(&tools_response);
-
-        Ok(())
+        let handshake = async {
+            let init_response = self
+                .send_request(
+                    "initialize",
+                    json!({
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": { "name": "telos-agent", "version": env!("CARGO_PKG_VERSION") },
+                    }),
+                )
+                .await?;
+            self.server_info.lock().unwrap().replace(init_response);
+            self.send_notification("notifications/initialized", json!({})).await?;
+            let tools_response = self.send_request("tools/list", json!({})).await?;
+            *self.tools.lock().unwrap() = Self::parse_tools(&tools_response);
+            Ok::<(), AgentError>(())
+        }
+        .await;
+        if handshake.is_err() {
+            self.disconnect().await;
+        }
+        handshake
     }
 
     /// Return the cached tool list.
     pub fn tools(&self) -> Vec<McpTool> {
         self.tools.lock().unwrap().clone()
+    }
+
+    pub async fn is_connected(&self) -> bool {
+        self.process.lock().await.is_some()
     }
 
     /// Call an MCP tool by name with the given arguments.
@@ -129,19 +144,37 @@ impl McpClient {
     }
 
     /// Kill the server process and release I/O handles.
-    pub fn disconnect(&self) {
-        if let Some(mut child) = self.process.lock().unwrap().take() {
-            let _ = child.kill();
-            let _ = child.wait();
+    pub async fn disconnect(&self) {
+        if let Some(mut child) = self.process.lock().await.take() {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
         }
-        *self.stdin.lock().unwrap() = None;
-        *self.reader.lock().unwrap() = None;
+        *self.stdin.lock().await = None;
+        *self.reader.lock().await = None;
     }
 
     // ── internal helpers ────────────────────────────────────────────
 
     /// Send a JSON-RPC request and read the matching response.
     async fn send_request(&self, method: &str, params: Value) -> Result<Value, AgentError> {
+        let _request = self.request_lock.lock().await;
+        let timeout = Duration::from_millis(self.config.timeout_ms.max(1));
+        match tokio::time::timeout(timeout, self.send_request_inner(method, params)).await {
+            Ok(result) => result,
+            Err(_) => {
+                self.disconnect().await;
+                Err(AgentError::ToolExecution {
+                    tool: "McpClient".into(),
+                    message: format!(
+                        "MCP request `{method}` timed out after {}ms",
+                        timeout.as_millis()
+                    ),
+                })
+            }
+        }
+    }
+
+    async fn send_request_inner(&self, method: &str, params: Value) -> Result<Value, AgentError> {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         let request = json!({
             "jsonrpc": "2.0",
@@ -152,12 +185,21 @@ impl McpClient {
         let request_str = serde_json::to_string(&request).unwrap();
 
         // Write request to child stdin
-        if let Some(ref mut stdin) = *self.stdin.lock().unwrap() {
-            writeln!(stdin, "{request_str}").map_err(|e| AgentError::ToolExecution {
+        if let Some(ref mut stdin) = *self.stdin.lock().await {
+            stdin.write_all(request_str.as_bytes()).await.map_err(|e| {
+                AgentError::ToolExecution {
+                    tool: "McpClient".into(),
+                    message: format!("write to MCP server stdin failed: {e}"),
+                }
+            })?;
+            stdin.write_all(b"\n").await.map_err(|e| AgentError::ToolExecution {
                 tool: "McpClient".into(),
                 message: format!("write to MCP server stdin failed: {e}"),
             })?;
-            stdin.flush().ok();
+            stdin.flush().await.map_err(|e| AgentError::ToolExecution {
+                tool: "McpClient".into(),
+                message: format!("flush MCP server stdin failed: {e}"),
+            })?;
         } else {
             return Err(AgentError::ToolExecution {
                 tool: "McpClient".into(),
@@ -166,38 +208,44 @@ impl McpClient {
         }
 
         // Read one response line from child stdout
-        if let Some(ref mut reader) = *self.reader.lock().unwrap() {
-            let mut line = String::new();
-            reader.read_line(&mut line).map_err(|e| AgentError::ToolExecution {
-                tool: "McpClient".into(),
-                message: format!("read from MCP server stdout failed: {e}"),
-            })?;
-
-            if line.trim().is_empty() {
-                return Err(AgentError::ToolExecution {
-                    tool: "McpClient".into(),
-                    message: "MCP server returned empty response".into(),
-                });
-            }
-
-            let response: Value =
-                serde_json::from_str(&line).map_err(|e| AgentError::ToolExecution {
-                    tool: "McpClient".into(),
-                    message: format!("parse MCP server response failed: {e}"),
+        if let Some(ref mut reader) = *self.reader.lock().await {
+            loop {
+                let line = read_bounded_line(reader, 16 * 1024 * 1024).await.map_err(|e| {
+                    AgentError::ToolExecution {
+                        tool: "McpClient".into(),
+                        message: format!("read from MCP server stdout failed: {e}"),
+                    }
                 })?;
 
-            if let Some(err) = response.get("error") {
-                return Err(AgentError::ToolExecution {
-                    tool: "McpClient".into(),
-                    message: format!(
-                        "MCP error (code {}): {}",
-                        err.get("code").and_then(|v| v.as_i64()).unwrap_or(0),
-                        err.get("message").and_then(|v| v.as_str()).unwrap_or("unknown"),
-                    ),
-                });
-            }
+                if line.trim().is_empty() {
+                    return Err(AgentError::ToolExecution {
+                        tool: "McpClient".into(),
+                        message: "MCP server returned empty response".into(),
+                    });
+                }
 
-            Ok(response.get("result").cloned().unwrap_or(Value::Null))
+                let response: Value =
+                    serde_json::from_str(&line).map_err(|e| AgentError::ToolExecution {
+                        tool: "McpClient".into(),
+                        message: format!("parse MCP server response failed: {e}"),
+                    })?;
+                if response.get("id").and_then(Value::as_u64) != Some(id) {
+                    continue;
+                }
+
+                if let Some(err) = response.get("error") {
+                    return Err(AgentError::ToolExecution {
+                        tool: "McpClient".into(),
+                        message: format!(
+                            "MCP error (code {}): {}",
+                            err.get("code").and_then(|v| v.as_i64()).unwrap_or(0),
+                            err.get("message").and_then(|v| v.as_str()).unwrap_or("unknown"),
+                        ),
+                    });
+                }
+
+                return Ok(response.get("result").cloned().unwrap_or(Value::Null));
+            }
         } else {
             Err(AgentError::ToolExecution {
                 tool: "McpClient".into(),
@@ -215,9 +263,21 @@ impl McpClient {
         });
         let notif_str = serde_json::to_string(&notification).unwrap();
 
-        if let Some(ref mut stdin) = *self.stdin.lock().unwrap() {
-            writeln!(stdin, "{notif_str}").ok();
-            stdin.flush().ok();
+        if let Some(ref mut stdin) = *self.stdin.lock().await {
+            stdin.write_all(notif_str.as_bytes()).await.map_err(|error| {
+                AgentError::ToolExecution {
+                    tool: "McpClient".into(),
+                    message: format!("write MCP notification failed: {error}"),
+                }
+            })?;
+            stdin.write_all(b"\n").await.map_err(|error| AgentError::ToolExecution {
+                tool: "McpClient".into(),
+                message: format!("write MCP notification failed: {error}"),
+            })?;
+            stdin.flush().await.map_err(|error| AgentError::ToolExecution {
+                tool: "McpClient".into(),
+                message: format!("flush MCP notification failed: {error}"),
+            })?;
         }
         Ok(())
     }
@@ -247,6 +307,38 @@ impl McpClient {
     }
 }
 
+async fn read_bounded_line(
+    reader: &mut (impl AsyncBufRead + Unpin),
+    maximum_bytes: usize,
+) -> std::io::Result<String> {
+    let mut bytes = Vec::new();
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            break;
+        }
+        let consumed = available
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(available.len(), |index| index + 1);
+        if bytes.len().saturating_add(consumed) > maximum_bytes {
+            reader.consume(consumed);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("MCP response exceeds {maximum_bytes} bytes"),
+            ));
+        }
+        bytes.extend_from_slice(&available[..consumed]);
+        let ended = available.get(consumed.saturating_sub(1)) == Some(&b'\n');
+        reader.consume(consumed);
+        if ended {
+            break;
+        }
+    }
+    String::from_utf8(bytes)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
 #[cfg_attr(not(windows), allow(unused_variables))]
 fn hide_console_window(command: &mut Command) {
     #[cfg(windows)]
@@ -273,14 +365,20 @@ mod tests {
 
         let script_path = dir.join("echo-mcp.sh");
         let script_content = r#"#!/bin/bash
-# Minimal MCP echo server — reads one request line, emits two responses.
+# Minimal MCP echo server.
 read REQUEST_LINE
-echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"echo","version":"1.0"},"capabilities":{"tools":{}}}}'
+ID=$(printf '%s' "$REQUEST_LINE" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+echo "{\"jsonrpc\":\"2.0\",\"id\":$ID,\"result\":{\"protocolVersion\":\"2024-11-05\",\"serverInfo\":{\"name\":\"echo\",\"version\":\"1.0\"},\"capabilities\":{\"tools\":{}}}}"
+# initialized notification
 read REQUEST_LINE
-echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"echo","description":"Echo tool","inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}]}}'
+# tools/list
+read REQUEST_LINE
+ID=$(printf '%s' "$REQUEST_LINE" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+echo "{\"jsonrpc\":\"2.0\",\"id\":$ID,\"result\":{\"tools\":[{\"name\":\"echo\",\"description\":\"Echo tool\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"]}}]}}"
 # Keep reading and echoing tool calls
 while read REQUEST_LINE; do
-  echo '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"pong"}]}}'
+  ID=$(printf '%s' "$REQUEST_LINE" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  echo "{\"jsonrpc\":\"2.0\",\"id\":$ID,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"pong\"}]}}"
 done
 "#;
         std::fs::write(&script_path, script_content).unwrap();
@@ -309,9 +407,26 @@ done
                 .expect("call_tool should succeed");
             assert_eq!(result["content"][0]["text"], "pong");
 
-            client.disconnect();
+            client.disconnect().await;
         });
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn connect_honors_request_timeout() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("hanging-mcp.sh");
+        std::fs::write(&script, "#!/bin/sh\nread request\nexec sleep 60\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut config = McpServerConfig::new(script.to_str().unwrap(), vec![]);
+        config.timeout_ms = 20;
+        let client = McpClient::new(config);
+
+        let error = client.connect().await.unwrap_err().to_string();
+
+        assert!(error.contains("timed out"), "{error}");
     }
 }

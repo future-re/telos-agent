@@ -151,7 +151,7 @@ fn policy_registry_for_config(agent_config: &AgentConfig) -> crate::PolicyRegist
 fn create_plugin_registry(project_root_or_cwd: &Path) -> Option<Arc<crate::PluginRegistry>> {
     let telos_dir = project_root_or_cwd.join(".telos");
     let plugins_root = telos_dir.join("plugins");
-    let mut registry = crate::PluginRegistry::new(&plugins_root);
+    let registry = crate::PluginRegistry::new(&plugins_root);
 
     let installed_dir = registry.installed_dir();
     if let Err(e) = std::fs::create_dir_all(&installed_dir) {
@@ -175,6 +175,9 @@ fn create_plugin_registry(project_root_or_cwd: &Path) -> Option<Arc<crate::Plugi
 
     if let Err(e) = registry.load_state() {
         tracing::warn!(error = %e, "failed to load plugin state");
+    }
+    if let Err(e) = registry.load_config() {
+        tracing::warn!(error = %e, "failed to load plugin configuration");
     }
 
     Some(Arc::new(registry))

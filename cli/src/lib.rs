@@ -8,6 +8,7 @@ pub mod diagnostics;
 mod interactive_input;
 #[path = "runtime/memory.rs"]
 pub mod memory_runtime;
+pub mod plugins;
 #[path = "workspace/project.rs"]
 pub mod project;
 pub mod runner;
@@ -36,7 +37,7 @@ use cli::{Cli, Command};
 /// Entry point shared between the binary and integration tests.
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
-    if !matches!(cli.command, Some(Command::Completion { .. })) {
+    if !matches!(cli.command, Some(Command::Completion { .. } | Command::Plugin { .. })) {
         update_check::maybe_print_update_notice(env!("CARGO_PKG_VERSION"), cli.shared.quiet).await;
     }
 
@@ -89,6 +90,7 @@ pub async fn run() -> Result<()> {
             // Serve mode — no onboarding, no approval, just the daemon loop.
             serve::run_serve(&cli.shared, &merged).await
         }
+        Some(Command::Plugin { command }) => plugins::run(command, &cli.shared).await,
         Some(Command::Chat) => {
             let onboarding = match check_onboarding(&cli.shared, &merged) {
                 Ok(o) => o,

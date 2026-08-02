@@ -11,7 +11,7 @@ use crate::integrations::plugin::PluginId;
 
 /// Author or maintainer of a plugin or marketplace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PluginAuthor {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -22,7 +22,7 @@ pub struct PluginAuthor {
 
 /// One user-configurable option declared by a plugin.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UserConfigOption {
     #[serde(rename = "type")]
     pub type_: ConfigOptionType,
@@ -56,11 +56,14 @@ pub enum ConfigOptionType {
 #[serde(untagged)]
 pub enum DependencyRef {
     Bare(String),
-    #[serde(rename_all = "camelCase")]
-    Qualified {
-        name: String,
-        marketplace: String,
-    },
+    Qualified(QualifiedDependencyRef),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QualifiedDependencyRef {
+    pub name: String,
+    pub marketplace: String,
 }
 
 impl DependencyRef {
@@ -72,9 +75,10 @@ impl DependencyRef {
             DependencyRef::Bare(name) => {
                 PluginId { name: name.clone(), marketplace: default_marketplace.to_string() }
             }
-            DependencyRef::Qualified { name, marketplace } => {
-                PluginId { name: name.clone(), marketplace: marketplace.clone() }
-            }
+            DependencyRef::Qualified(dependency) => PluginId {
+                name: dependency.name.clone(),
+                marketplace: dependency.marketplace.clone(),
+            },
         }
     }
 
@@ -82,7 +86,9 @@ impl DependencyRef {
     pub fn display(&self) -> String {
         match self {
             DependencyRef::Bare(name) => name.clone(),
-            DependencyRef::Qualified { name, marketplace } => format!("{name}@{marketplace}"),
+            DependencyRef::Qualified(dependency) => {
+                format!("{}@{}", dependency.name, dependency.marketplace)
+            }
         }
     }
 }
@@ -94,7 +100,7 @@ fn default_policy_timeout_ms() -> u64 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CommandPolicyDef {
     /// Stable identifier used in lifecycle events. Generated from declaration order when omitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -125,7 +131,7 @@ pub struct ToolPolicyDef {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PoliciesConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub session_start: Vec<SessionPolicyDef>,
@@ -209,7 +215,7 @@ impl PoliciesConfig {
 
 /// MCP server configuration (mirrors crate::integrations::mcp::McpServerConfig but serde-friendly).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct McpServerEntry {
     pub command: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -243,7 +249,7 @@ pub enum McpServersConfig {
 
 /// Individual LSP server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LspServerEntry {
     pub command: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -272,8 +278,10 @@ pub enum LspServersConfig {
 
 /// Parsed plugin.json — the plugin's self-describing manifest.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PluginManifest {
+    #[serde(default = "default_manifest_version")]
+    pub manifest_version: u32,
     #[serde(default)]
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -318,6 +326,10 @@ pub struct PluginManifest {
     pub user_config: Option<HashMap<String, UserConfigOption>>,
 }
 
+fn default_manifest_version() -> u32 {
+    1
+}
+
 /// A partial manifest — marketplace entries can override fields.
 ///
 /// This is a subset of PluginManifest with all optional fields.
@@ -325,7 +337,7 @@ pub type PartialPluginManifest = Value;
 
 /// An entry in a marketplace — describes a plugin and where to get it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MarketplaceEntry {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -351,7 +363,7 @@ fn default_strict() -> bool {
 
 /// Where to fetch a plugin from.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum PluginSource {
     /// Local directory containing plugin.json.
     Local { path: PathBuf },
@@ -415,6 +427,32 @@ mod tests {
         assert!(manifest.tools.is_none());
         assert!(manifest.policies.is_none());
         assert!(manifest.dependencies.is_empty());
+    }
+
+    #[test]
+    fn rejects_unknown_nested_manifest_fields() {
+        let author_error = serde_json::from_value::<PluginManifest>(json!({
+            "name": "strict",
+            "author": {"name": "Alice", "emali": "typo@example.com"}
+        }))
+        .unwrap_err();
+        assert!(author_error.to_string().contains("unknown field"));
+
+        let policy_error = serde_json::from_value::<PluginManifest>(json!({
+            "name": "strict",
+            "policies": {
+                "turnStart": [{"command": "echo", "argz": []}]
+            }
+        }))
+        .unwrap_err();
+        assert!(policy_error.to_string().contains("unknown field"));
+
+        let dependency_error = serde_json::from_value::<PluginManifest>(json!({
+            "name": "strict",
+            "dependencies": [{"name": "dep", "marketplace": "mkt", "marketpalce": "typo"}]
+        }))
+        .unwrap_err();
+        assert!(dependency_error.to_string().contains("did not match"));
     }
 
     #[test]

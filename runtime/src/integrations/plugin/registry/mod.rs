@@ -5,6 +5,7 @@ pub use types::{LoadedPlugin, PluginEntry, PluginStatus};
 
 mod apply;
 mod discovery;
+mod install;
 mod lifecycle;
 mod persistence;
 #[cfg(test)]

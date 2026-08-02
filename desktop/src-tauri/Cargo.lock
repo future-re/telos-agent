@@ -4009,6 +4009,7 @@ dependencies = [
  "libc",
  "reqwest 0.12.28",
  "rpassword",
+ "semver",
  "serde",
  "serde_json",
  "serde_yaml",

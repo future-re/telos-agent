@@ -10,6 +10,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Plus,
+  Plug,
   Settings,
   SlidersHorizontal,
   Sigma,
@@ -55,6 +56,7 @@ import {
 import { cn } from "@/lib/utils";
 import { formatTokenCount } from "@/tokenUsage";
 import { TokenUsageHistory } from "@/tokenUsageHistory";
+import { PluginSettings } from "@/components/PluginSettings";
 import {
   buildTodayTokenMetrics,
   buildTokenUsageDashboard,
@@ -548,6 +550,10 @@ function SettingsDialog({
                 </div>
               </label>
             )}
+
+            {activeSection === "plugins" && (
+              <PluginSettings cwd={mergedCwd} />
+            )}
           </section>
         </div>
 
@@ -600,6 +606,7 @@ const settingsSections: Array<{
   { id: "key", label: "密钥", icon: KeyRound },
   { id: "approval", label: "权限", icon: Check },
   { id: "model", label: "模型", icon: SlidersHorizontal },
+  { id: "plugins", label: "插件", icon: Plug },
   { id: "directory", label: "工作目录", icon: Folder },
 ];
 
@@ -630,6 +637,10 @@ const sectionMeta: Record<
   model: {
     title: "模型设置",
     description: "选择 Flash 或 Pro。",
+  },
+  plugins: {
+    title: "插件管理",
+    description: "查看运行状态、启停插件并维护经过校验的插件配置。",
   },
   directory: {
     title: "工作目录",

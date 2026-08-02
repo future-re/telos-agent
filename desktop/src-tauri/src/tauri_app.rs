@@ -12,6 +12,7 @@ use crate::agent_host::{
     delete_session_files, list_sessions as list_sessions_impl, load_session_messages,
     memory_overview, resolve_desktop_settings, save_deepseek_api_key,
 };
+use crate::plugin_manager::{DesktopMarketplacePlugin, DesktopPluginInfo};
 
 type HostMap = Mutex<HashMap<String, HostEntry>>;
 type CancelMap = Mutex<HashMap<String, CancellationToken>>;
@@ -95,6 +96,35 @@ struct ResolveApprovalRequest {
 struct LoadSessionRequest {
     session_id: String,
     cwd: Option<std::path::PathBuf>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginListRequest {
+    cwd: Option<std::path::PathBuf>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginMutationRequest {
+    cwd: Option<std::path::PathBuf>,
+    id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginEnableRequest {
+    cwd: Option<std::path::PathBuf>,
+    id: String,
+    enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginConfigRequest {
+    cwd: Option<std::path::PathBuf>,
+    id: String,
+    values: HashMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -190,6 +220,60 @@ async fn list_sessions(
 #[tauri::command]
 async fn load_session(request: LoadSessionRequest) -> Result<Vec<serde_json::Value>, String> {
     load_session_messages(&request.session_id, request.cwd).await
+}
+
+#[tauri::command]
+fn list_plugins(request: Option<PluginListRequest>) -> Result<Vec<DesktopPluginInfo>, String> {
+    crate::plugin_manager::list_plugins(request.and_then(|request| request.cwd))
+}
+
+#[tauri::command]
+fn set_plugin_enabled(request: PluginEnableRequest) -> Result<(), String> {
+    crate::plugin_manager::set_plugin_enabled(request.cwd, &request.id, request.enabled)
+}
+
+#[tauri::command]
+fn set_plugin_config(request: PluginConfigRequest) -> Result<(), String> {
+    crate::plugin_manager::set_plugin_config(request.cwd, &request.id, request.values)
+}
+
+#[tauri::command]
+fn clear_plugin_config(request: PluginMutationRequest) -> Result<(), String> {
+    crate::plugin_manager::clear_plugin_config(request.cwd, &request.id)
+}
+
+#[tauri::command]
+fn list_marketplace_plugins(
+    request: Option<PluginListRequest>,
+) -> Result<Vec<DesktopMarketplacePlugin>, String> {
+    crate::plugin_manager::list_marketplace_plugins(request.and_then(|request| request.cwd))
+}
+
+#[tauri::command]
+async fn install_plugin(request: PluginMutationRequest) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::plugin_manager::install_plugin(request.cwd, &request.id)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn upgrade_plugin(request: PluginMutationRequest) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::plugin_manager::upgrade_plugin(request.cwd, &request.id)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn uninstall_plugin(request: PluginMutationRequest) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::plugin_manager::uninstall_plugin(request.cwd, &request.id)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -396,6 +480,14 @@ pub fn run() {
             memory_summary,
             list_sessions,
             load_session,
+            list_plugins,
+            set_plugin_enabled,
+            set_plugin_config,
+            clear_plugin_config,
+            list_marketplace_plugins,
+            install_plugin,
+            upgrade_plugin,
+            uninstall_plugin,
             extract_deepseek_text,
             reset_all_sessions,
             reset_session,

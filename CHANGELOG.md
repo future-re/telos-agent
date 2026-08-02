@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added transactional plugin install, upgrade, and uninstall flows for local, Git, GitHub, npm, and pip sources.
+- Added CLI and desktop plugin management, validated per-project configuration, output styles, and read-only LSP tools.
+
 ### Changed
 - Replaced the internal pass state machine with a direct `agent_loop` owned by `AgentRuntime`.
 - Replaced removed plugin hooks/interceptors with semantic lifecycle policies for session, model, tool, and turn boundaries.
 - Lifecycle policy events now stream as they happen and distinguish completion, rejection, and execution failure.
+- Plugin runtime namespaces now include both plugin name and marketplace so same-named plugins can coexist.
+- Plugin configuration updates merge with existing values, preserving omitted sensitive fields.
 
 ### Fixed
 - Corrected crates.io and Python sdist paths after the `core` directory was renamed to `runtime`.
@@ -19,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added dedicated desktop and Windows WSL2 CI gates, and corrected desktop release artifact paths.
 - Aligned site CI with Astro's supported Node.js versions.
 - Restored workspace tests, strict Clippy, and runtime doctests.
+- Refreshed marketplaces before install and upgrade, rejected configuration environment-name collisions, and handled standard LSP server-to-client requests.
 
 ## [0.1.2] - 2026-06-29
 

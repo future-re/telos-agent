@@ -13,6 +13,8 @@ pub struct McpServerConfig {
     pub args: Vec<String>,
     /// Additional environment variables passed to the child process.
     pub env: HashMap<String, String>,
+    /// Whether to inherit the host process environment before applying `env`.
+    pub inherit_env: bool,
     /// Working directory for the child process.
     pub cwd: Option<PathBuf>,
     /// Auto-connect on session start.
@@ -27,6 +29,7 @@ impl Default for McpServerConfig {
             command: String::new(),
             args: Vec::new(),
             env: HashMap::new(),
+            inherit_env: true,
             cwd: None,
             auto_connect: true,
             timeout_ms: 60_000,

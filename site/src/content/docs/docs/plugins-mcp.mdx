@@ -7,7 +7,7 @@ telos includes extension points for plugins and MCP so tool ecosystems can be re
 
 ## Plugins
 
-The runtime API exposes `PluginRegistry`, `PluginId`, `PluginError`, and `BUILTIN_MARKETPLACE`. Plugins can load tool specs, lifecycle policies, skills, prompt sections, MCP declarations, and subagents.
+The runtime API exposes `PluginRegistry`, `PluginId`, `PluginError`, and `BUILTIN_MARKETPLACE`. Plugins can load tool specs, lifecycle policies, skills, prompt sections, output styles, settings, user configuration, MCP and LSP declarations, and subagents.
 
 Marketplace metadata is represented by `BUILTIN_MARKETPLACE` and plugin registry data. Use it to describe available plugin entries rather than hard-coding extension behavior in a client.
 
@@ -52,7 +52,69 @@ Policy commands run with the plugin directory as their working directory. They r
 
 To reject an operation, return `{"decision":"reject","reason":"explanation"}`. Policy process failures and policy rejections are emitted as distinct `PolicyFailed` and `PolicyRejected` events. Provider retry/failure, compaction, persistence, and session close are observer events rather than command policies. Output is bounded to 1 MiB, and invalid matchers, empty commands, or zero timeouts fail manifest validation.
 
-`lspServers`, `outputStyles`, `settings`, and `userConfig` are reserved but are not runtime capabilities yet. Declaring them produces an explicit degraded plugin error instead of being silently reported as loaded.
+### Manifest contract
+
+`plugin.json` is a strict, camel-case manifest. `manifestVersion` defaults to `1`; other versions and unknown fields are rejected. Versions use semver, component paths must remain under the plugin root, and installed directory names use `<name>@<marketplace>`.
+
+```json
+{
+  "manifestVersion": 1,
+  "name": "typescript-assist",
+  "version": "1.2.0",
+  "tools": ["./tools/format.json"],
+  "outputStyles": ["./styles/concise.md"],
+  "lspServers": {
+    "typescript": {
+      "command": "typescript-language-server",
+      "args": ["--stdio"],
+      "extensionToLanguage": { ".ts": "typescript" }
+    }
+  },
+  "userConfig": {
+    "endpoint": {
+      "type": "string",
+      "title": "Endpoint",
+      "description": "Service endpoint",
+      "required": true
+    },
+    "token": {
+      "type": "string",
+      "title": "Token",
+      "description": "Service token",
+      "sensitive": true
+    }
+  }
+}
+```
+
+Output styles accept Markdown/plain text or JSON containing an `instructions` string. They become static prompt sections. LSP servers become read-only namespaced tools supporting hover, definition, references, document symbols, and diagnostics over stdio. The bridge answers standard configuration, capability-registration, progress, and workspace requests while rejecting workspace edits. Plugin tool, policy, LSP, and MCP subprocesses receive a minimal platform environment plus declared plugin configuration; the agent/provider environment is not inherited.
+
+Configuration is validated by type, required fields, numeric bounds, file/directory existence, and unique environment-variable projection. It is stored per project in `.telos/plugins/plugin_config.json` with owner-only permissions on Unix. Configuration updates merge with stored values so omitted sensitive fields are preserved; use `clear-config` to remove all user configuration. Sensitive values are redacted from inspection and prompt interpolation. Use `${CONFIG:key}` only for non-sensitive prompt values; subprocesses receive `TELOS_PLUGIN_CONFIG` and normalized `TELOS_PLUGIN_<KEY>` variables. The key `config` and keys that normalize to the same environment name are rejected.
+
+Runtime component names include the marketplace to avoid collisions. Tools use `plugin__<name>__<marketplace>__<tool>`, and plugin subagents use `<name>@<marketplace>:<agent>`.
+
+### Management
+
+Plugins and marketplaces can be managed without starting a model provider:
+
+```bash
+telos plugin marketplace-add-local ./marketplace
+telos plugin marketplace-refresh my-marketplace
+telos plugin marketplace-search formatter
+telos plugin marketplace-list-plugins --name my-marketplace
+telos plugin install formatter@my-marketplace
+telos plugin config formatter@my-marketplace --json '{"mode":"strict"}'
+telos plugin enable formatter@my-marketplace
+telos plugin inspect formatter@my-marketplace
+telos plugin upgrade formatter@my-marketplace
+telos plugin disable formatter@my-marketplace
+telos plugin uninstall formatter@my-marketplace
+telos plugin marketplace-remove my-marketplace
+```
+
+Install and upgrade refresh the selected marketplace, validate the manifest and dependency graph, and only then switch directories. State writes and directory replacement are rollback-aware. Marketplace sources support local directories, inline catalogs, GitHub/git, direct JSON URLs, and npm catalogs; plugin entries support local, GitHub/git, npm, and pip sources. npm lifecycle scripts are disabled during installation. The desktop settings dialog lists registered marketplace entries and supports install, upgrade, disable, uninstall, schema inspection, and configuration with sensitive-value preservation.
+
+Migration note: manifests using the removed `hooks` or `interceptors` fields must move those commands to `policies`; unknown or misspelled fields that were previously ignored now fail validation.
 
 ## Skills
 

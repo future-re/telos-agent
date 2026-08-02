@@ -12,6 +12,8 @@ pub enum DependencyReason {
     NotEnabled,
     /// The dependency was not found in any configured marketplace.
     NotFound,
+    /// The declaring marketplace does not allow this cross-marketplace dependency.
+    NotAllowed,
 }
 
 impl std::fmt::Display for DependencyReason {
@@ -19,6 +21,7 @@ impl std::fmt::Display for DependencyReason {
         match self {
             DependencyReason::NotEnabled => write!(f, "not enabled"),
             DependencyReason::NotFound => write!(f, "not found"),
+            DependencyReason::NotAllowed => write!(f, "not allowed by marketplace policy"),
         }
     }
 }
@@ -53,6 +56,8 @@ pub enum PluginError {
     DependencyUnsatisfied { dependency: String, reason: DependencyReason },
     #[error("circular dependency detected: {cycle:?}")]
     CircularDependency { cycle: Vec<PluginId> },
+    #[error("plugin '{dependency}' is required by enabled plugins: {dependents:?}")]
+    DependencyRequiredBy { dependency: PluginId, dependents: Vec<PluginId> },
 
     // --- Lifecycle ---
     #[error("plugin '{0}' is already enabled")]

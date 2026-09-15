@@ -93,34 +93,42 @@ impl PluginManager {
         &self,
         selected: Option<&str>,
     ) -> Result<Vec<MarketplacePluginInfo>, PluginError> {
-        self.marketplaces.entries(selected).map(|entries| {
+        self.marketplaces.entries(selected).and_then(|entries| {
             entries
                 .into_iter()
-                .filter_map(|(raw_id, entry)| {
-                    let id = PluginId::parse(&raw_id)?;
-                    Some(MarketplacePluginInfo {
+                .map(|(raw_id, entry)| {
+                    let id = PluginId::parse(&raw_id).ok_or_else(|| {
+                        PluginError::Other(format!("invalid plugin id `{raw_id}` in marketplace"))
+                    })?;
+                    Ok(MarketplacePluginInfo {
                         installed: self.registry.is_installed(&id),
                         id,
                         entry: entry.clone(),
                     })
                 })
-                .collect()
+                .collect::<Result<Vec<_>, PluginError>>()
         })
     }
 
-    pub fn search_marketplace_plugins(&self, query: &str) -> Vec<MarketplacePluginInfo> {
-        self.marketplaces
-            .search_entries(query)
-            .into_iter()
-            .filter_map(|(raw_id, entry)| {
-                let id = PluginId::parse(&raw_id)?;
-                Some(MarketplacePluginInfo {
-                    installed: self.registry.is_installed(&id),
-                    id,
-                    entry: entry.clone(),
+    pub fn search_marketplace_plugins(
+        &self,
+        query: &str,
+    ) -> Result<Vec<MarketplacePluginInfo>, PluginError> {
+        self.marketplaces.search_entries(query).and_then(|entries| {
+            entries
+                .into_iter()
+                .map(|(raw_id, entry)| {
+                    let id = PluginId::parse(&raw_id).ok_or_else(|| {
+                        PluginError::Other(format!("invalid plugin id `{raw_id}` in marketplace"))
+                    })?;
+                    Ok(MarketplacePluginInfo {
+                        installed: self.registry.is_installed(&id),
+                        id,
+                        entry: entry.clone(),
+                    })
                 })
-            })
-            .collect()
+                .collect::<Result<Vec<_>, PluginError>>()
+        })
     }
 
     pub fn enable(&self, id: &PluginId) -> Result<(), PluginError> {
@@ -167,9 +175,14 @@ impl PluginManager {
         if !crate::integrations::plugin::is_valid_id_part(&marketplace) {
             return Err(PluginError::Other(format!("invalid marketplace name `{marketplace}`")));
         }
+        if self.marketplaces.is_local(&marketplace) == Some(false) {
+            return Err(PluginError::Other(format!(
+                "marketplace `{marketplace}` is already registered from a remote source"
+            )));
+        }
         let catalog_dir =
             self.marketplaces.upsert_local_plugin(&marketplace, &plugin_dir, &manifest)?;
-        if self.marketplaces.get(&marketplace).is_some() {
+        if self.marketplaces.is_local(&marketplace) == Some(true) {
             self.refresh_marketplace(&marketplace)?;
         } else {
             self.add_marketplace(
@@ -306,6 +319,37 @@ mod tests {
         let mut manager = PluginManager::open(&root).unwrap();
 
         assert!(manager.install_local(&plugin_dir, "local").is_err());
+        assert!(!root.join("local-marketplaces").exists());
+    }
+
+    #[test]
+    fn install_local_rejects_name_collision_with_remote_marketplace() {
+        let temp = tempfile::tempdir().unwrap();
+        let plugin_dir = temp.path().join("source");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("plugin.json"),
+            serde_json::json!({
+                "manifestVersion": 3,
+                "name": "local-plugin",
+                "version": "1.0.0"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let root = temp.path().join("plugins");
+        let mut manager = PluginManager::open(&root).unwrap();
+        manager
+            .add_marketplace(
+                MarketplaceSource::GitHub { repo: "example/remote".into(), ref_: None, path: None },
+                Some("local".into()),
+            )
+            .unwrap();
+
+        let error = manager.install_local(&plugin_dir, "local").unwrap_err();
+
+        assert!(error.to_string().contains("remote source"));
         assert!(!root.join("local-marketplaces").exists());
     }
 }

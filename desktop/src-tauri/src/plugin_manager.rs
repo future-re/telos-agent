@@ -38,10 +38,15 @@ pub fn list_plugins(cwd: Option<PathBuf>) -> Result<Vec<DesktopPluginInfo>, Stri
         .list_plugins()
         .into_iter()
         .map(|entry| {
-            let config = manager
-                .plugin_config(&entry.plugin.id)
-                .map(|config| serde_json::to_value(config.redacted_values()).unwrap_or(Value::Null))
-                .unwrap_or(Value::Null);
+            let mut errors: Vec<String> =
+                entry.load_errors.into_iter().map(|error| error.to_string()).collect();
+            let config = match manager.plugin_config(&entry.plugin.id) {
+                Ok(config) => serde_json::to_value(config.redacted_values()).unwrap_or(Value::Null),
+                Err(error) => {
+                    errors.push(format!("configuration: {error}"));
+                    Value::Null
+                }
+            };
             DesktopPluginInfo {
                 id: entry.plugin.id.to_string(),
                 name: entry.plugin.manifest.name,
@@ -49,7 +54,7 @@ pub fn list_plugins(cwd: Option<PathBuf>) -> Result<Vec<DesktopPluginInfo>, Stri
                 version: entry.plugin.manifest.version.to_string(),
                 source_status: manager.plugin_source_status(&entry.plugin.id).as_str().to_string(),
                 status: format!("{:?}", entry.status).to_lowercase(),
-                errors: entry.load_errors.into_iter().map(|error| error.to_string()).collect(),
+                errors,
                 config_schema: serde_json::to_value(entry.plugin.manifest.user_config)
                     .unwrap_or(Value::Null),
                 config,

@@ -150,8 +150,17 @@ impl MarketplaceRegistry {
         catalog.plugins.retain(|candidate| candidate.name != entry.name);
         catalog.plugins.push(entry);
         validate_marketplace(&catalog)?;
-        std::fs::write(&catalog_path, serde_json::to_vec_pretty(&catalog)?)?;
+        crate::integrations::plugin::state::write_json(
+            &catalog_path,
+            serde_json::to_value(&catalog)?,
+        )?;
         Ok(catalog_dir)
+    }
+
+    pub(crate) fn is_local(&self, name: &str) -> Option<bool> {
+        self.marketplaces
+            .get(name)
+            .map(|cached| matches!(cached.source, MarketplaceSource::Local { .. }))
     }
 
     /// Remove a marketplace and any Telos-owned cached data.
@@ -212,20 +221,24 @@ impl MarketplaceRegistry {
         Ok(entries)
     }
 
-    pub(crate) fn search_entries(&self, query: &str) -> Vec<(String, &MarketplaceEntry)> {
+    pub(crate) fn search_entries(
+        &self,
+        query: &str,
+    ) -> Result<Vec<(String, &MarketplaceEntry)>, PluginError> {
         let query = query.to_lowercase();
-        self.entries(None)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|(_, entry)| {
-                entry.name.to_lowercase().contains(&query)
-                    || entry
-                        .description
-                        .as_ref()
-                        .is_some_and(|description| description.to_lowercase().contains(&query))
-                    || entry.tags.iter().any(|tag| tag.to_lowercase().contains(&query))
-            })
-            .collect()
+        self.entries(None).map(|entries| {
+            entries
+                .into_iter()
+                .filter(|(_, entry)| {
+                    entry.name.to_lowercase().contains(&query)
+                        || entry
+                            .description
+                            .as_ref()
+                            .is_some_and(|description| description.to_lowercase().contains(&query))
+                        || entry.tags.iter().any(|tag| tag.to_lowercase().contains(&query))
+                })
+                .collect()
+        })
     }
 
     pub fn plugin_entry(

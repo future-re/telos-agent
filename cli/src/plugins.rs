@@ -112,7 +112,7 @@ pub async fn run(command: PluginCommand, options: &SharedOptions) -> Result<()> 
         }
         PluginCommand::MarketplaceSearch { query } => {
             let query = query.to_lowercase();
-            let mut matches = manager.search_marketplace_plugins(&query);
+            let mut matches = manager.search_marketplace_plugins(&query)?;
             matches.sort_by_key(|plugin| plugin.id.to_string());
             for plugin in matches {
                 println!(

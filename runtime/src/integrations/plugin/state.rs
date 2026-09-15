@@ -31,6 +31,10 @@ pub(crate) fn write_section(path: &Path, name: &str, section: Value) -> Result<(
     write(path, &state)
 }
 
+pub(crate) fn write_json(path: &Path, value: Value) -> Result<(), PluginError> {
+    write(path, &value)
+}
+
 fn empty() -> Value {
     let mut root = Map::new();
     root.insert("version".into(), Value::from(STATE_VERSION));

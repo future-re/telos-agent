@@ -14,10 +14,7 @@ use crate::tools::api::ToolRegistry;
 
 mod ask_user_question;
 pub(crate) mod browser;
-mod code_index;
 pub(crate) mod domain_filter;
-mod enter_plan_mode;
-mod exit_plan_mode;
 mod file_edit;
 mod file_read;
 mod file_write;
@@ -43,9 +40,6 @@ pub use browser::{
     BrowserNavigateTool, BrowserScreenshotTool, BrowserScrollTool, BrowserSelectTool,
     BrowserStartTool, BrowserStateTool, BrowserTypeTool,
 };
-pub use code_index::{CodeContextTool, CodeIndexRefreshTool, CodeSearchTool};
-pub use enter_plan_mode::EnterPlanModeTool;
-pub use exit_plan_mode::ExitPlanModeTool;
 pub use file_edit::FileEditTool;
 pub use file_read::FileReadTool;
 pub use file_write::FileWriteTool;
@@ -98,12 +92,13 @@ impl DefaultShell {
     }
 }
 
-/// Register every built-in tool with the current platform's default shell.
+/// Register the default office-work tool set with the current platform's
+/// default shell.
 pub fn register_core_tools(registry: &mut ToolRegistry) {
     register_core_tools_with_shell(registry, DefaultShell::current_platform());
 }
 
-/// Register every built-in tool with an explicit default shell.
+/// Register the default office-work tool set with an explicit default shell.
 pub fn register_core_tools_with_shell(registry: &mut ToolRegistry, default_shell: DefaultShell) {
     let browser_manager = BrowserManager::new();
     match default_shell {
@@ -115,9 +110,6 @@ pub fn register_core_tools_with_shell(registry: &mut ToolRegistry, default_shell
     registry.register(FileEditTool);
     registry.register(GlobTool);
     registry.register(GrepTool);
-    registry.register(CodeSearchTool);
-    registry.register(CodeContextTool);
-    registry.register(CodeIndexRefreshTool);
     registry.register(WebFetchTool::new());
     registry.register(WebSearchTool);
     registry.register(PythonScriptTool);

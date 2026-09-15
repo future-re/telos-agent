@@ -5,13 +5,13 @@ Codex-style full-screen terminal interface for [telos-agent](https://github.com/
 ## Features
 
 - **Full-screen TUI** — launch with `telos` for an immersive agent experience
-- **Single-prompt mode** — `telos "refactor lib.rs"` for one-shot tasks
+- **Single-prompt mode** — `telos "summarize notes.md"` for one-shot tasks
 - **Context-aware** — auto-discovers `CLAUDE.md`, `AGENTS.md`, `CODEBUDDY.md`, `GEMINI.md` and git status
 - **Streaming output** — real-time markdown rendering with tool-call indicators
 - **Interactive approval** — approve/deny tool calls inline
 - **Auto mode** — toggle automatic approval from the TUI and persist it in config
-- **Dual-model routing** — use a thinking model for planning/recovery and a fast model for execution
-- **Memory and CodeIndex integration** — project memory is registered by default; code search uses a local `.telos/index/code_index.json`
+- **Dual-model routing** — use separate model choices where providers support task-specific routing
+- **Memory integration** — project memory is registered by default
 - **Session persistence** — auto-saved to `.telos/sessions/`
 
 ## Installation
@@ -148,10 +148,6 @@ Real DeepSeek smoke tests only read `DEEPSEEK_TEST_KEY`:
 ```bash
 DEEPSEEK_TEST_KEY=sk-... cargo test -p telos_agent provider::test --lib -- --nocapture
 ```
-
-### CodeIndex
-
-The CLI registers `CodeSearch`, `CodeContext`, and `CodeIndexRefresh` by default. The index is stored under `.telos/index/code_index.json` and is created lazily on first search or explicitly refreshed with `CodeIndexRefresh`.
 
 ### Approval policies
 

@@ -206,7 +206,7 @@ fn token_match(query_token: &str, entry_token: &str) -> bool {
 
 /// Score a single memory entry against the tokenized user query.
 ///
-/// Weights are tuned for coding-agent use: name and description are
+/// Weights are tuned for work-agent use: name and description are
 /// the strongest signals (they're written for retrieval); tags add
 /// categorical relevance; body is a weaker signal because it's noisy.
 fn compute_relevance(query_tokens: &[String], entry: &MemoryEntry) -> f64 {

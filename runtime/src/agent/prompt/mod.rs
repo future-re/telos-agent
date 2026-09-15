@@ -1,9 +1,5 @@
-//! Prompt system — modular, cache-aware construction of the system prompt.
-//!
-//! The prompt is assembled from independent sections rather than one hardcoded
-//! string. Static sections are rendered once and cached; dynamic sections are
-//! re-rendered every turn. This mirrors the modular prompt architecture:
-//! "prompt is assembled, not hardcoded".
+//! Prompt system for assembling the small set of system prompt blocks the
+//! runtime needs.
 pub mod assembly;
 pub mod builtins;
 pub mod section;
@@ -11,63 +7,32 @@ pub mod section;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub use assembly::{PromptAssembly, PromptSectionStat, PromptStats};
+pub use assembly::PromptAssembly;
 pub use builtins::{
     CwdSection, DateSection, GitStatusSection, IdentitySection, McpSection, MemorySection,
-    PathSection, ProfileSection, SafetySection, ShellAwareToolUsageSection, SkillsSection,
-    TaskGuidanceSection, ToneStyleSection, ToolPromptsSection, ToolUsageSection, ToolsSection,
+    ProfileSection, SafetySection, ShellAwareToolUsageSection, SkillsSection, ToolPromptsSection,
 };
 pub use section::{CacheHint, PromptBlock, PromptSection, PromptStability};
 
-use crate::config::TaskPath;
 use crate::tools::api::ToolRegistry;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PromptProfile {
-    #[default]
-    Minimal,
-    Full,
-}
-
-/// Build a standard coding-agent prompt assembly.
+/// Build the default office-work agent prompt assembly.
 ///
-/// This is the recommended default for software-engineering sessions. It
-/// includes the minimum shared guidance needed for software-engineering
-/// sessions: identity, safety rules, task path, the current date, and the
-/// working directory.
+/// This is the recommended default for work sessions. It includes the
+/// shared guidance needed for document, research, file, browser, and
+/// data-analysis tasks.
 ///
 /// Optional sections such as skills, memory, profiles, MCP tools, and git
 /// status can be added afterwards by the caller.
-pub fn default_coding_assembly(
+pub fn default_work_assembly(
     tools: Arc<ToolRegistry>,
     cwd: PathBuf,
-    skills: Option<Arc<crate::knowledge::skills::SkillRegistry>>,
-    path: TaskPath,
-) -> PromptAssembly {
-    default_coding_assembly_for_profile(tools, cwd, skills, path, PromptProfile::Minimal)
-}
-
-pub fn default_coding_assembly_for_profile(
-    tools: Arc<ToolRegistry>,
-    cwd: PathBuf,
-    skills: Option<Arc<crate::knowledge::skills::SkillRegistry>>,
-    path: TaskPath,
-    profile: PromptProfile,
 ) -> PromptAssembly {
     let mut assembly = PromptAssembly::new();
     assembly.add(IdentitySection::new(None));
     assembly.add(SafetySection);
-    assembly.add(PathSection::new(path));
-    if profile == PromptProfile::Full {
-        assembly.add(ToneStyleSection);
-        assembly.add(TaskGuidanceSection);
-        assembly.add(ShellAwareToolUsageSection::new(Arc::clone(&tools)));
-        assembly.add(ToolsSection::new(Arc::clone(&tools)));
-        assembly.add(ToolPromptsSection::new(Arc::clone(&tools)));
-        if let Some(skills) = skills {
-            assembly.add(SkillsSection::new(skills));
-        }
-    }
+    assembly.add(ShellAwareToolUsageSection::new(Arc::clone(&tools)));
+    assembly.add(ToolPromptsSection::new(tools));
     assembly.add(DateSection);
     assembly.add(CwdSection::new(cwd));
     assembly

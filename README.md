@@ -5,9 +5,9 @@
 [![CLI](https://img.shields.io/badge/CLI-telos-blue?style=flat-square)](cli/README.md)
 [![Last commit](https://img.shields.io/github/last-commit/future-re/telos-agent?style=flat-square)](https://github.com/future-re/telos-agent/commits/main)
 
-**telos** 是一个 Rust 编写的意图驱动 agent runtime，封装“用户输入 → 模型采样 → 工具执行 → 结果回注”的完整 turn 循环，可作为编码助手、聊天应用和自动化工作流的内核。
+**telos** 是一个 Rust 编写的办公型 agent runtime，封装“用户输入 → 模型采样 → 工具执行 → 结果回注”的完整 turn 循环，可作为文档、研究、数据分析、文件整理、浏览器操作和自动化工作流的内核。
 
-> Loop: intent → execute → think → complete
+> Loop: input → model → tools → results → finish
 
 | 模块 | 说明 |
 | --- | --- |
@@ -41,13 +41,13 @@ export DEEPSEEK_API_KEY=sk-...
 telos
 
 # 单次调用
-telos --provider deepseek --model deepseek-v4-pro "Review src/lib.rs"
+telos --provider deepseek --model deepseek-v4-pro "Summarize this week's meeting notes"
 
 # thinking / execution 双模型路由
 telos --provider deepseek \
   --thinking-model deepseek-v4-pro \
   --fast-model deepseek-v4-flash \
-  "Refactor error handling"
+  "Research the vendor options and draft a comparison table"
 ```
 
 不提供 API key 时可使用 `--provider mock` 验证本地流程。

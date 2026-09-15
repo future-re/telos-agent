@@ -11,7 +11,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::agent::compaction::{HistoryCompactionStrategy, SummaryHistoryCompaction};
 use crate::agent::policies::PolicyRegistry;
-use crate::agent::prompt::PromptProfile;
 use crate::diagnostics::ToolDiagnosticsSink;
 use crate::error::AgentError;
 use crate::storage::Storage;
@@ -114,48 +113,18 @@ impl Default for CancellationState {
     }
 }
 
-/// Workflow path — the agent tailors its runtime behaviour and prompt guidance
-/// to match the expected scope and risk of the task.
-///
-/// | Path      | Typical task                                     |
-/// |-----------|--------------------------------------------------|
-/// | `Fast`    | Single-file fix, clear bug, small config change  |
-/// | `Standard`| Multi-file change, local restructure             |
-/// | `Heavy`   | New feature, cross-module refactor, 3+ steps     |
-///
-/// The path adjusts iteration caps, timeouts, and concurrency defaults. It
-/// also injects matching behavioural guidance into the system prompt so the
-/// model knows whether to work directly or follow a fuller plan cycle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TaskPath {
-    /// Single-file changes, clear bugs, small config — execute directly.
-    Fast,
-    /// Multi-file changes, local restructures — map context, verify incrementally.
-    #[default]
-    Standard,
-    /// New features, cross-module refactors — design, plan, execute in phases.
-    Heavy,
-}
-
 /// Configuration for an [`AgentSession`](crate::AgentSession).
 ///
 /// Build with [`Default::default`] and override fields as needed. All fields
 /// are public so callers don't need a builder for simple cases.
 #[derive(Clone)]
 pub struct AgentConfig {
-    /// Workflow path classification for the current task. Influences iteration
-    /// budget, timeout, concurrency, and the system-prompt guidance injected at
-    /// turn time.
-    pub path: TaskPath,
     /// Optional base instruction appended to the identity section of the
     /// system prompt. For full control, use `prompt_assembly` instead.
     pub base_system_prompt: Option<String>,
     /// Optional pre-built prompt assembly. When set, the runtime uses this
     /// instead of constructing the prompt from `base_system_prompt` alone.
     pub prompt_assembly: Option<std::sync::Arc<crate::agent::prompt::PromptAssembly>>,
-    /// Controls how much built-in prompt guidance is injected when the runtime
-    /// constructs the default prompt assembly.
-    pub prompt_profile: PromptProfile,
     /// Optional maximum number of model ⇄ tool round-trips per turn before the
     /// loop aborts with [`AgentError::MaxIterations`].
     ///
@@ -241,10 +210,8 @@ impl std::fmt::Debug for AgentConfig {
         // for debugging. Other fields are considered non-sensitive.
         let env_keys: Vec<&String> = self.env.keys().collect();
         f.debug_struct("AgentConfig")
-            .field("path", &self.path)
             .field("base_system_prompt", &self.base_system_prompt)
             .field("prompt_assembly", &self.prompt_assembly.as_ref().map(|_| "<set>"))
-            .field("prompt_profile", &self.prompt_profile)
             .field("max_iterations", &self.max_iterations)
             .field("cwd", &self.cwd)
             .field("env", &format!("{} keys: [REDACTED]", env_keys.len()))
@@ -277,10 +244,8 @@ impl std::fmt::Debug for AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            path: TaskPath::default(),
             base_system_prompt: None,
             prompt_assembly: None,
-            prompt_profile: PromptProfile::default(),
             max_iterations: None,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             // Start with a minimal platform environment for shell tools. Callers
@@ -431,51 +396,10 @@ impl AgentConfig {
         mut self,
         tools: Arc<crate::tools::api::ToolRegistry>,
     ) -> Result<Self, AgentError> {
-        let assembly = crate::agent::prompt::default_coding_assembly_for_profile(
-            tools,
-            self.cwd.clone(),
-            self.skill_registry.clone(),
-            self.path,
-            self.prompt_profile,
-        );
+        let assembly = crate::agent::prompt::default_work_assembly(tools, self.cwd.clone());
         self.base_system_prompt = None;
         self.prompt_assembly = Some(Arc::new(assembly));
         Ok(self)
-    }
-
-    /// Apply path-appropriate defaults for timeouts, token budgets, and
-    /// concurrency. Call after setting custom values if you want the path to
-    /// override them.
-    ///
-    /// | Knob                   | Fast      | Standard  | Heavy     |
-    /// |------------------------|-----------|-----------|-----------|
-    /// | `max_iterations`       | None      | None      | None      |
-    /// | `tool_concurrency_limit`| 10       | 10        | 5         |
-    /// | `token_budget`         | None      | None      | 308k      |
-    /// | `tool_timeout_ms`      | 30_000    | None      | 60_000    |
-    pub fn with_path(mut self, path: TaskPath) -> Self {
-        self.path = path;
-        match path {
-            TaskPath::Fast => {
-                self.max_iterations = None;
-                self.tool_timeout_ms = Some(30_000);
-                // Fast tasks shouldn't need compaction — keep budget off.
-                self.token_budget = None;
-            }
-            TaskPath::Standard => {
-                self.max_iterations = None;
-                self.tool_timeout_ms = None;
-                // 1M context window — compact early to leave headroom for output.
-                self.token_budget = Some(TokenBudget::new(900_000));
-            }
-            TaskPath::Heavy => {
-                self.max_iterations = None;
-                self.tool_timeout_ms = Some(60_000);
-                self.token_budget = Some(TokenBudget::new(950_000));
-                self.tool_concurrency_limit = 5;
-            }
-        }
-        self
     }
 
     /// Load bundled skills into a fresh skill registry attached to this config.

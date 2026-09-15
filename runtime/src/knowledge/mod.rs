@@ -1,6 +1,5 @@
-//! Persistent knowledge, skills, tasks, and repository indexing.
+//! Persistent knowledge, skills, and tasks.
 
-pub mod code_index;
 pub mod memory;
 pub mod skills;
 pub mod tasks;

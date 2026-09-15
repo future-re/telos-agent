@@ -163,7 +163,6 @@ pub struct ToolResult {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SystemReminder {
-    PlanMode,
     Compaction { reason: String },
     ProviderContext,
     PolicyFeedback { point: String, name: String },
@@ -175,7 +174,6 @@ pub enum SystemReminder {
 impl SystemReminder {
     pub fn render(&self) -> String {
         let body = match self {
-            Self::PlanMode => "You are entering plan mode. Follow the plan instructions and do not write implementation code until the plan is approved.".to_string(),
             Self::Compaction { reason } => format!(
                 "Prior messages were compacted (reason: {reason}). Some context may have been summarized."
             ),

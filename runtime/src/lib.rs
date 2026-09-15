@@ -93,7 +93,7 @@
 //! | [`agent`] | Runtime, sessions, turns, context, prompts, policies, and compaction. |
 //! | [`model`] | Provider APIs, model messages, token counting, and test doubles. |
 //! | [`tools`] | Tool APIs, execution, built-ins, approvals, permissions, and command safety. |
-//! | [`knowledge`] | Memory, skills, tasks, and repository indexing. |
+//! | [`knowledge`] | Memory, skills, and tasks. |
 //! | [`integrations`] | MCP, plugins, and external event channels. |
 //! | [`orchestration`] | Subagents and multi-agent teams. |
 //! | [`diagnostics`] / [`metrics`] | Sanitized tool failure records and session counters. |
@@ -108,7 +108,7 @@ pub mod diagnostics;
 pub mod error;
 /// External event, protocol, and plugin integrations.
 pub mod integrations;
-/// Persistent knowledge, skills, tasks, and repository indexing.
+/// Persistent knowledge, skills, and tasks.
 pub mod knowledge;
 /// Runtime metrics accumulated by sessions.
 pub mod metrics;
@@ -128,8 +128,8 @@ pub use tools::approval::{
 };
 // Compaction — history- and message-level shrinking strategies.
 pub use agent::compaction::{HistoryCompactionStrategy, SummaryHistoryCompaction};
-// Configuration — the session config aggregate, task path, and token-budget knob.
-pub use config::{AgentConfig, TaskPath, TokenBudget, platform_base_env};
+// Configuration — the session config aggregate and token-budget knob.
+pub use config::{AgentConfig, TokenBudget, platform_base_env};
 // Diagnostics — sanitized local recording of tool execution failures.
 pub use diagnostics::{
     JsonlToolDiagnosticsSink, NoopToolDiagnosticsSink, SanitizedToolFailure, ToolDiagnosticsSink,
@@ -164,8 +164,6 @@ pub use knowledge::memory::{
 pub use tools::builtin::{
     MemoryEditTool, MemoryGrepTool, MemoryReadTool, MemoryStatusTool, MemoryWriteTool,
 };
-// Code index — lightweight repository search and path/line lookup.
-pub use knowledge::code_index::{CodeContextLine, CodeIndex, CodeSearchMatch, IndexedFile};
 // Metrics — session-level counters accumulated by the runtime.
 pub use config::CancellationState;
 pub use metrics::SessionMetrics;
@@ -216,9 +214,8 @@ pub use integrations::plugin::{
 // Prompt system — modular, cache-aware construction of the system prompt.
 pub use agent::prompt::{
     CwdSection, DateSection, GitStatusSection, IdentitySection, McpSection, MemorySection,
-    ProfileSection, PromptAssembly, PromptProfile, PromptSection, PromptSectionStat,
-    PromptStability, PromptStats, SafetySection, ShellAwareToolUsageSection, SkillsSection,
-    TaskGuidanceSection, ToneStyleSection, ToolUsageSection, ToolsSection,
+    ProfileSection, PromptAssembly, PromptSection, PromptStability, SafetySection,
+    ShellAwareToolUsageSection, SkillsSection, ToolPromptsSection,
 };
 
 // Tool abstraction — the trait every callable capability implements, plus its registry.
@@ -231,8 +228,7 @@ pub use tools::api::{
 pub use tools::builtin::{
     AskUserQuestionTool, BrowserBackTool, BrowserClickTool, BrowserCloseTool, BrowserFindUrlTool,
     BrowserManager, BrowserNavigateTool, BrowserScreenshotTool, BrowserScrollTool,
-    BrowserSelectTool, BrowserStartTool, BrowserStateTool, BrowserTypeTool, CodeContextTool,
-    CodeIndexRefreshTool, CodeSearchTool, DefaultShell, EnterPlanModeTool, ExitPlanModeTool,
+    BrowserSelectTool, BrowserStartTool, BrowserStateTool, BrowserTypeTool, DefaultShell,
     FileEditTool, FileReadTool, FileWriteTool, GlobTool, GrepTool, PowerShellTool,
     SendUserMessageTool, ShellTool, SkillTool, TaskCreateTool, TaskGetTool, TaskListTool,
     TaskOutputTool, TaskStopTool, TaskUpdateTool, TeamCreateTool, TeamDeleteTool, TodoWriteTool,

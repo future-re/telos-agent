@@ -729,7 +729,6 @@ max_iterations = 9
         let provider = Arc::new(MockProvider::new(vec![]));
         shared_runtime::register_subagent_tool(&mut runtime.tools, &runtime.agent_config, provider)
             .unwrap();
-        runtime.agent_config.prompt_profile = telos_agent::agent::prompt::PromptProfile::Full;
         shared_runtime::rebuild_prompt_assembly(&mut runtime);
         let prompt = runtime.agent_config.prompt_assembly.unwrap().build().await;
 

@@ -1,5 +1,4 @@
 use crate::agent::context::Conversation;
-use crate::agent::prompt::PromptProfile;
 use tracing::debug;
 
 use super::super::session::SessionInfo;
@@ -48,9 +47,6 @@ pub(super) fn inject_skill(
     iterations: usize,
 ) {
     if iterations != 1 {
-        return;
-    }
-    if session.config().prompt_profile != PromptProfile::Minimal {
         return;
     }
     let Some(injector) = &session.config().skill_injector else { return };

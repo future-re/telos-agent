@@ -51,7 +51,7 @@ where
             TurnEvent::IterationStarted { iteration, message_count: context.messages().len() },
         );
 
-        append_pending_inputs(session, context, &mut turn_input, &mut loop_state)?;
+        append_pending_inputs(session, context, &mut turn_input)?;
 
         if compaction::compact_if_needed(session, context, state, provider, iteration).await? {
             state.metrics_mut().add_compaction();
@@ -68,7 +68,7 @@ where
             Vec::new()
         };
         let tool_definitions = tools.definitions();
-        let hint = loop_state.model_hint(session.config());
+        let hint = loop_state.model_hint();
         loop_state.queue_feedback(
             run_policies(
                 session,
@@ -128,7 +128,6 @@ where
             .await?,
         );
 
-        loop_state.observe_assistant(&message);
         let pending_tool_calls: Vec<ToolCall> = message.tool_calls().cloned().collect();
         if !pending_tool_calls.is_empty() {
             if session.config().cancellation.is_cancelled() {
@@ -137,7 +136,6 @@ where
             let tools::ToolBatchOutcome { message: tool_message, feedback } =
                 tools::execute(session, context, state, &tools, pending_tool_calls, turn_id)
                     .await?;
-            loop_state.observe_tool_results(&tool_message);
             context.journal().resolve_tool_calls(tool_message.clone())?;
             emit(session, TurnEvent::ToolResult(tool_message));
             loop_state.queue_feedback(feedback);
@@ -147,7 +145,7 @@ where
             continue;
         }
 
-        if append_pending_inputs(session, context, &mut turn_input, &mut loop_state)? {
+        if append_pending_inputs(session, context, &mut turn_input)? {
             continue;
         }
 
@@ -201,12 +199,9 @@ async fn begin_turn(
     context.set_turn_memory_mutation_notified(false);
     if session.config().prompt_assembly.is_none() && session.config().base_system_prompt.is_none() {
         session.config_mut().prompt_assembly =
-            Some(Arc::new(crate::agent::prompt::default_coding_assembly_for_profile(
+            Some(Arc::new(crate::agent::prompt::default_work_assembly(
                 Arc::new(tools.clone()),
                 session.config().cwd.clone(),
-                session.config().skill_registry.clone(),
-                session.config().path,
-                session.config().prompt_profile,
             )));
     }
     context.repair_incomplete_tool_call_tail();
@@ -252,12 +247,8 @@ fn append_pending_inputs(
     session: &mut SessionInfo,
     context: &mut Conversation,
     turn_input: &mut TurnInputReceiver,
-    loop_state: &mut LoopState,
 ) -> Result<bool, AgentError> {
     let received = input::drain_pending(session, turn_input);
-    if !received.is_empty() {
-        loop_state.request_thinking();
-    }
     let appended = !received.is_empty();
     for message in received {
         context.journal().append_user(message.clone())?;
@@ -278,7 +269,6 @@ fn append_feedback(
     let message = Message::user(feedback.join("\n\n"));
     context.journal().append_user(message.clone())?;
     emit(session, TurnEvent::User(message));
-    loop_state.request_thinking();
     Ok(true)
 }
 

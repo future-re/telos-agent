@@ -65,7 +65,7 @@ pub fn prepare_runtime(
     // Prepare registries for plugin apply
     let policies = policy_registry_for_config(&agent_config);
     let skills = agent_config.skill_registry.clone().map(|r| (*r).clone()).unwrap_or_default();
-    let prompt = build_prompt_assembly(&agent_config, &tools, &context, memory_store.clone());
+    let prompt = build_prompt_assembly(&agent_config.cwd, &tools, &context);
 
     // Apply enabled plugins — always get the registries back
     let (mut tools, policies, skills, mcp_manager, mut prompt, plugin_result) =
@@ -108,12 +108,8 @@ pub fn register_subagent_tool(
 }
 
 pub fn rebuild_prompt_assembly(runtime: &mut PreparedRuntime) {
-    let mut prompt = build_prompt_assembly(
-        &runtime.agent_config,
-        &runtime.tools,
-        &runtime.context,
-        runtime.memory_store.clone(),
-    );
+    let mut prompt =
+        build_prompt_assembly(&runtime.agent_config.cwd, &runtime.tools, &runtime.context);
 
     // Re-apply plugin prompt sections
     if let Some(ref registry) = runtime.agent_config.plugin_registry {
@@ -128,17 +124,13 @@ pub fn rebuild_prompt_assembly(runtime: &mut PreparedRuntime) {
 }
 
 fn build_prompt_assembly(
-    agent_config: &AgentConfig,
+    cwd: &Path,
     tools: &ToolRegistry,
     context: &ProjectContext,
-    _memory_store: Arc<Mutex<MemoryStore>>,
 ) -> crate::PromptAssembly {
-    let mut assembly = telos_agent::agent::prompt::default_coding_assembly_for_profile(
+    let mut assembly = telos_agent::agent::prompt::default_work_assembly(
         Arc::new(tools.clone()),
-        agent_config.cwd.clone(),
-        agent_config.skill_registry.clone(),
-        agent_config.path,
-        agent_config.prompt_profile,
+        cwd.to_path_buf(),
     );
     context::append_prompt_context(&mut assembly, context);
     assembly
